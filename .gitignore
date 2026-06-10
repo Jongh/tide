@@ -1,3 +1,6 @@
+# tide 상태 파일 (로컬 전용)
+.tide/
+
 # OS
 .DS_Store
 Thumbs.db
