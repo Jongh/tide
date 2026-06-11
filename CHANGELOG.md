@@ -4,6 +4,16 @@
 
 ---
 
+<!-- 아래 [start:notes]~[end:notes]는 사이트(site/docs/changelog.md)가 pymdownx.snippets로
+     릴리즈 노트만 인클루드하기 위한 마커다. 위 제목·안내 줄은 사이트에 부적절해 제외된다.
+     렌더에는 영향 없음. -->
+<!-- --8<-- [start:notes] -->
+### [v0.9.0]
+- **tide-guard 차단 메시지 한국어화**: git commit/tag/push 차단 안내를 한국어로("'{phase}' 단계에서는 git commit/tag/push가 차단됩니다. git 작업은 /tide:release 단계에서만 허용됩니다") — `tide-guard.sh`·`.ps1` 동일 문구. **인코딩 규약 확정**: sh=BOM 없는 UTF-8(Git Bash shebang 보호), ps1=BOM 포함 UTF-8(Windows PowerShell 5.1 한글 보존)
+- **사이트 문서 단일 원본화**: `pymdownx.snippets`로 사이트 `conventions`·`changelog`가 저장소 원본 `docs/conventions.md`·`CHANGELOG.md`를 인클루드 — 사본 이중 갱신 부채 제거. 원본 도입부의 외부 귀속은 섹션 마커(`[start:body]`/`[start:notes]`)로 사이트에서 제외(빌드 출력 0건 유지)
+- **패키지 위생 재확정**: 설치가 추적 파일 트리를 미러링함을 캐시로 실측, 공식 제외 수단 부재로 수용 재확정(`docs/project-context.md` "배포 위생" 절). 런타임 무관 파일은 용량 외 비용 없음
+- 검증: `mkdocs build --strict` 통과 + 인클루드 정상(마커 누수 없음) + 빌드 출력 porpoise 0건 실증, 편집본 가드 sh 한국어 차단(exit 2) 실증
+
 ### [v0.8.0]
 - **tide 소개 GitHub Pages 사이트 신설**: MkDocs Material 기반 한국어 문서 사이트(홈·시작하기·개념·커맨드 레퍼런스·규약·변경 이력 6페이지)를 `site/`에 구성하고, GitHub Actions(`.github/workflows/deploy-pages.yml`)로 `main` 푸시 시 자동 빌드·배포 — 사이트 소스를 tide 사이클 기록(`docs/`)과 격리(`site/`, `site_dir: _build` 명시)해 충돌 회피
 - 콘텐츠는 `README.md`·`docs/conventions.md`·`CHANGELOG.md`·`skills/*/SKILL.md`에서 정제, tide를 독립 워크플로우로 서술(외부 저장소 귀속 표현 제외). 사이클 다이어그램은 Mermaid로 재구성. **원본 문서는 무수정**
@@ -57,3 +67,4 @@
 - impl/review 단계 작업보고서(`docs/reports/M{N}-impl.md`·`M{N}-review.md`) 규약 포함
 - 부수효과 분리 원칙(impl/review는 git 금지, release만 git 조작) 명문화
 - `docs/conventions.md` 규약 문서 추가
+<!-- --8<-- [end:notes] -->

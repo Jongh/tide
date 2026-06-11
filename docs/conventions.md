@@ -3,6 +3,10 @@
 tide는 porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴리즈)을 프로젝트
 독립적인 슬래시 커맨드로 옮긴 워크플로우다. 이 문서는 각 단계가 따르는 규약을 정의한다.
 
+<!-- 아래 [start:body]~[end:body]는 사이트(site/docs/conventions.md)가 pymdownx.snippets로
+     본문만 인클루드하기 위한 마커다. 위 도입 문단은 일부러 마커 밖에 두어 사이트에서는
+     사이트 전용(외부 귀속 없는) 도입부로 대체된다. 렌더에는 영향 없음. -->
+<!-- --8<-- [start:body] -->
 ## 사이클
 
 ```
@@ -40,15 +44,20 @@ tide는 porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴�
   `hooks/hooks.json`이 `${CLAUDE_PLUGIN_ROOT}/hooks/tide-guard.sh`를 등록하므로
   플러그인 설치만으로 활성화되고, 프로젝트별 설치 절차는 없다.
 - 동작: `.tide/phase`가 `release`가 **아닌** 동안 `git commit` / `git tag` / `git push`
-  패턴의 셸 명령을 차단한다(exit 2 + 안내 메시지).
+  패턴의 셸 명령을 차단한다(exit 2 + 한국어 안내 메시지: "'{phase}' 단계에서는 git
+  commit/tag/push가 차단됩니다. git 작업은 /tide:release 단계에서만 허용됩니다.").
 - 상태 파일이 없으면 아무것도 차단하지 않는다 — tide를 쓰지 않는 프로젝트나
   사용자의 수동 git 작업(idle 상태가 아니라 파일 자체가 없는 경우)에 영향을 주지 않는다.
 - **`idle`에서도 차단된다** — tide 도입 후에는 Claude를 통한 git commit/tag/push가 항상
   `/tide:release`로만 일어나는 것이 의도된 동작이다. tide 사이클 밖에서 Claude에게
   git 작업을 시키려면 `.tide/phase` 파일을 삭제해 가드를 해제한다.
 - 스크립트 원본은 `hooks/tide-guard.sh` **한 곳**이다 (`tide-guard.ps1`은 sh를 쓸 수
-  없는 환경을 위한 보조 사본 — 로직 수정 시 함께 갱신). Windows에서는 Git for
+  없는 환경을 위한 보조 사본 — 로직·메시지 수정 시 함께 갱신). Windows에서는 Git for
   Windows의 sh로 실행된다.
+- **인코딩 규약**: 두 사본의 인코딩이 다르다 — `tide-guard.sh`는 **BOM 없는 UTF-8**
+  (Git Bash가 shebang을 정상 처리하도록), `tide-guard.ps1`은 **BOM 포함 UTF-8**
+  (Windows PowerShell 5.1이 한글 메시지를 ANSI로 오인해 깨뜨리지 않도록). 메시지를
+  수정할 때 각 파일의 인코딩을 유지한다.
 
 ## 템플릿
 
@@ -121,3 +130,4 @@ release 1번 검사는 사용자가 버전 인자와 함께 강행 의사를 명
 | retro | 회고 문서(`docs/reports/retro.md`) 외 파일 생성·수정 / `.tide/phase` 변경 / git 작업 | 프롬프트 |
 | cycle | git commit / git tag / git push (release 단계는 체이닝에서 제외) | 프롬프트 + hook(git) |
 | release | (없음 — 유일하게 git 조작 허용) | 프리플라이트 통과 필요 |
+<!-- --8<-- [end:body] -->

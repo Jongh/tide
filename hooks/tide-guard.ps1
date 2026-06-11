@@ -1,4 +1,4 @@
-# tide-guard — PreToolUse hook
+﻿# tide-guard — PreToolUse hook
 # .tide/phase가 release가 아닌 동안 git commit/tag/push를 차단한다.
 # 상태 파일이 없으면 아무것도 차단하지 않는다 (tide 미사용 프로젝트에 영향 없음).
 
@@ -18,7 +18,7 @@ try {
 } catch {}
 
 if ($cmd -match 'git[^&|;]*[^a-zA-Z](commit|tag|push)([^a-zA-Z]|$)') {
-    [Console]::Error.WriteLine("tide-guard: git commit/tag/push is blocked during phase '$phase'. Git operations are allowed only in /tide:release.")
+    [Console]::Error.WriteLine("tide-guard: '$phase' 단계에서는 git commit/tag/push가 차단됩니다. git 작업은 /tide:release 단계에서만 허용됩니다.")
     exit 2
 }
 

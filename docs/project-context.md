@@ -31,6 +31,20 @@
   `.sh`·`.ps1` 두 사본을 함께 갱신
 - **개발 사이클**: tide 자신을 도그푸딩 — `/tide:milestone → impl → review → release`
 
+## 배포 위생 (패키지에 포함되는 파일)
+
+- **현황(M8 재조사, 2026-06-11)**: 플러그인 설치는 저장소의 **추적 파일 트리를
+  그대로 미러링**한다. 설치 캐시(`~/.claude/plugins/cache/tide/tide/{version}/`)에
+  런타임 무관 파일인 `docs/`가 실제로 포함됨을 확인했다(`site/`·`.github/`도 추후
+  버전부터 동일하게 포함될 것).
+- **공식 제외 수단 부재**: `plugin.json`·`marketplace.json`에 배포 파일을 한정하는
+  `files`/`include`/`ignore` 류 필드가 없고, `.gitattributes export-ignore`는
+  `git archive`에만 적용돼 clone 기반 설치에는 효과가 없다. M3의 "수용 종결"을 이
+  근거로 **재확정**한다.
+- **영향·결정**: 런타임에는 `skills/`·`hooks/`·`.claude-plugin/`만 쓰이고 추가 파일
+  (`docs/`·`site/` 등)은 용량 외 비용이 없어(보안·동작 무영향) **수용**. 공식 제외
+  수단이 생기면 재검토(재검토 트리거: 플러그인 매니페스트 스키마에 파일 한정 필드 등장).
+
 ## 핵심 도메인 개념
 
 - **사이클**: kickoff → milestone → impl → review → release. `status`는 읽기 전용 현재 위치 보고
