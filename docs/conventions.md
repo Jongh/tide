@@ -26,8 +26,9 @@ tide는 porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴�
 
 ## tide-guard hook
 
-- PreToolUse(Bash|PowerShell 매처) hook. `/tide-kickoff`가 `.claude/hooks/tide-guard.sh`·
-  `.ps1`을 설치하고 `.claude/settings.json`에 등록한다.
+- PreToolUse(Bash|PowerShell 매처) hook. **플러그인이 직접 제공한다** —
+  `hooks/hooks.json`이 `${CLAUDE_PLUGIN_ROOT}/hooks/tide-guard.sh`를 등록하므로
+  플러그인 설치만으로 활성화되고, 프로젝트별 설치 절차는 없다.
 - 동작: `.tide/phase`가 `release`가 **아닌** 동안 `git commit` / `git tag` / `git push`
   패턴의 셸 명령을 차단한다(exit 2 + 안내 메시지).
 - 상태 파일이 없으면 아무것도 차단하지 않는다 — tide를 쓰지 않는 프로젝트나
@@ -35,8 +36,18 @@ tide는 porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴�
 - **`idle`에서도 차단된다** — tide 도입 후에는 Claude를 통한 git commit/tag/push가 항상
   `/tide-release`로만 일어나는 것이 의도된 동작이다. tide 사이클 밖에서 Claude에게
   git 작업을 시키려면 `.tide/phase` 파일을 삭제해 가드를 해제한다.
-- 원본 스크립트는 이 저장소 `hooks/`에 있으며, kickoff 커맨드에 동일 내용이 내장돼
-  있다(전역 설치 시에도 자급자족하도록). 둘을 수정할 때는 반드시 함께 갱신한다.
+- 스크립트 원본은 `hooks/tide-guard.sh` **한 곳**이다 (`tide-guard.ps1`은 sh를 쓸 수
+  없는 환경을 위한 보조 사본 — 로직 수정 시 함께 갱신). Windows에서는 Git for
+  Windows의 sh로 실행된다.
+
+## 템플릿
+
+- `templates/` 의 3종 파일이 마일스톤·보고서 **형식의 단일 원본**이다:
+  `milestone.md` / `impl-report.md` / `review-report.md`
+- milestone/impl/review 커맨드는 `${CLAUDE_PLUGIN_ROOT}/templates/` 의 템플릿을 읽어
+  그 구조 그대로 문서를 생성한다. 템플릿을 읽을 수 없으면 커맨드에 내장된 한 줄
+  폴백(섹션 목록)으로 동작한다.
+- 형식을 바꾸려면 템플릿 파일을 수정한다 — 커맨드·규약 문서의 산문을 고치는 것이 아니라.
 
 ## 전제조건 · 프리플라이트
 

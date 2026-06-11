@@ -15,7 +15,8 @@ argument-hint: "v0.1.0 (생략 시 리뷰보고서의 추천 버전 기준)"
 
 프리플라이트 통과 후 .tide/phase 파일에 `release` 한 줄을 기록하고
 (.tide/ 디렉터리가 없으면 생성) 다음을 수행:
-1. 버전 파일 업데이트 (Cargo.toml / package.json / pyproject.toml 등 프로젝트에 맞게)
+1. 버전 파일 업데이트 (Cargo.toml / package.json / pyproject.toml /
+   .claude-plugin/plugin.json 등 프로젝트에 맞게)
 2. CHANGELOG.md 최상단에 해당 버전 릴리즈 노트 추가
 3. README.md의 CHANGELOG 섹션 최상단에 동일 내용 추가
 4. git add → git commit ("Release {버전}: {핵심 변경사항 한 줄 요약}")

@@ -1,0 +1,14 @@
+{
+  "name": "tide",
+  "owner": {
+    "name": "Jongh"
+  },
+  "description": "tide 워크플로우 플러그인 마켓플레이스",
+  "plugins": [
+    {
+      "name": "tide",
+      "source": "./",
+      "description": "마일스톤 → 구현 → 리뷰 → 릴리즈 개발 사이클 슬래시 커맨드 + git 작업 가드 hook"
+    }
+  ]
+}

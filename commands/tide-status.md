@@ -7,7 +7,7 @@ tide 사이클의 현재 상태를 읽기 전용으로 보고해줘.
 1. docs/milestones/M*.md 중 최대 번호 — 마일스톤 번호와 제목
 2. docs/reports/M{N}-impl.md 존재 여부
 3. docs/reports/M{N}-review.md 존재 여부 — 있으면 릴리즈 판정(가능/불가)과 추천 버전
-4. 버전 파일(Cargo.toml / package.json / pyproject.toml 등)의 현재 버전
+4. 버전 파일(Cargo.toml / package.json / pyproject.toml / .claude-plugin/plugin.json 등)의 현재 버전
 5. .tide/phase의 현재 값 (파일 없으면 "없음")
 
 보고 형식: 위 항목을 간단한 표나 목록으로 보여주고, 마지막 줄에 다음 권장 커맨드를
