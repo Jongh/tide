@@ -4,6 +4,12 @@
 
 ---
 
+### [v0.5.0]
+- **브라운필드 킥오프**: `/tide:kickoff`가 대상 저장소를 신규/진행-중으로 판별(커밋 이력·기존 산출물·소스 규모 기준)하고, 진행-중이면 코드베이스를 조사해 `docs/project-context.md`(스택·디렉터리 구조·진입점·도메인 개념)를 생성 — 이후 단계가 매번 재조사하지 않도록
+- `/tide:milestone`·`/tide:impl`이 `docs/project-context.md`가 있으면 먼저 읽어 기존 구조를 파악(조건부 — 없으면 평소대로, 하위 호환)
+- `docs/conventions.md`에 "프로젝트 컨텍스트" 절 신설, README 커맨드 표·저장소 구조·설치 절을 브라운필드 동작에 맞게 갱신
+- 로드맵 마일스톤 추가 — M5(`/tide:cycle` 오케스트레이션)·M6(`/tide:retro` 회고) 문서를 독립 진행 가능하도록 작성
+
 ### [v0.4.0]
 - **호출명 개편**: `/tide:tide-status` → `/tide:status` — 커맨드 6종을 공식 권장 `skills/{이름}/SKILL.md` 구조로 전환하며 `tide-` 접두사 중복 제거 (기능·frontmatter 동등, 이력 보존 이동)
 - 템플릿을 각 스킬에 동봉 — `skills/{milestone,impl,review}/template.md`, 참조는 `${CLAUDE_SKILL_DIR}/template.md`로 전환 (중앙 `templates/` 폐지)

@@ -11,6 +11,9 @@ argument-hint: "[M번호 (선택, 예: M3 — 생략 시 최신 마일스톤)]"
 
 검사를 통과하면 .tide/phase 파일에 `impl` 한 줄을 기록해줘 (.tide/ 디렉터리가 없으면 생성).
 
+docs/project-context.md가 있으면 먼저 읽어 기존 구조를 파악한 뒤 구현해줘
+(없으면 평소대로 진행).
+
 진행:
 - 태스크를 의존성(deps) 순서를 고려해 구현
 - 구현 후 프로젝트의 테스트 명령(cargo test / npm test / pytest 등)을 실행해 결과 확인

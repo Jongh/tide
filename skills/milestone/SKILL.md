@@ -6,6 +6,9 @@ argument-hint: "[마일스톤 주제(선택)]"
 
 시작 시 .tide/phase 파일에 `milestone` 한 줄을 기록해줘 (.tide/ 디렉터리가 없으면 생성).
 
+docs/project-context.md가 있으면 먼저 읽어 기존 구조·스택을 파악한 뒤 마일스톤을
+구성해줘 (없으면 평소대로 진행).
+
 규칙:
 - 파일 위치: docs/milestones/M{N}.md (기존 M*.md 중 가장 큰 번호 + 1, 없으면 M1)
 - 형식: ${CLAUDE_SKILL_DIR}/template.md 템플릿을 읽어 그 구조 그대로 작성

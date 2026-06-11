@@ -27,7 +27,7 @@ porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴리즈)�
 
 | 커맨드 | 역할 | 산출물 |
 |---|---|---|
-| `/tide:kickoff` | 새 프로젝트에 워크플로우 골격 생성 | `docs/milestones/`·`docs/reports/`·`CHANGELOG.md`·`docs/conventions.md` |
+| `/tide:kickoff` | 워크플로우 골격 생성 (+ 진행 중 프로젝트면 구조 문서화) | `docs/milestones/`·`docs/reports/`·`CHANGELOG.md`·`docs/conventions.md`·`docs/project-context.md` |
 | `/tide:milestone` | 다음 마일스톤 문서 생성 | `docs/milestones/M{N}.md` |
 | `/tide:impl [M번호]` | 마일스톤대로 구현 + 테스트 (생략 시 최신, 번호 지정 시 재실행) | 코드 + `docs/reports/M{N}-impl.md` (완료보고서) |
 | `/tide:review` | 비판적 리뷰 + 릴리즈 판정 | `docs/reports/M{N}-review.md` (리뷰보고서) |
@@ -69,7 +69,7 @@ cp -r skills/* ~/.claude/skills/
 >   바뀌었습니다. `claude plugin marketplace update tide` 후 재설치하면 새 호출명이
 >   적용됩니다.
 
-설치 후 새 프로젝트에서 `/tide:kickoff`로 시작하세요.
+설치 후 프로젝트에서 `/tide:kickoff`로 시작하세요 (신규·진행 중 프로젝트 모두 지원).
 
 ## 저장소 구조
 
@@ -77,7 +77,7 @@ cp -r skills/* ~/.claude/skills/
 .claude-plugin/   plugin.json·marketplace.json (플러그인/마켓플레이스 매니페스트)
 skills/           스킬 6종 — {단계}/SKILL.md (+ milestone·impl·review는 template.md 동봉)
 hooks/            hooks.json + tide-guard.sh·.ps1 (git 작업 가드)
-docs/             규약·마일스톤·보고서 (이 저장소 자체의 tide 사이클 기록)
+docs/             규약·마일스톤·보고서·프로젝트 컨텍스트 (이 저장소 자체의 tide 사이클 기록)
 ```
 
 ## 명명 규약
@@ -91,6 +91,12 @@ docs/             규약·마일스톤·보고서 (이 저장소 자체의 tide 
 [docs/conventions.md](docs/conventions.md)를 참고하세요.
 
 ## CHANGELOG
+
+### [v0.5.0]
+- **브라운필드 킥오프**: `/tide:kickoff`가 대상 저장소를 신규/진행-중으로 판별(커밋 이력·기존 산출물·소스 규모 기준)하고, 진행-중이면 코드베이스를 조사해 `docs/project-context.md`(스택·디렉터리 구조·진입점·도메인 개념)를 생성 — 이후 단계가 매번 재조사하지 않도록
+- `/tide:milestone`·`/tide:impl`이 `docs/project-context.md`가 있으면 먼저 읽어 기존 구조를 파악(조건부 — 없으면 평소대로, 하위 호환)
+- `docs/conventions.md`에 "프로젝트 컨텍스트" 절 신설, README 커맨드 표·저장소 구조·설치 절을 브라운필드 동작에 맞게 갱신
+- 로드맵 마일스톤 추가 — M5(`/tide:cycle` 오케스트레이션)·M6(`/tide:retro` 회고) 문서를 독립 진행 가능하도록 작성
 
 ### [v0.4.0]
 - **호출명 개편**: `/tide:tide-status` → `/tide:status` — 커맨드 6종을 공식 권장 `skills/{이름}/SKILL.md` 구조로 전환하며 `tide-` 접두사 중복 제거 (기능·frontmatter 동등, 이력 보존 이동)
