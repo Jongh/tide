@@ -16,8 +16,9 @@ porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴리즈)�
 ```
 
 `/tide:cycle`은 `milestone → impl → review`를 한 번에 이어 실행하고(impl 단계에서
-마일스톤 태스크의 `(deps:)`를 읽어 독립 태스크는 병렬·의존 태스크는 순차로 진행),
-git 작업을 하는 `release`만은 자동 체이닝에서 빼고 직전에 멈춰 안내합니다.
+마일스톤 태스크의 `(deps:)`를 읽어 독립 태스크는 **서브에이전트로 동시 실행**·의존
+태스크는 순차로 진행 — 변경 파일이 겹치면 그 부분만 순차 폴백), git 작업을 하는
+`release`만은 자동 체이닝에서 빼고 직전에 멈춰 안내합니다.
 
 각 단계는 **부수효과를 엄격히 분리**합니다 — `impl`·`review`는 절대 git 작업을 하지 않고
 (코드·보고서만 남김), git commit/tag/push는 오직 `release`에서만 일어납니다.
@@ -37,7 +38,7 @@ git 작업을 하는 `release`만은 자동 체이닝에서 빼고 직전에 멈
 | `/tide:milestone` | 다음 마일스톤 문서 생성 | `docs/milestones/M{N}.md` |
 | `/tide:impl [M번호]` | 마일스톤대로 구현 + 테스트 (생략 시 최신, 번호 지정 시 재실행) | 코드 + `docs/reports/M{N}-impl.md` (완료보고서) |
 | `/tide:review` | 비판적 리뷰 + 릴리즈 판정 | `docs/reports/M{N}-review.md` (리뷰보고서) |
-| `/tide:cycle [주제/M번호]` | `milestone→impl→review` 자동 체이닝 (deps 기반 병렬/순차, release 직전 정지) | 위 단계들의 산출물 + 릴리즈 안내 |
+| `/tide:cycle [주제/M번호]` | `milestone→impl→review` 자동 체이닝 (deps 기반 실제 병렬[서브에이전트]/순차, release 직전 정지) | 위 단계들의 산출물 + 릴리즈 안내 |
 | `/tide:release` | 프리플라이트 → 버전 범프 → CHANGELOG → commit → tag → push | 릴리즈 커밋·태그 |
 | `/tide:retro` | 누적 사이클 회고 — 반복 문제·수용 트레이드오프·미반영 후속 집계 (읽기 전용) | `docs/reports/retro.md` (회고 문서) |
 | `/tide:status` | 사이클 현재 상태 + 다음 권장 커맨드 (읽기 전용) | (없음 — 보고만) |
@@ -100,11 +101,17 @@ docs/             규약·마일스톤·보고서·프로젝트 컨텍스트 (�
 
 ## CHANGELOG
 
+### [v0.10.0]
+- **진짜 병렬 실행 신설**: `/tide:impl`·`/tide:cycle`의 impl 단계가 deps 위상에서 독립(무의존) 태스크를 서브에이전트로 **동시 디스패치**(같은 메시지에 복수 Agent 호출 = 동시 실행, 레벨 간 배리어) — "병렬은 스케줄링 해석일 뿐"이던 것을 실제 동시 실행으로 전환. 메커니즘·전달 컨텍스트·반환 계약은 `skills/impl/SKILL.md`의 "병렬 디스패치" 절이 단일 원본
+- 파일 충돌 안전장치(예상 변경 파일 겹침 → 겹치는 태스크만 순차 폴백, 워크트리 격리는 선택·기본 비활성), 결과 병합(단일 impl 보고서)·부분 실패 처리, tide-guard 정합(서브에이전트도 phase=impl이라 git 차단). Agent 부재·레벨 단일 태스크·deps 이상은 순차 폴백(하위 호환)
+- `skills/cycle/SKILL.md`의 "실제 병렬 실행 수단은 구현 판단에 맡긴다" 문장을 impl 단일 원본 참조로 교체, `docs/conventions.md`·`README.md`·`docs/project-context.md` 반영(매니페스트 무수정·자동 발견)
+- 회귀 수정: v0.9.0 changelog 노트의 검증 문장에 들어간 외부 저장소명 literal이 단일 원본화(snippets)로 사이트에 유입된 것을 리워딩으로 제거 — 사이트 외부 귀속 표기 0건 회복
+
 ### [v0.9.0]
 - **tide-guard 차단 메시지 한국어화**: git commit/tag/push 차단 안내를 한국어로("'{phase}' 단계에서는 git commit/tag/push가 차단됩니다. git 작업은 /tide:release 단계에서만 허용됩니다") — `tide-guard.sh`·`.ps1` 동일 문구. **인코딩 규약 확정**: sh=BOM 없는 UTF-8(Git Bash shebang 보호), ps1=BOM 포함 UTF-8(Windows PowerShell 5.1 한글 보존)
 - **사이트 문서 단일 원본화**: `pymdownx.snippets`로 사이트 `conventions`·`changelog`가 저장소 원본 `docs/conventions.md`·`CHANGELOG.md`를 인클루드 — 사본 이중 갱신 부채 제거. 원본 도입부의 외부 귀속은 섹션 마커로 사이트에서 제외(빌드 출력 0건 유지)
 - **패키지 위생 재확정**: 설치가 추적 파일 트리를 미러링함을 캐시로 실측, 공식 제외 수단 부재로 수용 재확정(`docs/project-context.md` "배포 위생" 절)
-- 검증: `mkdocs build --strict` 통과 + 인클루드 정상 + 빌드 출력 porpoise 0건 실증, 편집본 가드 sh 한국어 차단(exit 2) 실증
+- 검증: `mkdocs build --strict` 통과 + 인클루드 정상 + 빌드 출력 외부 귀속 표기 0건 실증, 편집본 가드 sh 한국어 차단(exit 2) 실증
 
 ### [v0.8.0]
 - **tide 소개 GitHub Pages 사이트 신설**: MkDocs Material 기반 한국어 문서 사이트(홈·시작하기·개념·커맨드 레퍼런스·규약·변경 이력 6페이지)를 `site/`에 구성하고, GitHub Actions(`.github/workflows/deploy-pages.yml`)로 `main` 푸시 시 자동 빌드·배포 — 사이트 소스를 tide 사이클 기록(`docs/`)과 격리(`site/`, `site_dir: _build` 명시)해 충돌 회피
