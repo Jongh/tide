@@ -6,6 +6,11 @@ on:
     paths:
       - "site/**"
       - ".github/workflows/deploy-pages.yml"
+      # 사이트가 pymdownx.snippets로 단일 원본 인클루드하는 루트 파일들 —
+      # 이들이 바뀌면 사이트 콘텐츠(변경 이력·규약)도 바뀌므로 재배포가 필요하다.
+      # (이 항목이 없으면 CHANGELOG/conventions만 바뀐 릴리즈에서 사이트가 낡는다)
+      - "CHANGELOG.md"
+      - "docs/conventions.md"
   workflow_dispatch:
 
 permissions:
