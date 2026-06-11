@@ -18,7 +18,7 @@ try {
 } catch {}
 
 if ($cmd -match 'git[^&|;]*[^a-zA-Z](commit|tag|push)([^a-zA-Z]|$)') {
-    [Console]::Error.WriteLine("tide-guard: git commit/tag/push is blocked during phase '$phase'. Git operations are allowed only in /tide-release.")
+    [Console]::Error.WriteLine("tide-guard: git commit/tag/push is blocked during phase '$phase'. Git operations are allowed only in /tide:release.")
     exit 2
 }
 

@@ -7,7 +7,7 @@ argument-hint: "[M번호 (선택, 예: M3 — 생략 시 최신 마일스톤)]"
 - 생략하면 docs/milestones/M*.md 중 번호가 가장 큰 문서를 대상으로
 
 시작 전 검사: 대상 마일스톤 문서가 존재하는지 확인해줘.
-없으면 아무것도 구현하지 말고, /tide-milestone 을 먼저 실행하라고 안내한 뒤 중단해줘.
+없으면 아무것도 구현하지 말고, /tide:milestone 을 먼저 실행하라고 안내한 뒤 중단해줘.
 
 검사를 통과하면 .tide/phase 파일에 `impl` 한 줄을 기록해줘 (.tide/ 디렉터리가 없으면 생성).
 
@@ -16,7 +16,7 @@ argument-hint: "[M번호 (선택, 예: M3 — 생략 시 최신 마일스톤)]"
 - 구현 후 프로젝트의 테스트 명령(cargo test / npm test / pytest 등)을 실행해 결과 확인
 
 완료보고서 작성 — docs/reports/M{N}-impl.md (재실행이면 기존 보고서를 갱신):
-- ${CLAUDE_PLUGIN_ROOT}/templates/impl-report.md 템플릿을 읽어 그 구조 그대로 작성
+- ${CLAUDE_SKILL_DIR}/template.md 템플릿을 읽어 그 구조 그대로 작성
   ({} 자리를 채우고 안내문은 제거)
 - 템플릿을 읽을 수 없으면 폴백 — 개요 / 태스크별 수행 내용 / 변경 파일 요약 /
   테스트 결과 / 미해결·후속 메모 5개 섹션

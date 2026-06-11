@@ -12,7 +12,7 @@ phase=$(head -n 1 "$phase_file" | tr -d '[:space:]')
 [ "$phase" = "release" ] && exit 0
 
 if printf '%s' "$input" | grep -Eq 'git[^&|;]*[^a-zA-Z](commit|tag|push)([^a-zA-Z]|$)'; then
-    echo "tide-guard: git commit/tag/push is blocked during phase '$phase'. Git operations are allowed only in /tide-release." >&2
+    echo "tide-guard: git commit/tag/push is blocked during phase '$phase'. Git operations are allowed only in /tide:release." >&2
     exit 2
 fi
 

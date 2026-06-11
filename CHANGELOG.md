@@ -4,6 +4,13 @@
 
 ---
 
+### [v0.4.0]
+- **호출명 개편**: `/tide:tide-status` → `/tide:status` — 커맨드 6종을 공식 권장 `skills/{이름}/SKILL.md` 구조로 전환하며 `tide-` 접두사 중복 제거 (기능·frontmatter 동등, 이력 보존 이동)
+- 템플릿을 각 스킬에 동봉 — `skills/{milestone,impl,review}/template.md`, 참조는 `${CLAUDE_SKILL_DIR}/template.md`로 전환 (중앙 `templates/` 폐지)
+- 저장소 전체 호출 표기를 실동작과 일치 — 스킬 상호 안내, 가드 차단 메시지(sh·ps1), README·conventions
+- 패키지 위생 조사 종결 — 플러그인 파일 제외 수단은 공식 미지원으로 확인, 수용 결정 (근거: M3 보고서)
+- README 마이그레이션 노트에 v0.3.0 → v0.4.0 호출명 변경 안내 추가
+
 ### [v0.3.0]
 - **Claude Code 플러그인으로 전환** — `/plugin marketplace add Jongh/tide` → `/plugin install tide@tide` 한 번으로 커맨드 6종 + tide-guard hook이 함께 활성화 (`.claude-plugin/plugin.json`·`marketplace.json` 신설, 커맨드를 `commands/`로 이동)
 - tide-guard hook을 플러그인이 직접 제공 — `hooks/hooks.json`이 `${CLAUDE_PLUGIN_ROOT}` 경로로 등록, 프로젝트별 hook 설치 절차 폐지. kickoff 내장 스크립트 제거로 가드 원본이 `hooks/` 한 곳으로 단일화

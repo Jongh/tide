@@ -2,7 +2,7 @@
 description: "[tide] 프리플라이트 → 버전 범프 → CHANGELOG/README → commit → tag → push"
 argument-hint: "v0.1.0 (생략 시 리뷰보고서의 추천 버전 기준)"
 ---
-릴리즈를 진행해줘. 버전은 "$ARGUMENTS"로 지정할 수 있어 (예: /tide-release v0.1.0).
+릴리즈를 진행해줘. 버전은 "$ARGUMENTS"로 지정할 수 있어 (예: /tide:release v0.1.0).
 생략하면 리뷰보고서의 추천 버전으로, 그것도 없으면 버전 파일의 현재 버전을 기준으로 판단해줘.
 
 프리플라이트 (하나라도 실패하면 git 작업 없이 중단하고 사유를 보고):

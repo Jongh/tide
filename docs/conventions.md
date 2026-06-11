@@ -6,10 +6,10 @@ tide는 porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴�
 ## 사이클
 
 ```
-/tide-kickoff  →  /tide-milestone  →  /tide-impl  →  /tide-review  →  /tide-release vX.Y.Z
+/tide:kickoff  →  /tide:milestone  →  /tide:impl  →  /tide:review  →  /tide:release vX.Y.Z
    (세팅)           (계획)             (구현·테스트)    (리뷰·판정)       (배포)
 
-                          /tide-status — 언제든 현재 위치 확인 (읽기 전용)
+                          /tide:status — 언제든 현재 위치 확인 (읽기 전용)
 ```
 
 **핵심 원칙 — 부수효과 분리**: `impl`·`review`는 **절대 git 작업을 하지 않는다**(문서·코드만
@@ -21,7 +21,7 @@ tide는 porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴�
 
 - 위치: `.tide/phase` — 현재 단계명 한 줄 (`milestone` / `impl` / `review` / `release` / `idle`)
 - 각 커맨드는 시작 시 자기 단계명을 기록하고, 최종 보고 직전 `idle`로 되돌린다
-  (`/tide-status`는 읽기 전용이라 변경하지 않음)
+  (`/tide:status`는 읽기 전용이라 변경하지 않음)
 - `.tide/`는 `.gitignore` 대상이다 (로컬 상태일 뿐 커밋하지 않음)
 
 ## tide-guard hook
@@ -34,7 +34,7 @@ tide는 porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴�
 - 상태 파일이 없으면 아무것도 차단하지 않는다 — tide를 쓰지 않는 프로젝트나
   사용자의 수동 git 작업(idle 상태가 아니라 파일 자체가 없는 경우)에 영향을 주지 않는다.
 - **`idle`에서도 차단된다** — tide 도입 후에는 Claude를 통한 git commit/tag/push가 항상
-  `/tide-release`로만 일어나는 것이 의도된 동작이다. tide 사이클 밖에서 Claude에게
+  `/tide:release`로만 일어나는 것이 의도된 동작이다. tide 사이클 밖에서 Claude에게
   git 작업을 시키려면 `.tide/phase` 파일을 삭제해 가드를 해제한다.
 - 스크립트 원본은 `hooks/tide-guard.sh` **한 곳**이다 (`tide-guard.ps1`은 sh를 쓸 수
   없는 환경을 위한 보조 사본 — 로직 수정 시 함께 갱신). Windows에서는 Git for
@@ -42,20 +42,20 @@ tide는 porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴�
 
 ## 템플릿
 
-- `templates/` 의 3종 파일이 마일스톤·보고서 **형식의 단일 원본**이다:
-  `milestone.md` / `impl-report.md` / `review-report.md`
-- milestone/impl/review 커맨드는 `${CLAUDE_PLUGIN_ROOT}/templates/` 의 템플릿을 읽어
-  그 구조 그대로 문서를 생성한다. 템플릿을 읽을 수 없으면 커맨드에 내장된 한 줄
-  폴백(섹션 목록)으로 동작한다.
-- 형식을 바꾸려면 템플릿 파일을 수정한다 — 커맨드·규약 문서의 산문을 고치는 것이 아니라.
+- 각 스킬 디렉터리에 동봉된 `template.md`가 마일스톤·보고서 **형식의 단일 원본**이다:
+  `skills/milestone/template.md` / `skills/impl/template.md` / `skills/review/template.md`
+- milestone/impl/review 스킬은 `${CLAUDE_SKILL_DIR}/template.md`를 읽어 그 구조 그대로
+  문서를 생성한다. 템플릿을 읽을 수 없으면 스킬에 내장된 한 줄 폴백(섹션 목록)으로
+  동작한다.
+- 형식을 바꾸려면 템플릿 파일을 수정한다 — 스킬·규약 문서의 산문을 고치는 것이 아니라.
 
 ## 전제조건 · 프리플라이트
 
 | 커맨드 | 시작 전 검사 | 실패 시 |
 |---|---|---|
-| `/tide-impl` | 대상 마일스톤 문서 존재 | 구현 없이 `/tide-milestone` 안내 후 중단 |
-| `/tide-review` | `docs/reports/M{N}-impl.md` 존재 | 리뷰 없이 `/tide-impl` 안내 후 중단 |
-| `/tide-release` | ① review 판정 "가능" ② 테스트 통과 ③ 워킹트리 확인 | git 작업 없이 사유 보고 후 중단 |
+| `/tide:impl` | 대상 마일스톤 문서 존재 | 구현 없이 `/tide:milestone` 안내 후 중단 |
+| `/tide:review` | `docs/reports/M{N}-impl.md` 존재 | 리뷰 없이 `/tide:impl` 안내 후 중단 |
+| `/tide:release` | ① review 판정 "가능" ② 테스트 통과 ③ 워킹트리 확인 | git 작업 없이 사유 보고 후 중단 |
 
 release 1번 검사는 사용자가 버전 인자와 함께 강행 의사를 명시한 경우에만 경고 후 통과할 수 있다.
 
@@ -66,7 +66,7 @@ release 1번 검사는 사용자가 버전 인자와 함께 강행 의사를 명
 - 태스크 ID: `M{N}-T01`, `M{N}-T02` …
 - 태스크는 한 번에 끝낼 수 있는 크기로 분해하고, 가능한 한 서로 독립적으로 설계
 - 선행 의존이 있으면 태스크 끝에 `(deps: M{N}-T01, …)` 로 표기
-- `/tide-impl M{N}` 처럼 번호를 지정해 특정 마일스톤을 재실행·이어하기 할 수 있다
+- `/tide:impl M{N}` 처럼 번호를 지정해 특정 마일스톤을 재실행·이어하기 할 수 있다
 
 ## 보고서
 

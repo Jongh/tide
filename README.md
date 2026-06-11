@@ -7,10 +7,10 @@ porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴리즈)�
 ## 사이클
 
 ```
-/tide-kickoff  →  /tide-milestone  →  /tide-impl  →  /tide-review  →  /tide-release vX.Y.Z
+/tide:kickoff  →  /tide:milestone  →  /tide:impl  →  /tide:review  →  /tide:release vX.Y.Z
    (세팅)           (계획)             (구현·테스트)    (리뷰·판정)       (배포)
 
-              /tide-status — 언제든 현재 위치와 다음 커맨드 확인 (읽기 전용)
+              /tide:status — 언제든 현재 위치와 다음 커맨드 확인 (읽기 전용)
 ```
 
 각 단계는 **부수효과를 엄격히 분리**합니다 — `impl`·`review`는 절대 git 작업을 하지 않고
@@ -27,12 +27,12 @@ porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴리즈)�
 
 | 커맨드 | 역할 | 산출물 |
 |---|---|---|
-| `/tide-kickoff` | 새 프로젝트에 워크플로우 골격 생성 | `docs/milestones/`·`docs/reports/`·`CHANGELOG.md`·`docs/conventions.md` |
-| `/tide-milestone` | 다음 마일스톤 문서 생성 | `docs/milestones/M{N}.md` |
-| `/tide-impl [M번호]` | 마일스톤대로 구현 + 테스트 (생략 시 최신, 번호 지정 시 재실행) | 코드 + `docs/reports/M{N}-impl.md` (완료보고서) |
-| `/tide-review` | 비판적 리뷰 + 릴리즈 판정 | `docs/reports/M{N}-review.md` (리뷰보고서) |
-| `/tide-release` | 프리플라이트 → 버전 범프 → CHANGELOG → commit → tag → push | 릴리즈 커밋·태그 |
-| `/tide-status` | 사이클 현재 상태 + 다음 권장 커맨드 (읽기 전용) | (없음 — 보고만) |
+| `/tide:kickoff` | 새 프로젝트에 워크플로우 골격 생성 | `docs/milestones/`·`docs/reports/`·`CHANGELOG.md`·`docs/conventions.md` |
+| `/tide:milestone` | 다음 마일스톤 문서 생성 | `docs/milestones/M{N}.md` |
+| `/tide:impl [M번호]` | 마일스톤대로 구현 + 테스트 (생략 시 최신, 번호 지정 시 재실행) | 코드 + `docs/reports/M{N}-impl.md` (완료보고서) |
+| `/tide:review` | 비판적 리뷰 + 릴리즈 판정 | `docs/reports/M{N}-review.md` (리뷰보고서) |
+| `/tide:release` | 프리플라이트 → 버전 범프 → CHANGELOG → commit → tag → push | 릴리즈 커밋·태그 |
+| `/tide:status` | 사이클 현재 상태 + 다음 권장 커맨드 (읽기 전용) | (없음 — 보고만) |
 
 ## 설치
 
@@ -52,33 +52,38 @@ porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴리즈)�
 ### 수동 복사 (비권장 — 가드 hook 미포함)
 
 ```bash
-mkdir -p ~/.claude/commands
-cp commands/tide-*.md ~/.claude/commands/
+mkdir -p ~/.claude/skills
+cp -r skills/* ~/.claude/skills/
 ```
 
-이 경로는 tide-guard hook이 설치되지 않아 git 금지가 프롬프트 수준으로만 동작합니다.
+이 경로는 tide-guard hook이 설치되지 않아 git 금지가 프롬프트 수준으로만 동작하며,
+호출명도 네임스페이스 없는 `/kickoff`·`/milestone` 형태가 되어 다른 스킬과 충돌할 수
+있습니다.
 
-> **구버전(≤v0.2.0)에서 마이그레이션**: 프로젝트나 전역 `.claude/commands/`에 복사해 둔
-> `tide-*.md` 사본은 **플러그인 커맨드를 가리므로** 삭제하세요. 같은 이름의 프로젝트
-> 커맨드가 플러그인 커맨드보다 우선합니다. v0.2.0 방식으로 설치한 `.claude/hooks/`와
-> settings.json의 hook 등록도 제거해야 가드가 중복 실행되지 않습니다.
+> **구버전에서 마이그레이션**:
+> - **≤v0.2.0 (수동 복사)**: 프로젝트나 전역 `.claude/commands/`에 복사해 둔
+>   `tide-*.md` 사본은 **플러그인 커맨드를 가리므로** 삭제하세요. v0.2.0 방식으로
+>   설치한 `.claude/hooks/`와 settings.json의 hook 등록도 제거해야 가드가 중복
+>   실행되지 않습니다.
+> - **v0.3.0 → v0.4.0**: 호출명이 `/tide:tide-status`에서 `/tide:status` 형태로
+>   바뀌었습니다. `claude plugin marketplace update tide` 후 재설치하면 새 호출명이
+>   적용됩니다.
 
-설치 후 새 프로젝트에서 `/tide-kickoff`로 시작하세요.
+설치 후 새 프로젝트에서 `/tide:kickoff`로 시작하세요.
 
 ## 저장소 구조
 
 ```
 .claude-plugin/   plugin.json·marketplace.json (플러그인/마켓플레이스 매니페스트)
-commands/         슬래시 커맨드 6종
+skills/           스킬 6종 — {단계}/SKILL.md (+ milestone·impl·review는 template.md 동봉)
 hooks/            hooks.json + tide-guard.sh·.ps1 (git 작업 가드)
-templates/        마일스톤·완료보고서·리뷰보고서 템플릿 (형식의 단일 원본)
 docs/             규약·마일스톤·보고서 (이 저장소 자체의 tide 사이클 기록)
 ```
 
 ## 명명 규약
 
-- 패턴: `tide-{단계}` — 다른 플러그인·내장 스킬과 충돌하지 않도록 `tide-` 접두사로 묶음
-- `/tide-` 까지 입력하면 탭 자동완성으로 6종이 함께 표시됩니다
+- 호출: `/tide:{단계}` — 플러그인 네임스페이스가 내장 스킬·다른 플러그인과의 충돌을 방지
+- `/tide:` 까지 입력하면 탭 자동완성으로 6종이 함께 표시됩니다
 
 ## 규약
 
@@ -86,6 +91,13 @@ docs/             규약·마일스톤·보고서 (이 저장소 자체의 tide 
 [docs/conventions.md](docs/conventions.md)를 참고하세요.
 
 ## CHANGELOG
+
+### [v0.4.0]
+- **호출명 개편**: `/tide:tide-status` → `/tide:status` — 커맨드 6종을 공식 권장 `skills/{이름}/SKILL.md` 구조로 전환하며 `tide-` 접두사 중복 제거 (기능·frontmatter 동등, 이력 보존 이동)
+- 템플릿을 각 스킬에 동봉 — `skills/{milestone,impl,review}/template.md`, 참조는 `${CLAUDE_SKILL_DIR}/template.md`로 전환 (중앙 `templates/` 폐지)
+- 저장소 전체 호출 표기를 실동작과 일치 — 스킬 상호 안내, 가드 차단 메시지(sh·ps1), README·conventions
+- 패키지 위생 조사 종결 — 플러그인 파일 제외 수단은 공식 미지원으로 확인, 수용 결정 (근거: M3 보고서)
+- README 마이그레이션 노트에 v0.3.0 → v0.4.0 호출명 변경 안내 추가
 
 ### [v0.3.0]
 - **Claude Code 플러그인으로 전환** — `/plugin marketplace add Jongh/tide` → `/plugin install tide@tide` 한 번으로 커맨드 6종 + tide-guard hook이 함께 활성화 (`.claude-plugin/plugin.json`·`marketplace.json` 신설, 커맨드를 `commands/`로 이동)

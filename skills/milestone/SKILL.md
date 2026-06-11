@@ -8,7 +8,7 @@ argument-hint: "[마일스톤 주제(선택)]"
 
 규칙:
 - 파일 위치: docs/milestones/M{N}.md (기존 M*.md 중 가장 큰 번호 + 1, 없으면 M1)
-- 형식: ${CLAUDE_PLUGIN_ROOT}/templates/milestone.md 템플릿을 읽어 그 구조 그대로 작성
+- 형식: ${CLAUDE_SKILL_DIR}/template.md 템플릿을 읽어 그 구조 그대로 작성
   ({} 자리를 채우고 안내문은 제거). 템플릿을 읽을 수 없으면 폴백 — 목표 / 배경 /
   태스크 목록 / 태스크 상세 / 파일 변경 요약 / 완료 기준 / 메타데이터 7개 섹션
 - 태스크 ID: M{N}-T01, M{N}-T02 …
