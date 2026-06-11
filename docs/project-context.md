@@ -57,7 +57,12 @@
 - **태스크 표기**: `M{N}-T01` … , 선행 의존은 `(deps: M{N}-T01, …)`
 - **병렬 디스패치**: impl 단계(`/tide:impl`·`/tide:cycle` 공통)는 deps 위상에서 같은
   레벨의 독립 태스크를 서브에이전트로 동시 실행한다. 메커니즘·충돌 안전장치·병합·폴백의
-  단일 원본은 `skills/impl/SKILL.md`의 "병렬 디스패치" 절
+  단일 원본은 `skills/impl/SKILL.md`의 "병렬 디스패치" 절. 파일 겹침 감지는 마일스톤
+  템플릿의 태스크별 **"변경 파일"** 권장 필드(`skills/milestone/template.md`)로 결정적이
+  된다 — 같은 레벨 태스크의 변경 파일이 비중첩이면 폴백 없이 병렬 유지
+- **릴리즈 위생**: release 운영 주의(phase↔git 분리·멀티라인 메시지·제외 용어 literal
+  회피)는 `skills/release/SKILL.md`, 메타 용어 누수 방지·빌드 출력 검증 규약은
+  `docs/conventions.md`(버전·CHANGELOG 절)
 
 ## 메타
 
