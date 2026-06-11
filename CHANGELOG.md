@@ -4,6 +4,13 @@
 
 ---
 
+### [v0.6.0]
+- **`/tide:cycle` 오케스트레이션 신설**: `milestone → impl → review`를 한 번의 호출로 자동 체이닝 — 각 단계 진입 시 `.tide/phase` 기록, 사이클 종료 시 `idle` 복원, 한 단계라도 전제조건 미충족·실패 시 사이클 전체를 중단하고 중단 지점·사유 보고. git 작업을 하는 `release`만은 체이닝에서 제외하고 review "가능" 판정 후 `/tide:release vX.Y.Z`를 안내 (부수효과 분리·tide-guard와 정합)
+- impl 단계에서 마일스톤 태스크의 `(deps:)` 표기를 파싱해 독립=병렬·의존=순차로 스케줄링하는 규칙 명시 (순환 의존·미존재 의존 ID는 감지·보고 후 순차 폴백)
+- 무인자 호출 시 최대 번호 마일스톤의 보고서 상태로 시작점 3분기 (impl 없음→impl / impl만 있음→review 이어하기 / 둘 다 완료→새 milestone)
+- 신규 스킬이 매니페스트 수정 없이 `skills/*/SKILL.md` 자동 발견됨을 확인 — `plugin.json`·`marketplace.json` 무변경
+- `docs/conventions.md`·`README.md`·`docs/project-context.md`에 cycle 반영 (사이클 다이어그램·금지 행위 표·커맨드 표·스킬 7종)
+
 ### [v0.5.0]
 - **브라운필드 킥오프**: `/tide:kickoff`가 대상 저장소를 신규/진행-중으로 판별(커밋 이력·기존 산출물·소스 규모 기준)하고, 진행-중이면 코드베이스를 조사해 `docs/project-context.md`(스택·디렉터리 구조·진입점·도메인 개념)를 생성 — 이후 단계가 매번 재조사하지 않도록
 - `/tide:milestone`·`/tide:impl`이 `docs/project-context.md`가 있으면 먼저 읽어 기존 구조를 파악(조건부 — 없으면 평소대로, 하위 호환)

@@ -9,8 +9,18 @@ tide는 porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴�
 /tide:kickoff  →  /tide:milestone  →  /tide:impl  →  /tide:review  →  /tide:release vX.Y.Z
    (세팅)           (계획)             (구현·테스트)    (리뷰·판정)       (배포)
 
+                  └──────────── /tide:cycle ────────────┘  (release 직전 정지)
+
                           /tide:status — 언제든 현재 위치 확인 (읽기 전용)
 ```
+
+**수동 단계별 호출 vs `/tide:cycle` 자동 체이닝**: 평소엔 각 단계를 직접 호출하지만,
+`/tide:cycle`은 `milestone → impl → review`를 한 번에 이어 실행한다(필요 시 milestone부터,
+`M{N}` 인자면 impl부터). `release`만은 자동 체이닝에서 **제외** — git 작업을 하는 유일한
+단계이므로 review "가능" 판정 후 사이클을 끝내고 사용자에게 `/tide:release vX.Y.Z`를
+넘긴다. cycle은 각 단계의 전제조건을 그대로 검사하고, 한 단계가 미충족·실패로 멈추면
+사이클 전체를 중단하며 중단 지점·사유를 보고한다. impl 단계에서는 마일스톤 태스크의
+`(deps:)` 표기를 읽어 독립 태스크는 병렬, 의존 태스크는 순차로 스케줄링한다.
 
 **핵심 원칙 — 부수효과 분리**: `impl`·`review`는 **절대 git 작업을 하지 않는다**(문서·코드만
 남김). git commit/tag/push는 오직 `release`에서만 일어난다. impl/review가 남긴 보고서는
@@ -104,4 +114,5 @@ release 1번 검사는 사용자가 버전 인자와 함께 강행 의사를 명
 | impl | 코드 리뷰 / git commit / git tag / git push | 프롬프트 + hook(git) |
 | review | git commit / git tag / git push | 프롬프트 + hook(git) |
 | status | 파일 생성·수정 / git 작업 | 프롬프트 |
+| cycle | git commit / git tag / git push (release 단계는 체이닝에서 제외) | 프롬프트 + hook(git) |
 | release | (없음 — 유일하게 git 조작 허용) | 프리플라이트 통과 필요 |

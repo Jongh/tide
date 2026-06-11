@@ -8,14 +8,14 @@
 - **형태**: Claude Code 플러그인 (코드 런타임 없음 — 마크다운 프롬프트 + 셸 hook으로 구성)
 - **언어**: Markdown(스킬·문서), POSIX sh + PowerShell(가드 hook), JSON(매니페스트)
 - **외부 의존성**: 런타임 의존성 없음. Windows에서 hook 실행에 Git for Windows의 `sh` 필요
-- **버전**: 0.4.0 (`.claude-plugin/plugin.json`이 단일 버전 원본)
+- **버전**: 0.6.0 (`.claude-plugin/plugin.json`이 단일 버전 원본)
 
 ## 디렉터리 구조
 
 | 경로 | 역할 |
 |---|---|
 | `.claude-plugin/` | `plugin.json`·`marketplace.json` — 플러그인/마켓플레이스 매니페스트 (버전 원본) |
-| `skills/` | 스킬 6종 — `{kickoff,milestone,impl,review,release,status}/SKILL.md`. milestone·impl·review는 `template.md` 동봉 |
+| `skills/` | 스킬 7종 — `{kickoff,milestone,impl,review,release,status,cycle}/SKILL.md`. milestone·impl·review는 `template.md` 동봉 |
 | `hooks/` | `hooks.json`(PreToolUse 등록) + `tide-guard.sh`(원본 로직)·`tide-guard.ps1`(보조 사본) |
 | `docs/milestones/` | 마일스톤 문서 `M{N}.md` |
 | `docs/reports/` | 완료보고서 `M{N}-impl.md`·리뷰보고서 `M{N}-review.md` |

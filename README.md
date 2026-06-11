@@ -10,8 +10,14 @@ porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴리즈)�
 /tide:kickoff  →  /tide:milestone  →  /tide:impl  →  /tide:review  →  /tide:release vX.Y.Z
    (세팅)           (계획)             (구현·테스트)    (리뷰·판정)       (배포)
 
+              └──────────── /tide:cycle ────────────┘  (release 직전 정지)
+
               /tide:status — 언제든 현재 위치와 다음 커맨드 확인 (읽기 전용)
 ```
+
+`/tide:cycle`은 `milestone → impl → review`를 한 번에 이어 실행하고(impl 단계에서
+마일스톤 태스크의 `(deps:)`를 읽어 독립 태스크는 병렬·의존 태스크는 순차로 진행),
+git 작업을 하는 `release`만은 자동 체이닝에서 빼고 직전에 멈춰 안내합니다.
 
 각 단계는 **부수효과를 엄격히 분리**합니다 — `impl`·`review`는 절대 git 작업을 하지 않고
 (코드·보고서만 남김), git commit/tag/push는 오직 `release`에서만 일어납니다.
@@ -31,6 +37,7 @@ porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴리즈)�
 | `/tide:milestone` | 다음 마일스톤 문서 생성 | `docs/milestones/M{N}.md` |
 | `/tide:impl [M번호]` | 마일스톤대로 구현 + 테스트 (생략 시 최신, 번호 지정 시 재실행) | 코드 + `docs/reports/M{N}-impl.md` (완료보고서) |
 | `/tide:review` | 비판적 리뷰 + 릴리즈 판정 | `docs/reports/M{N}-review.md` (리뷰보고서) |
+| `/tide:cycle [주제/M번호]` | `milestone→impl→review` 자동 체이닝 (deps 기반 병렬/순차, release 직전 정지) | 위 단계들의 산출물 + 릴리즈 안내 |
 | `/tide:release` | 프리플라이트 → 버전 범프 → CHANGELOG → commit → tag → push | 릴리즈 커밋·태그 |
 | `/tide:status` | 사이클 현재 상태 + 다음 권장 커맨드 (읽기 전용) | (없음 — 보고만) |
 
@@ -43,7 +50,7 @@ porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴리즈)�
 /plugin install tide@tide
 ```
 
-커맨드 6종과 tide-guard hook이 **함께** 활성화됩니다. 프로젝트별 hook 설치 절차는
+커맨드 7종과 tide-guard hook이 **함께** 활성화됩니다. 프로젝트별 hook 설치 절차는
 없습니다 — 가드는 플러그인이 `${CLAUDE_PLUGIN_ROOT}` 경로의 hook으로 직접 제공합니다.
 
 > Windows 참고: hook은 `sh`로 실행되므로 Git for Windows가 필요합니다
@@ -75,7 +82,7 @@ cp -r skills/* ~/.claude/skills/
 
 ```
 .claude-plugin/   plugin.json·marketplace.json (플러그인/마켓플레이스 매니페스트)
-skills/           스킬 6종 — {단계}/SKILL.md (+ milestone·impl·review는 template.md 동봉)
+skills/           스킬 7종 — {단계}/SKILL.md (+ milestone·impl·review는 template.md 동봉)
 hooks/            hooks.json + tide-guard.sh·.ps1 (git 작업 가드)
 docs/             규약·마일스톤·보고서·프로젝트 컨텍스트 (이 저장소 자체의 tide 사이클 기록)
 ```
@@ -83,7 +90,7 @@ docs/             규약·마일스톤·보고서·프로젝트 컨텍스트 (�
 ## 명명 규약
 
 - 호출: `/tide:{단계}` — 플러그인 네임스페이스가 내장 스킬·다른 플러그인과의 충돌을 방지
-- `/tide:` 까지 입력하면 탭 자동완성으로 6종이 함께 표시됩니다
+- `/tide:` 까지 입력하면 탭 자동완성으로 7종이 함께 표시됩니다
 
 ## 규약
 
@@ -91,6 +98,13 @@ docs/             규약·마일스톤·보고서·프로젝트 컨텍스트 (�
 [docs/conventions.md](docs/conventions.md)를 참고하세요.
 
 ## CHANGELOG
+
+### [v0.6.0]
+- **`/tide:cycle` 오케스트레이션 신설**: `milestone → impl → review`를 한 번의 호출로 자동 체이닝 — 각 단계 진입 시 `.tide/phase` 기록, 사이클 종료 시 `idle` 복원, 한 단계라도 전제조건 미충족·실패 시 사이클 전체를 중단하고 중단 지점·사유 보고. git 작업을 하는 `release`만은 체이닝에서 제외하고 review "가능" 판정 후 `/tide:release vX.Y.Z`를 안내 (부수효과 분리·tide-guard와 정합)
+- impl 단계에서 마일스톤 태스크의 `(deps:)` 표기를 파싱해 독립=병렬·의존=순차로 스케줄링하는 규칙 명시 (순환 의존·미존재 의존 ID는 감지·보고 후 순차 폴백)
+- 무인자 호출 시 최대 번호 마일스톤의 보고서 상태로 시작점 3분기 (impl 없음→impl / impl만 있음→review 이어하기 / 둘 다 완료→새 milestone)
+- 신규 스킬이 매니페스트 수정 없이 `skills/*/SKILL.md` 자동 발견됨을 확인 — `plugin.json`·`marketplace.json` 무변경
+- `docs/conventions.md`·`README.md`·`docs/project-context.md`에 cycle 반영 (사이클 다이어그램·금지 행위 표·커맨드 표·스킬 7종)
 
 ### [v0.5.0]
 - **브라운필드 킥오프**: `/tide:kickoff`가 대상 저장소를 신규/진행-중으로 판별(커밋 이력·기존 산출물·소스 규모 기준)하고, 진행-중이면 코드베이스를 조사해 `docs/project-context.md`(스택·디렉터리 구조·진입점·도메인 개념)를 생성 — 이후 단계가 매번 재조사하지 않도록
