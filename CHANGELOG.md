@@ -4,6 +4,12 @@
 
 ---
 
+### [v0.7.0]
+- **`/tide:retro` 회고 신설**: 누적된 마일스톤·보고서를 가로질러 반복 문제·이슈 군집, 수용된 트레이드오프, "후속"의 반영/미반영 추적, 릴리즈 판정·버전 추이를 집계하는 읽기 전용 회고 스킬 — 산출물은 갱신형 단일 문서 `docs/reports/retro.md`(회고 시점마다 최상단 누적), 형식은 `skills/retro/template.md` 동봉
+- `/tide:status`와 동일한 읽기 전용 원칙 — 회고 문서 하나만 생성/갱신하고 `.tide/phase`·git에는 손대지 않음
+- `docs/conventions.md`(보고서 절·금지 행위 표)·`README.md`(커맨드 표)·`docs/project-context.md`에 retro 반영, 스킬 8종으로 갱신
+- 첫 회고 산출 — M1~M5 사이클을 집계한 `docs/reports/retro.md` 생성(반복 군집 4·수용 트레이드오프 6·후속 반영 7/미반영 3·버전 추이 v0.2.0~v0.6.0 전부 minor)
+
 ### [v0.6.0]
 - **`/tide:cycle` 오케스트레이션 신설**: `milestone → impl → review`를 한 번의 호출로 자동 체이닝 — 각 단계 진입 시 `.tide/phase` 기록, 사이클 종료 시 `idle` 복원, 한 단계라도 전제조건 미충족·실패 시 사이클 전체를 중단하고 중단 지점·사유 보고. git 작업을 하는 `release`만은 체이닝에서 제외하고 review "가능" 판정 후 `/tide:release vX.Y.Z`를 안내 (부수효과 분리·tide-guard와 정합)
 - impl 단계에서 마일스톤 태스크의 `(deps:)` 표기를 파싱해 독립=병렬·의존=순차로 스케줄링하는 규칙 명시 (순환 의존·미존재 의존 ID는 감지·보고 후 순차 폴백)

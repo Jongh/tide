@@ -84,6 +84,10 @@ release 1번 검사는 사용자가 버전 인자와 함께 강행 의사를 명
   - 개요 / 태스크별 수행 내용 / 변경 파일 요약 / 테스트 결과 / 미해결·후속 메모
 - 리뷰 보고서: `docs/reports/M{N}-review.md`
   - 비판점(심각도: 차단/권장/사소) / 수정 내용 / 검증 / 릴리즈 판정(+추천 버전) / 다음 단계
+- 회고 문서: `docs/reports/retro.md` (`/tide:retro` 산출물 — 갱신형 단일)
+  - 집계 범위 / 반복된 문제·이슈 군집 / 수용된 트레이드오프 / 후속 항목 추적 /
+    릴리즈 판정·버전 추이 / 회고 메모. 마일스톤별이 아니라 **누적 사이클을 가로질러** 본다.
+  - 회고 시점마다 문서 최상단에 새 섹션을 누적한다(이력 보존, 읽기 전용 — 회고 문서만 생성).
 - 동일 마일스톤 재실행 시 기존 보고서를 갱신한다.
 
 ## 프로젝트 컨텍스트 (docs/project-context.md)
@@ -114,5 +118,6 @@ release 1번 검사는 사용자가 버전 인자와 함께 강행 의사를 명
 | impl | 코드 리뷰 / git commit / git tag / git push | 프롬프트 + hook(git) |
 | review | git commit / git tag / git push | 프롬프트 + hook(git) |
 | status | 파일 생성·수정 / git 작업 | 프롬프트 |
+| retro | 회고 문서(`docs/reports/retro.md`) 외 파일 생성·수정 / `.tide/phase` 변경 / git 작업 | 프롬프트 |
 | cycle | git commit / git tag / git push (release 단계는 체이닝에서 제외) | 프롬프트 + hook(git) |
 | release | (없음 — 유일하게 git 조작 허용) | 프리플라이트 통과 필요 |
