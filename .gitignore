@@ -1,6 +1,9 @@
 # tide 상태 파일 (로컬 전용)
 .tide/
 
+# MkDocs 빌드 출력 (docs 사이트)
+site/_build/
+
 # Claude Code 로컬 설정 (머신 전용)
 .claude/settings.local.json
 
