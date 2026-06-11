@@ -1,6 +1,6 @@
 site_name: tide
 site_description: 마일스톤 → 구현 → 리뷰 → 릴리즈 개발 사이클을 프로젝트 독립적인 Claude Code 슬래시 커맨드로 구현한 워크플로우
-site_url: https://Jongh.github.io/tide/
+site_url: https://jongh.github.io/tide/
 repo_url: https://github.com/Jongh/tide
 repo_name: Jongh/tide
 

@@ -1,5 +1,5 @@
 ---
-description: "[tide] 프리플라이트 → 버전 범프 → CHANGELOG/README → commit → tag → push"
+description: "[tide] 프리플라이트 → 버전 범프 → CHANGELOG → commit → tag → push"
 argument-hint: "v0.1.0 (생략 시 리뷰보고서의 추천 버전 기준)"
 ---
 릴리즈를 진행해줘. 버전은 "$ARGUMENTS"로 지정할 수 있어 (예: /tide:release v0.1.0).
@@ -24,11 +24,12 @@ argument-hint: "v0.1.0 (생략 시 리뷰보고서의 추천 버전 기준)"
 1. 버전 파일 업데이트 (Cargo.toml / package.json / pyproject.toml /
    .claude-plugin/plugin.json 등 프로젝트에 맞게)
 2. CHANGELOG.md 최상단에 해당 버전 릴리즈 노트 추가
-3. README.md의 CHANGELOG 섹션 최상단에 동일 내용 추가
-4. git add → git commit ("Release {버전}: {핵심 변경사항 한 줄 요약}")
-5. git tag {버전}
-6. git push origin main
-7. git push origin {버전}
+   (CHANGELOG.md가 릴리즈 노트의 단일 원본 — README.md의 CHANGELOG 섹션은 포인터만
+   두므로 건드리지 않는다. `docs/conventions.md`의 "버전·CHANGELOG" 규약 참조)
+3. git add → git commit ("Release {버전}: {핵심 변경사항 한 줄 요약}")
+4. git tag {버전}
+5. git push origin main
+6. git push origin {버전}
 
 완료 후 .tide/phase를 `idle`로 되돌리고 결과를 보고해줘.
 

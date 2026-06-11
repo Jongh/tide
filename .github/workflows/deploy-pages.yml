@@ -2,15 +2,10 @@ name: Deploy docs site to GitHub Pages
 
 on:
   push:
+    # paths 필터 없이 main 푸시마다 빌드·배포한다. 사이트가 단일 원본으로 인클루드하는
+    # 루트 파일(CHANGELOG.md·docs/conventions.md 등)이 늘어도 허용목록 누락으로 사이트가
+    # 낡을 위험이 없도록 main 전체를 트리거로 둔다(사이트 빌드가 ~1초로 가벼워 비용 무시 가능).
     branches: [main]
-    paths:
-      - "site/**"
-      - ".github/workflows/deploy-pages.yml"
-      # 사이트가 pymdownx.snippets로 단일 원본 인클루드하는 루트 파일들 —
-      # 이들이 바뀌면 사이트 콘텐츠(변경 이력·규약)도 바뀌므로 재배포가 필요하다.
-      # (이 항목이 없으면 CHANGELOG/conventions만 바뀐 릴리즈에서 사이트가 낡는다)
-      - "CHANGELOG.md"
-      - "docs/conventions.md"
   workflow_dispatch:
 
 permissions:

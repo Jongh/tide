@@ -62,7 +62,13 @@
   된다 — 같은 레벨 태스크의 변경 파일이 비중첩이면 폴백 없이 병렬 유지
 - **릴리즈 위생**: release 운영 주의(phase↔git 분리·멀티라인 메시지·제외 용어 literal
   회피)는 `skills/release/SKILL.md`, 메타 용어 누수 방지·빌드 출력 검증 규약은
-  `docs/conventions.md`(버전·CHANGELOG 절)
+  `docs/conventions.md`(버전·CHANGELOG 절). 릴리즈 노트의 단일 원본은 `CHANGELOG.md`이며
+  README의 CHANGELOG 섹션은 포인터만 둔다(이중 갱신 제거)
+- **1.0 안정성·메타 규칙**(v1.0.0~): 커맨드 8종 호출명·역할, 단계별 규약, `.tide/phase`/
+  tide-guard 계약, 보고서·마일스톤 형식은 1.0부터 안정(stable)이고 하위 호환을 깨는 변경은
+  다음 major에서만 한다. 또한 규약·단일 원본을 새로 더하면 그것을 강제·반영할 실행 수단
+  (스킬 프리플라이트·hook·CI 트리거·빌드)도 같은 사이클에 함께 손본다 — 단일 원본은
+  `docs/conventions.md`의 "1.0 안정성"·"규약↔실행/인프라 동기화" 절
 
 ## 메타
 
