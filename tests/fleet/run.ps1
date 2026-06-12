@@ -12,8 +12,8 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
-$OK  = [string]([char]0xAC00 + [char]0xB2A5)   # "가능" (release-able)
-$BAD = [string]([char]0xBD88 + [char]0xAC00)   # "불가" (blocked)
+$OK  = [string]([char]0xAC00 + [char]0xB2A5)   # ga-neung U+AC00 U+B2A5 (release-able)
+$BAD = [string]([char]0xBD88 + [char]0xAC00)   # bul-ga  U+BD88 U+AC00 (blocked)
 
 $sbx = Join-Path ([System.IO.Path]::GetTempPath()) "tide-fleet-live.$PID"
 if (Test-Path $sbx) { Remove-Item -Recurse -Force $sbx }
@@ -72,6 +72,62 @@ function Summarize($parent) {
     "release=$rel review=$rev impl=$imp milestone=$mil fix=$fix"
 }
 
+# --- .tide/deps parse reference: one sibling repo name per line, skip #-comments / blanks, trim ---
+function ReadDeps($repoDir) {
+    $f = Join-Path $repoDir '.tide\deps'
+    if (-not (Test-Path $f)) { return @() }
+    $out = @()
+    foreach ($line in (Get-Content $f)) {
+        $t = $line.Trim()
+        if ($t -eq '' -or $t.StartsWith('#')) { continue }   # blank / comment
+        $out += $t
+    }
+    return $out
+}
+
+# --- dependency-aware order reference: topological sort (depended-upon first) + cycle detection ---
+# Names not in the discovered set are ignored (safe side). Unconsumed nodes -> cycle -> sentinel CYCLE.
+function TopoSort($parent) {
+    $nodes = @(Discover $parent)                              # discovered repos (sorted)
+    if ($nodes.Count -eq 0) { return '' }
+
+    # edges: keep only deps that are in the discovered set (ignore unknown names)
+    $edges = @{}
+    foreach ($r in $nodes) {
+        $kept = @()
+        foreach ($dep in (ReadDeps (Join-Path $parent $r))) {
+            if ($nodes -contains $dep) { $kept += $dep }
+        }
+        $edges[$r] = $kept
+    }
+
+    $remaining = New-Object System.Collections.ArrayList
+    [void]$remaining.AddRange($nodes)
+    $order = @()
+    # Kahn variant: emit nodes whose deps are all already emitted; no progress -> cycle.
+    while ($remaining.Count -gt 0) {
+        $progressed = $false
+        $next = New-Object System.Collections.ArrayList
+        foreach ($r in $remaining) {
+            $ready = $true
+            foreach ($dep in $edges[$r]) {
+                if ($remaining -contains $dep) { $ready = $false; break }  # dep not yet emitted
+            }
+            if ($ready) { $order += $r; $progressed = $true } else { [void]$next.Add($r) }
+        }
+        if (-not $progressed) { return 'CYCLE' }
+        $remaining = $next
+    }
+    return ($order -join ' ')
+}
+
+# index of <name> in a space-joined order string (-1 if absent)
+function IdxOf($orderStr, $name) {
+    $arr = @($orderStr -split '\s+' | Where-Object { $_ -ne '' })
+    for ($i = 0; $i -lt $arr.Count; $i++) { if ($arr[$i] -eq $name) { return $i } }
+    return -1
+}
+
 try {
     Write-Host "# tide fleet live test (PowerShell)"
     Write-Host "# sandbox: $sbx`n"
@@ -118,6 +174,35 @@ try {
     $e = (Discover $EMPTY) -join ','
     Chk "discover 0 -> graceful degrade (empty)" $(if ($e) { $e } else { 'EMPTY' }) 'EMPTY'
 
+    # --- dependency-aware order fixtures/scenarios (M16: .tide/deps topo sort / fallback) ---
+
+    function MkRepo($d) { GitInit $d; W (Join-Path $d 'docs\milestones\M1.md') '# M1' }
+
+    # topo: auth(no deps) <- orders(->auth) <- gateway(->auth) <- solo(undeclared independent)
+    $TP = Join-Path $sbx 'topo'; New-Item -ItemType Directory -Force -Path $TP | Out-Null
+    MkRepo (Join-Path $TP 'auth')
+    MkRepo (Join-Path $TP 'orders')
+    # trim + unknown-name ignore in one file: leading/trailing spaces around auth, plus non-existent 'nowhere'
+    W (Join-Path $TP 'orders\.tide\deps') "  auth  `nnowhere"
+    MkRepo (Join-Path $TP 'gateway')
+    W (Join-Path $TP 'gateway\.tide\deps') "# dep`nauth"        # comment + dependency
+    MkRepo (Join-Path $TP 'solo')                                # undeclared independent
+
+    $tord = TopoSort $TP
+    $ia = IdxOf $tord 'auth'; $io = IdxOf $tord 'orders'; $ig = IdxOf $tord 'gateway'; $is = IdxOf $tord 'solo'
+    $nodeCount = @($tord -split '\s+' | Where-Object { $_ -ne '' }).Count
+    Chk "topo: not a cycle (not CYCLE)" $(if ($tord -eq 'CYCLE') { 'yes' } else { 'no' }) 'no'
+    Chk "topo: auth before orders"  $(if ($ia -ge 0 -and $io -ge 0 -and $ia -lt $io) { 'yes' } else { 'no' }) 'yes'
+    Chk "topo: auth before gateway" $(if ($ia -ge 0 -and $ig -ge 0 -and $ia -lt $ig) { 'yes' } else { 'no' }) 'yes'
+    Chk "undeclared independent: solo present in order" $(if ($is -ge 0) { 'yes' } else { 'no' }) 'yes'
+    Chk "unknown name ignored: order has 4 nodes (no crash)" "$nodeCount" '4'
+
+    # cycle fallback: a->b, b->a -> CYCLE sentinel
+    $CY = Join-Path $sbx 'cycle'; New-Item -ItemType Directory -Force -Path $CY | Out-Null
+    MkRepo (Join-Path $CY 'a'); W (Join-Path $CY 'a\.tide\deps') 'b'
+    MkRepo (Join-Path $CY 'b'); W (Join-Path $CY 'b\.tide\deps') 'a'
+    Chk "cycle fallback: a<->b cycle detected (CYCLE)" (TopoSort $CY) 'CYCLE'
+
     Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail)"
 }
 finally {
@@ -125,5 +210,5 @@ finally {
 }
 
 if ($script:fail -ne 0) { exit 1 }
-Write-Host "# fleet discovery / 5-position classify / 1:1 summary / hidden-skip / degrade confirmed"
+Write-Host "# fleet discovery / 5-position classify / 1:1 summary / hidden-skip / degrade / topo-sort / cycle-fallback confirmed"
 exit 0

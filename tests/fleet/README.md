@@ -14,7 +14,7 @@ fleet은 **프롬프트 스킬**이라 실행 바이너리가 없다(tide-guard�
 > **결정적 핵심**(발견·분류·강등)만 스크립트로 덮고, **advisory 서술 품질**은 아래 세션 레벨
 > 수동 절차로 분리한다(M13 앵커링 수동 절차와 동일 분리).
 
-### 시나리오 (sh·ps1 동일, 각 5건)
+### 시나리오 (sh·ps1 동일, 각 15건)
 
 러너는 임시 상위 폴더 아래에 서로 다른 사이클 위치의 자식들을 만든다:
 
@@ -32,6 +32,25 @@ fleet은 **프롬프트 스킬**이라 실행 바이너리가 없다(tide-guard�
 검증: ① 발견 = tide 레포만(plain·notide·.hidden 제외, **직속 1단계 + 숨김 무시**), ② 5 position
 분류 정확(release 가능/review 대기/impl 진행/보완 필요/milestone 필요), ③ **교차 요약 5버킷 1:1**
 (`release=1 review=1 impl=1 milestone=1 fix=1`, 합산 금지), ④ tide 레포 0개 부모 → **graceful 강등**.
+
+### 의존성 인식 순서 (M16 — `.tide/deps` 위상정렬·폴백)
+
+`.tide/deps` 파싱(한 줄에 형제 레포명 하나, `#` 주석·빈 줄 무시, 트림) + 발견 집합 위 방향 그래프
+**위상정렬**(피의존 먼저) + **순환 감지 폴백**(센티넬 `CYCLE`)을 참조 구현으로 회귀 고정한다.
+별도 픽스처 상위 폴더에서 검증한다:
+
+| 픽스처 | `.tide/deps` 구성 | 검증 |
+|---|---|---|
+| `topo/auth` | (없음) | 무의존 — 순서 선두 그룹 |
+| `topo/orders` | `auth` + 미존재명 `nowhere`(트림 포함) | auth가 orders보다 **앞**, 미존재명 **무시** |
+| `topo/gateway` | `# dep` 주석 + `auth` | auth가 gateway보다 **앞**(주석 무시) |
+| `topo/solo` | (없음) | **미선언 독립** — 순서에 그대로 존재 |
+| `cycle/a` ↔ `cycle/b` | a→b, b→a | **순환 감지 → `CYCLE` 폴백 신호** |
+
+검증: ⑤ 위상정렬 순서에서 `auth`가 `orders`·`gateway`보다 앞(인덱스 비교), ⑥ 미선언 `solo`가
+순서에 존재(위상 제약 없음), ⑦ 미존재 형제명(`nowhere`)은 무시(크래시 없이 순서 4노드 유지),
+⑧ 순환(a↔b)은 `CYCLE` 센티넬로 감지 — fleet 스킬은 이때 상태 기반 순서로 폴백한다(advisory).
+fleet은 순서를 **제안만** 하며 cross-repo git을 자동 실행하지 않는다(부수효과 분리 불변).
 
 > 분류·요약·advisory 인자의 정규 taxonomy 단일 원본은 `docs/conventions.md` "멀티 레포
 > 오케스트레이션" 절이며, 이 러너는 그 결정적 동작을 회귀 고정한다(advisory→`/tide:impl M{N}`·

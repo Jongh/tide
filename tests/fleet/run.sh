@@ -66,6 +66,76 @@ summarize() { # <parent> → "release=N review=N impl=N milestone=N fix=N"
     echo "release=$rel review=$rev impl=$imp milestone=$mil fix=$fix"
 }
 
+# --- .tide/deps 파싱(참조 구현): 한 줄에 형제 레포명 하나, # 주석·빈 줄 무시, 트림 ---
+read_deps() { # <repo-dir> → 의존 형제명 줄 출력 (없으면 빈 출력)
+    f="$1/.tide/deps"
+    [ -f "$f" ] || return 0
+    while IFS= read -r line || [ -n "$line" ]; do
+        # 앞뒤 공백 트림
+        line=$(printf '%s' "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+        case "$line" in ''|'#'*) continue ;; esac           # 빈 줄·주석 무시
+        echo "$line"
+    done < "$f"
+}
+
+# --- 의존성 인식 순서(참조 구현): 위상정렬(피의존 우선) + 순환 감지 폴백 ---
+# 발견 집합에 없는 이름은 무시(안전 측). 모든 노드를 소비 못하면 순환 → 센티넬 CYCLE.
+toposort() { # <parent> → "depA depB ..."(공백 구분, 피의존 먼저) | "CYCLE"
+    parent="$1"
+    nodes=$(discover "$parent")                              # 발견된 레포(정렬됨)
+    [ -n "$nodes" ] || { echo ""; return 0; }
+
+    # edges_<repo> = 발견 집합에 든 의존 대상만(미존재명 무시)
+    set -- $nodes
+    for r in $nodes; do
+        kept=""
+        for dep in $(read_deps "$parent/$r"); do
+            for n in $nodes; do                              # 발견 집합 멤버십 검사
+                if [ "$dep" = "$n" ]; then kept="$kept $dep"; break; fi
+            done
+        done
+        eval "edges_$r=\"$kept\""
+    done
+
+    remaining="$nodes"
+    order=""
+    # Kahn 변형: 미해결 의존이 0인 노드를 발견 순서대로 방출, 진전 없으면 순환.
+    while [ -n "$(printf '%s' "$remaining" | tr -d '[:space:]')" ]; do
+        progressed=0
+        next_remaining=""
+        for r in $remaining; do
+            eval "deps=\$edges_$r"
+            ready=1
+            for dep in $deps; do
+                # dep이 아직 remaining에 있으면(아직 미방출) 이 노드는 대기
+                for rem in $remaining; do
+                    if [ "$dep" = "$rem" ]; then ready=0; break; fi
+                done
+                [ "$ready" -eq 1 ] || break
+            done
+            if [ "$ready" -eq 1 ]; then
+                order="$order $r"; progressed=1
+            else
+                next_remaining="$next_remaining $r"
+            fi
+        done
+        if [ "$progressed" -eq 0 ]; then echo "CYCLE"; return 0; fi
+        remaining="$next_remaining"
+    done
+    # 선두 공백 제거
+    printf '%s\n' "$order" | sed 's/^[[:space:]]*//'
+}
+
+# 순서 문자열에서 어떤 레포가 다른 레포보다 앞에 오는지(인덱스 비교)
+idx_of() { # <order-string> <name> → 0-based 인덱스(없으면 -1)
+    i=0
+    for w in $1; do
+        if [ "$w" = "$2" ]; then echo "$i"; return 0; fi
+        i=$((i+1))
+    done
+    echo "-1"
+}
+
 # --- 픽스처: 5 position을 각각 두는 자식들 + 제외 케이스(commit 불필요) ---
 P="$SBX/parent"; mkdir -p "$P"
 A="$P/repo-a"; mkdir -p "$A/docs/milestones" "$A/docs/reports"; git -C "$A" init -q   # release 가능
@@ -102,7 +172,33 @@ EMPTY="$SBX/empty"; mkdir -p "$EMPTY/just-a-folder"
 e=$(discover "$EMPTY" | tr -d '\n')
 chk "발견 0 → graceful 강등(빈 결과)" "${e:-EMPTY}" "EMPTY"
 
+# --- 의존성 인식 순서 픽스처/시나리오 (M16: .tide/deps 위상정렬·폴백) ---
+
+# 위상정렬: auth(무의존) ← orders(→auth) ← gateway(→auth) ← solo(미선언 독립)
+TP="$SBX/topo"; mkdir -p "$TP"
+mk_repo() { mkdir -p "$1/docs/milestones"; git -C "$1" init -q; printf '# M1\n' > "$1/docs/milestones/M1.md"; }
+mk_repo "$TP/auth"
+mk_repo "$TP/orders";  mkdir -p "$TP/orders/.tide";  printf 'auth\n'        > "$TP/orders/.tide/deps"
+mk_repo "$TP/gateway"; mkdir -p "$TP/gateway/.tide"; printf '# dep\nauth\n' > "$TP/gateway/.tide/deps"  # 주석+의존
+mk_repo "$TP/solo"                                                                                       # 미선언 독립
+# 미존재명: nowhere는 발견 집합에 없음 → 무시되어야 함
+printf '  auth  \nnowhere\n' > "$TP/orders/.tide/deps"  # 트림·미존재명 무시 동시 검증
+
+tord=$(toposort "$TP")
+ia=$(idx_of "$tord" auth); io=$(idx_of "$tord" orders); ig=$(idx_of "$tord" gateway); is=$(idx_of "$tord" solo)
+chk "토포: 순환 아님(CYCLE 아님)" "$([ "$tord" = "CYCLE" ] && echo yes || echo no)" "no"
+chk "토포: auth가 orders보다 앞"  "$([ "$ia" -ge 0 ] && [ "$io" -ge 0 ] && [ "$ia" -lt "$io" ] && echo yes || echo no)" "yes"
+chk "토포: auth가 gateway보다 앞" "$([ "$ia" -ge 0 ] && [ "$ig" -ge 0 ] && [ "$ia" -lt "$ig" ] && echo yes || echo no)" "yes"
+chk "미선언 독립: solo가 순서에 존재" "$([ "$is" -ge 0 ] && echo yes || echo no)" "yes"
+chk "미존재명 무시: 순서가 4개 노드(NaN/크래시 없음)" "$(echo $tord | wc -w | tr -d ' ')" "4"
+
+# 순환 폴백: a→b, b→a → CYCLE 센티넬
+CY="$SBX/cycle"; mkdir -p "$CY"
+mk_repo "$CY/a"; mkdir -p "$CY/a/.tide"; printf 'b\n' > "$CY/a/.tide/deps"
+mk_repo "$CY/b"; mkdir -p "$CY/b/.tide"; printf 'a\n' > "$CY/b/.tide/deps"
+chk "순환 폴백: a↔b 순환 감지(CYCLE)" "$(toposort "$CY")" "CYCLE"
+
 echo
 echo "# 결과: PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ] || exit 1
-echo "# fleet 발견·5분류·1:1 요약·숨김 무시·강등 확인됨 (참조 구현 기준)"
+echo "# fleet 발견·5분류·1:1 요약·숨김 무시·강등·위상정렬·순환 폴백 확인됨 (참조 구현 기준)"
