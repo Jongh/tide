@@ -18,16 +18,24 @@ fleet은 **프롬프트 스킬**이라 실행 바이너리가 없다(tide-guard�
 
 러너는 임시 상위 폴더 아래에 서로 다른 사이클 위치의 자식들을 만든다:
 
-| 자식 | 구성 | 기대 |
+| 자식 | 구성 | 기대 position |
 |---|---|---|
-| `repo-a` | git + milestone + impl + review(판정 가능) + 버전 파일 | 발견됨 / **release-ready** |
-| `repo-b` | git + milestone + impl (review 없음) | 발견됨 / **review-pending** |
-| `repo-c` | git + milestone만 | 발견됨 / **impl-inprogress** |
+| `repo-a` | git + milestone + impl + review(판정 가능) + 버전 파일 | 발견됨 / **release 가능** (release-ready) |
+| `repo-b` | git + milestone + impl (review 없음) | 발견됨 / **review 대기** (review-pending) |
+| `repo-c` | git + milestone만 | 발견됨 / **impl 진행** (impl-inprogress) |
+| `repo-d` | git + milestone + impl + review(판정 **불가**) | 발견됨 / **보완 필요** (needs-fix) |
+| `repo-e` | git + `.tide` + 버전 파일 (마일스톤 없음) | 발견됨 / **milestone 필요** (milestone-needed) |
 | `plain` | 비-git 일반 디렉터리 | **발견 제외** |
 | `notide` | git이나 tide 산출물 없음 | **발견 제외** |
+| `.hidden-svc` | git + tide 산출물이나 **숨김(dot) 디렉터리** | **발견 제외** |
 
-검증: ① 발견 = tide 레포만(plain·notide 제외, **직속 1단계**), ② 사이클 위치별 분류 정확,
-③ tide 레포 0개 부모 → **graceful 강등**(빈 결과 → 스킬은 단일 레포 안내).
+검증: ① 발견 = tide 레포만(plain·notide·.hidden 제외, **직속 1단계 + 숨김 무시**), ② 5 position
+분류 정확(release 가능/review 대기/impl 진행/보완 필요/milestone 필요), ③ **교차 요약 5버킷 1:1**
+(`release=1 review=1 impl=1 milestone=1 fix=1`, 합산 금지), ④ tide 레포 0개 부모 → **graceful 강등**.
+
+> 분류·요약·advisory 인자의 정규 taxonomy 단일 원본은 `docs/conventions.md` "멀티 레포
+> 오케스트레이션" 절이며, 이 러너는 그 결정적 동작을 회귀 고정한다(advisory→`/tide:impl M{N}`·
+> `/tide:release v{추천}` 등 인자 포함).
 
 ## 실행
 

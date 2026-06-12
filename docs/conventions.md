@@ -132,13 +132,26 @@ tide는 porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴�
 - git 레포일 것, **그리고**
 - tide 산출물을 가질 것 — `docs/milestones/` **또는** `.tide/` **또는** 버전 파일 중 하나 이상.
 
+**이름이 `.`으로 시작하는 숨김(dot) 디렉터리는 무시한다**(`.git`·`.claude` 등) — 직속 1단계
+스캔에서 제외 대상이다.
+
 **깊은 재귀는 하지 않는다 — 직속 1단계만**(단순·예측 가능). 손주 이하 디렉터리는 보지 않는다.
 
 ### advisory 계획 규칙
 
-각 자식 레포의 **사이클 위치**를 `/tide:status`의 다음 커맨드 판단 규칙을 **재사용**해
-분류하고("release 가능", "review 대기", "impl 진행" 등), 권장 순서를 제시한다.
+각 자식 레포의 **사이클 위치(position)**를 `/tide:status`의 다음 커맨드 판단 규칙을 그대로
+**재사용**해 정확히 하나로 분류한다. 이 절이 분류 taxonomy·교차 요약·advisory 인자의 **단일
+원본**이며, fleet 스킬은 이를 인용한다(임의로 합산·분리하지 않는다).
 
+- **정규 position 5종과 advisory 다음 커맨드**(각 위치는 인자까지 포함한 정확한 커맨드로 매핑):
+  - `milestone 필요`(`docs/milestones/M*.md` 없음) → `/tide:milestone`
+  - `impl 진행`(M{N} 있고 `M{N}-impl.md` 없음) → `/tide:impl M{N}`(반드시 마일스톤 번호 포함)
+  - `review 대기`(`M{N}-impl.md` 있고 `M{N}-review.md` 없음) → `/tide:review`
+  - `보완 필요`(`M{N}-review.md` 판정 "불가") → 보완 후 `/tide:impl M{N}`
+  - `release 가능`(`M{N}-review.md` 판정 "가능") → `/tide:release v{추천}`
+- **교차 요약은 이 5 position을 1:1로 집계한다**(합산·분리 금지). 고정 형식:
+  `release 가능 N / review 대기 N / impl 진행 N / milestone 필요 N / 보완 필요 N`
+  (해당 0건 버킷도 0으로 명시한다).
 - 현재는 **상태 기반 advisory**다. **의존성 기반 정렬은 2층(의존성/계약 선언) 전까지
   미지원**임을 명시한다 — fleet은 레포 간 의존을 알지 못하므로 순서는 각 레포의 상태로만
   산출한다.

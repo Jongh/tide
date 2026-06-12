@@ -1,18 +1,17 @@
-# tide fleet live test (Windows PowerShell 5.1) -- discovery / classification / graceful degrade
+# tide fleet live test (Windows PowerShell 5.1) -- discovery / 5-position classify / summary / degrade
 #
 # fleet is a prompt skill with no executable. This exercises a REFERENCE of its deterministic
-# core (discovery rule + /tide:status classification) against fixtures; the single source is
-# docs/conventions.md "multi-repo orchestration". Advisory narrative quality -> README manual.
+# core (discovery rule + /tide:status classification + canonical 5-position taxonomy summary)
+# against fixtures; the single source is docs/conventions.md "multi-repo orchestration".
+# Advisory narrative quality -> README manual.
 #
-# ASCII-only source (BOM-independent, per the project's PS 5.1 encoding rule). The Korean
-# release verdict tokens are built from code points so this file stays ASCII. git mutating
-# verbs live only in this script's setup (init only -- commits not needed for discovery).
+# ASCII-only source (BOM-independent). Korean release verdict tokens are built from code points.
+# git mutating verbs live only in this script's setup (init only -- no commits needed).
 #
 # Usage: & tests\fleet\run.ps1   (exit 0 if all pass, exit 1 if any fail)
 
-$ErrorActionPreference = 'SilentlyContinue'   # native git stderr must not terminate
+$ErrorActionPreference = 'SilentlyContinue'
 
-# Korean verdict tokens via code points (keeps this source ASCII):
 $OK  = [string]([char]0xAC00 + [char]0xB2A5)   # "가능" (release-able)
 $BAD = [string]([char]0xBD88 + [char]0xAC00)   # "불가" (blocked)
 
@@ -22,11 +21,13 @@ New-Item -ItemType Directory -Force -Path $sbx | Out-Null
 
 $script:pass = 0; $script:fail = 0
 function Chk($desc, $got, $want) {
-    if ($got -eq $want) { $script:pass++; Write-Host ("PASS  {0,-50} ({1})" -f $desc, $got) }
-    else { $script:fail++; Write-Host ("FAIL  {0,-50} (got {1}, want {2})" -f $desc, $got, $want) }
+    if ($got -eq $want) { $script:pass++; Write-Host ("PASS  {0,-52} ({1})" -f $desc, $got) }
+    else { $script:fail++; Write-Host ("FAIL  {0,-52} (got {1}, want {2})" -f $desc, $got, $want) }
 }
+function W($path, $text) { $d = Split-Path $path -Parent; if (-not (Test-Path $d)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }; Set-Content -Path $path -Value $text -Encoding utf8 }
+function GitInit($d) { New-Item -ItemType Directory -Force -Path $d | Out-Null; & git -C $d init -q }   # dir must exist before init
 
-# --- discovery reference: immediate children, git repo AND tide artifacts ---
+# --- discovery reference: immediate children, skip hidden (dot) dirs, git repo AND tide artifacts ---
 function IsTideRepo($d) {
     $isGit = Test-Path (Join-Path $d '.git')
     if (-not $isGit) { & git -C $d rev-parse --show-toplevel 2>$null | Out-Null; $isGit = ($LASTEXITCODE -eq 0) }
@@ -38,10 +39,10 @@ function IsTideRepo($d) {
 }
 function Discover($parent) {
     Get-ChildItem -Directory $parent -ErrorAction SilentlyContinue |
-        Where-Object { IsTideRepo $_.FullName } | ForEach-Object { $_.Name } | Sort-Object
+        Where-Object { $_.Name -notlike '.*' -and (IsTideRepo $_.FullName) } | ForEach-Object { $_.Name } | Sort-Object
 }
 
-# --- classification reference: /tide:status next-command judgment (ASCII labels) ---
+# --- classification reference: /tide:status next-command judgment (5 positions, ASCII labels) ---
 function Classify($r) {
     $ms = Get-ChildItem (Join-Path $r 'docs\milestones') -Filter 'M*.md' -ErrorAction SilentlyContinue |
         Sort-Object Name | Select-Object -Last 1
@@ -56,6 +57,20 @@ function Classify($r) {
     if ($c.Contains($OK))  { return 'release-ready' }
     return 'unknown'
 }
+# --- cross-summary reference: 1:1 position counts (canonical 5 buckets, no lumping) ---
+function Summarize($parent) {
+    $rel=0;$rev=0;$imp=0;$mil=0;$fix=0
+    foreach ($name in (Discover $parent)) {
+        switch (Classify (Join-Path $parent $name)) {
+            'release-ready'    { $rel++ }
+            'review-pending'   { $rev++ }
+            'impl-inprogress'  { $imp++ }
+            'milestone-needed' { $mil++ }
+            'needs-fix'        { $fix++ }
+        }
+    }
+    "release=$rel review=$rev impl=$imp milestone=$mil fix=$fix"
+}
 
 try {
     Write-Host "# tide fleet live test (PowerShell)"
@@ -63,45 +78,42 @@ try {
 
     $P = Join-Path $sbx 'parent'; New-Item -ItemType Directory -Force -Path $P | Out-Null
 
-    # repo-a: release-ready (milestone + impl + review verdict OK + version file)
-    $A = Join-Path $P 'repo-a'
-    New-Item -ItemType Directory -Force -Path (Join-Path $A 'docs\milestones'), (Join-Path $A 'docs\reports') | Out-Null
-    & git -C $A init -q
-    Set-Content (Join-Path $A 'docs\milestones\M1.md') '# M1' -Encoding utf8
-    Set-Content (Join-Path $A 'package.json') '{ "version": "0.1.0" }' -Encoding utf8
-    Set-Content (Join-Path $A 'docs\reports\M1-impl.md') '# M1 impl' -Encoding utf8
-    Set-Content (Join-Path $A 'docs\reports\M1-review.md') ("verdict: " + $OK + " v0.2.0") -Encoding utf8
+    $A = Join-Path $P 'repo-a'; GitInit $A            # release-ready
+    W (Join-Path $A 'docs\milestones\M1.md') '# M1'
+    W (Join-Path $A 'package.json') '{ "version": "0.1.0" }'
+    W (Join-Path $A 'docs\reports\M1-impl.md') '# M1 impl'
+    W (Join-Path $A 'docs\reports\M1-review.md') ("## release verdict`n`n**" + $OK + "** -- rec: **v0.2.0 (minor)**`n")
 
-    # repo-b: review-pending (impl present, review absent)
-    $B = Join-Path $P 'repo-b'
-    New-Item -ItemType Directory -Force -Path (Join-Path $B 'docs\milestones'), (Join-Path $B 'docs\reports') | Out-Null
-    & git -C $B init -q
-    Set-Content (Join-Path $B 'docs\milestones\M1.md') '# M1' -Encoding utf8
-    Set-Content (Join-Path $B 'docs\reports\M1-impl.md') '# M1 impl' -Encoding utf8
+    $B = Join-Path $P 'repo-b'; GitInit $B            # review-pending
+    W (Join-Path $B 'docs\milestones\M1.md') '# M1'
+    W (Join-Path $B 'docs\reports\M1-impl.md') '# M1 impl'
 
-    # repo-c: impl-inprogress (milestone only)
-    $C = Join-Path $P 'repo-c'
-    New-Item -ItemType Directory -Force -Path (Join-Path $C 'docs\milestones') | Out-Null
-    & git -C $C init -q
-    Set-Content (Join-Path $C 'docs\milestones\M1.md') '# M1' -Encoding utf8
+    $C = Join-Path $P 'repo-c'; GitInit $C            # impl-inprogress
+    W (Join-Path $C 'docs\milestones\M1.md') '# M1'
 
-    # plain: non-git folder -> excluded
-    New-Item -ItemType Directory -Force -Path (Join-Path $P 'plain') | Out-Null
-    Set-Content (Join-Path $P 'plain\readme.txt') 'x' -Encoding utf8
+    $D = Join-Path $P 'repo-d'; GitInit $D            # needs-fix (blocked verdict)
+    W (Join-Path $D 'docs\milestones\M1.md') '# M1'
+    W (Join-Path $D 'docs\reports\M1-impl.md') '# M1 impl'
+    W (Join-Path $D 'docs\reports\M1-review.md') ("## release verdict`n`n**" + $BAD + "** (test failed) -- needs fix`n")
 
-    # notide: git repo but no tide artifacts -> excluded
-    $ND = Join-Path $P 'notide'; New-Item -ItemType Directory -Force -Path $ND | Out-Null
-    & git -C $ND init -q
-    Set-Content (Join-Path $ND 'file.txt') 'x' -Encoding utf8
+    $E = Join-Path $P 'repo-e'; GitInit $E            # milestone-needed
+    W (Join-Path $E 'package.json') '{ "version": "0.1.0" }'
+    W (Join-Path $E '.tide\phase') 'idle'
+
+    W (Join-Path $P 'plain\readme.txt') 'x'           # non-git -> excluded
+    $ND = Join-Path $P 'notide'; GitInit $ND; W (Join-Path $ND 'file.txt') 'x'   # no tide artifacts -> excluded
+    $H = Join-Path $P '.hidden-svc'; GitInit $H; W (Join-Path $H 'docs\milestones\M1.md') '# M1'  # hidden -> excluded
 
     # --- scenarios ---
-    $got = (Discover $P) -join ','
-    Chk "discover: tide repos only (plain/notide excluded)" $got 'repo-a,repo-b,repo-c'
-    Chk "classify repo-a = release-ready" (Classify $A) 'release-ready'
-    Chk "classify repo-b = review-pending" (Classify $B) 'review-pending'
-    Chk "classify repo-c = impl-inprogress" (Classify $C) 'impl-inprogress'
+    Chk "discover: tide repos only (plain/notide/.hidden excluded)" ((Discover $P) -join ',') 'repo-a,repo-b,repo-c,repo-d,repo-e'
+    Chk "classify repo-a = release-ready"    (Classify $A) 'release-ready'
+    Chk "classify repo-b = review-pending"   (Classify $B) 'review-pending'
+    Chk "classify repo-c = impl-inprogress"  (Classify $C) 'impl-inprogress'
+    Chk "classify repo-d = needs-fix (blocked)" (Classify $D) 'needs-fix'
+    Chk "classify repo-e = milestone-needed" (Classify $E) 'milestone-needed'
+    Chk "hidden dir (.hidden-svc) not discovered" ([bool]((Discover $P) -match 'hidden')).ToString() 'False'
+    Chk "cross-summary 5 buckets 1:1" (Summarize $P) 'release=1 review=1 impl=1 milestone=1 fix=1'
 
-    # graceful degrade: parent with zero tide repos -> empty discovery
     $EMPTY = Join-Path $sbx 'empty'; New-Item -ItemType Directory -Force -Path (Join-Path $EMPTY 'just-a-folder') | Out-Null
     $e = (Discover $EMPTY) -join ','
     Chk "discover 0 -> graceful degrade (empty)" $(if ($e) { $e } else { 'EMPTY' }) 'EMPTY'
@@ -113,5 +125,5 @@ finally {
 }
 
 if ($script:fail -ne 0) { exit 1 }
-Write-Host "# fleet discovery/classification/degrade confirmed (reference impl)"
+Write-Host "# fleet discovery / 5-position classify / 1:1 summary / hidden-skip / degrade confirmed"
 exit 0
