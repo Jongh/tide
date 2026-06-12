@@ -5,6 +5,13 @@ argument-hint: "v0.1.0 (생략 시 리뷰보고서의 추천 버전 기준)"
 릴리즈를 진행해줘. 버전은 "$ARGUMENTS"로 지정할 수 있어 (예: /tide:release v0.1.0).
 생략하면 리뷰보고서의 추천 버전으로, 그것도 없으면 버전 파일의 현재 버전을 기준으로 판단해줘.
 
+**대상 레포**: 시작 시 대상 레포 루트를 정한다 — 기본은 세션 레포(현행 단일 레포 동작 그대로),
+상위 폴더 단일 세션에서 특정 자식 레포를 지시받으면 그 자식 레포 루트. 버전 파일·`CHANGELOG.md`·
+`.tide/phase`·테스트·`git add/commit/tag/push`는 모두 **대상 레포 루트 기준/cwd**로 수행한다.
+`git push`의 대상 브랜치·remote는 가정(`origin main`)을 고정하지 말고 **대상 레포의 실제 기본
+브랜치·remote**에 맞춘다(레포마다 다를 수 있음). 상세·격리 규약은 `docs/conventions.md`의
+"멀티 레포 / 대상 레포" 절.
+
 프리플라이트 (하나라도 실패하면 git 작업 없이 중단하고 사유를 보고):
 1. 대상 마일스톤(M{N})의 docs/reports/M{N}-review.md 릴리즈 판정이 "가능"인지 확인
    — 판정이 "불가"이거나 보고서가 없으면 중단. 단, 사용자가 버전 인자를 주며 강행
@@ -28,8 +35,8 @@ argument-hint: "v0.1.0 (생략 시 리뷰보고서의 추천 버전 기준)"
    두므로 건드리지 않는다. `docs/conventions.md`의 "버전·CHANGELOG" 규약 참조)
 3. git add → git commit ("Release {버전}: {핵심 변경사항 한 줄 요약}")
 4. git tag {버전}
-5. git push origin main
-6. git push origin {버전}
+5. git push {remote} {기본 브랜치}  — 대상 레포의 실제 remote·기본 브랜치 (기본 추정: origin/main, 다르면 그에 맞춤)
+6. git push {remote} {버전}
 
 완료 후 .tide/phase를 `idle`로 되돌리고 결과를 보고해줘.
 
