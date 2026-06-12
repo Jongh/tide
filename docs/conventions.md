@@ -18,6 +18,7 @@ tide는 porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴�
                           /tide:status      — 언제든 현재 위치 확인 (읽기 전용)
                           /tide:fleet       — 여러 자식 레포 교차 개요 (읽기 전용)
                           /tide:fleet-cycle — 그 순서대로 milestone→review 자동 실행 (멀티 레포, release 제외)
+                          /tide:fleet-verify — 통합 훅으로 레포 간 통합 검증 (멀티 레포, verification-only)
 ```
 
 `/tide:status`·`/tide:fleet`은 **사이클 단계가 아니다** — kickoff→…→release 흐름 밖에 있는
@@ -121,18 +122,24 @@ tide는 porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴�
   처리 순서(피의존 먼저)를 정하고 각 레포 루트에 앵커해 그 레포의 `/tide:cycle` 의미를 돌린다.
   **release는 제외** — 부수효과 분리상 레포별 수동으로 유지한다(아래 불변 참조). 아래
   "교차 사이클 자동화 (`/tide:fleet-cycle`)" 절이 그 단일 원본이다.
-- **④ 4층 — 통합 검증**: 프로젝트 정의 통합 테스트 훅으로 자식 레포들을 가로지르는 통합을
-  검증한다.
+- **④ 4층 — 통합 검증 (활성 — 이번 마일스톤)**: 프로젝트 정의 통합 테스트 훅으로 자식
+  레포들을 가로지르는 통합을 검증한다(`/tide:fleet-verify`). 각 레포가 각자 사이클을 통과한
+  뒤 release 전에, 레포를 가로지르는 통합을 부모 레벨 훅(`.tide-fleet/integration`, 옵트인)으로
+  한 번 검증한다 — **verification-only**(git·release 없음). 아래 "통합 검증 (`/tide:fleet-verify`)"
+  절이 그 단일 원본이다.
 
-**4층은 후속 마일스톤**이다 — 이번 마일스톤은 1·2층(가시성·의존성 선언, 구현됨) 위에
-**3층(교차 사이클 자동화)**을 올린다.
+이로써 오케스트레이션 로드맵 1~4층이 모두 완성된다 — 1·2·3층(가시성·의존성 선언·교차
+사이클 자동화, 구현됨) 위에 이번 마일스톤이 **4층(통합 검증)**을 올린다.
 
 ### 부수효과 분리 불변
 
 멀티 레포 토대에서도 부수효과 분리 원칙(위 "사이클" 절)은 그대로다. **2층(의존성 인식)에서도
 동일하다** — 의존성 그래프로 권장 순서를 산출해도 fleet은 그 순서를 제안만 한다. **3층(교차
 사이클 자동화)에서도 동일하다** — fleet-cycle은 milestone→review까지만 자동화하고 release·
-cross-repo git은 자동화하지 않는다(아래 "교차 사이클 자동화" 절 참조).
+cross-repo git은 자동화하지 않는다(아래 "교차 사이클 자동화" 절 참조). **4층(통합 검증)에서도
+동일하다** — fleet-verify는 통합 훅(검증/테스트 명령)을 실행하되 git commit/tag/push·release·
+cross-repo git을 하지 않고, **어떤 레포의 `.tide/phase`도 `release`로 쓰지 않는다**(아래 "통합
+검증" 절 참조). verification-only다.
 
 - 오케스트레이션은 **cross-repo `git commit/tag/push`를 자동화하지 않는다**. release는 항상
   **레포별 수동**(`/tide:release`)이며, tide-guard와 레포별 격리(위 "멀티 레포 / 대상 레포"
@@ -279,6 +286,54 @@ milestone→review를 자동 실행**하는 행위 커맨드다 — release는 �
 - **발견 0 강등**: 자식 tide 레포를 못 찾으면 단일 레포로 graceful 강등한다(현재 레포
   `/tide:cycle` 권유) — 단일 레포·미선언 동작 불변(옵트인 가산).
 
+### 통합 검증 (`/tide:fleet-verify`)
+
+4층(통합 검증)의 **단일 원본**이다. `/tide:fleet-verify` 스킬·실증이 이를 인용한다. 자식 레포가
+각자 사이클을 통과해도 "각 서비스가 각자 통과"와 "서비스들이 **함께** 동작"은 다르다 —
+fleet-verify는 release 전에 레포를 가로지르는 통합을 프로젝트 정의 훅으로 한 번 검증한다.
+**verification-only**(git·release 없음, 아래 불변).
+
+**통합 훅 (`.tide-fleet/integration`, 옵트인·parent-level)** — 레포 간 통합 검증 명령의 단일
+원본이다.
+
+- **위치·형식**: 대상 부모(기본 = 세션 cwd, 선택 인자로 경로)의 `.tide-fleet/integration` 파일.
+  내용은 통합 검증으로 실행할 **명령(들)**(셸 명령 한 줄 이상, 빈 줄·`#`로 시작하는 주석 무시,
+  선두 UTF-8 BOM 제거). **부모 cwd에서 실행**한다(예: `docker compose up -d && npm run
+  integration-test`).
+- **parent-level(설계 결정)**: 의존 선언(`.tide/deps`)은 레포별(탈중앙, 각 레포가 자기 의존을
+  선언)이지만, **통합은 단일 레포가 소유하지 않는 cross-repo 개념**(어느 한 레포의 통합이 아니라
+  fleet 전체의 통합)이므로 훅은 **대상 부모 레벨**에 둔다.
+- **옵트인·하위 호환**: 파일이 없거나 유효 줄이 0이면 **통합 훅 미선언** — fleet-verify는
+  "통합 훅 미선언, 검증 생략"을 안내하고 graceful 종료한다. 단일 레포·미선언 동작은 현행 그대로.
+- **발견 무시**: `.tide-fleet/`는 **숨김(dot) 디렉터리**라 fleet 발견(직속·git·tide 산출물·숨김
+  무시, 위 "발견 규약")에서 자식 레포로 잡히지 않는다 — 1~3층과 충돌하지 않는다.
+
+**`/tide:fleet-verify` — 통합 검증 실행**
+
+- **발견·대상**: fleet 규약으로 자식 tide 레포를 발견(직속 1단계·git·tide 산출물·숨김 무시)해
+  통합 대상 레포 목록을 보고한다. 발견 0이면 단일 레포로 graceful 강등(현재 레포 `/tide:status`
+  권유).
+- **실행·보고**: 통합 훅을 **부모 cwd에서 실행**하고 결과를 보고한다 — **exit 0 = 통합 pass**,
+  비0 = **통합 fail**(실패 출력 요약 + 관련 레포). 훅 미선언이면 검증 생략 안내.
+- **verification-only(불변)**: fleet-verify는 git commit/tag/push·release·cross-repo git을 하지
+  않고, **어떤 레포의 `.tide/phase`도 `release`로 쓰지 않는다**. 통합 훅도 검증/테스트 명령이어야
+  하며(git·release 금지 — 훅 작성자 책임), tide-guard는 phase≠release인 레포의 git을 막는
+  **백스톱**(release 차단기가 아닌 phase 잠금 — 위 fleet-cycle 백스톱 설명과 동일)이다. 단, **통합
+  훅이 자식 레포에서 git을 시도하고 그 자식이 stale phase=release**(중단된 수동 release 잔재)면 가드가
+  풀릴 수 있으므로(M18 stale-release 사각), 훅에 **cross-repo git을 두지 않으며** 의심 시 처리 전
+  자식 phase의 release 잔재를 점검·정리한다(fleet-cycle "사전 점검"과 동일 취지).
+- **출력**: ① 통합 대상 레포 목록(발견), ② 통합 훅 명령(요약), ③ **통합 결과**(pass/fail + 실패
+  시 요약), ④ 다음 안내(pass면 "이제 release 핸드오프 순서대로 수동 `/tide:release`", fail이면
+  "통합 수정 후 재검증").
+
+**fleet-cycle ↔ fleet-verify 흐름**
+
+- 권장 순서: **`/tide:fleet-cycle`**(각 레포 milestone→review 의존성 순서 자동) →
+  **`/tide:fleet-verify`**(통합 검증) → 통합 pass면 fleet-cycle의 release 핸드오프 순서대로
+  **수동 `/tide:release`**.
+- fleet-cycle은 통합을 자동 실행하지 않는다 — release 핸드오프 출력에 "release 전
+  `/tide:fleet-verify`로 통합 확인(통합 훅 선언 시)" 안내만 두고, fleet-verify가 별도 명시 호출이다.
+
 ## 템플릿
 
 - 각 스킬 디렉터리에 동봉된 `template.md`가 마일스톤·보고서 **형식의 단일 원본**이다:
@@ -362,6 +417,7 @@ release 1번 검사는 사용자가 버전 인자와 함께 강행 의사를 명
 | status | 파일 생성·수정 / git 작업 | 프롬프트 |
 | fleet | 파일 생성·수정 / `.tide/phase` 변경 / git 작업 | 프롬프트 |
 | fleet-cycle | git commit/tag/push (release·cross-repo git 비자동화) | 프롬프트 + hook(git) |
+| fleet-verify | git commit/tag/push / release / 어떤 레포 phase=release 쓰기 (verification-only) | 프롬프트 + hook(git) |
 | retro | 회고 문서(`docs/reports/retro.md`) 외 파일 생성·수정 / `.tide/phase` 변경 / git 작업 | 프롬프트 |
 | cycle | git commit / git tag / git push (release 단계는 체이닝에서 제외) | 프롬프트 + hook(git) |
 | release | (없음 — 유일하게 git 조작 허용) | 프리플라이트 통과 필요 |
@@ -408,4 +464,10 @@ tide는 **v1.0.0부터 아래를 안정(stable) 계약으로 선언**한다. 안
   **v1.5.0부터 가산**으로 더해진다 — **release는 제외**(milestone→review만, git 금지). 위 8종
   안정 계약·읽기 전용 fleet 서술은 그대로이며, 새 행위 커맨드도 부수효과 분리 불변(release·
   cross-repo git 비자동화)을 지킨다(상세 규약은 위 "교차 사이클 자동화" 절).
+- **가산 커맨드 — `/tide:fleet-verify` (v1.6.0부터)**: fleet·fleet-cycle과 별개로, 자식 레포를
+  가로지르는 통합을 부모 레벨 훅(`.tide-fleet/integration`, 옵트인)으로 검증하는 커맨드
+  `/tide:fleet-verify`가 **v1.6.0부터 가산**으로 더해진다 — **verification-only**(통합 훅은 검증/
+  테스트 명령이며 git commit/tag/push·release·cross-repo git 없음, 어떤 레포 phase=release 미기록).
+  위 8종 안정 계약·읽기 전용 fleet·fleet-cycle 서술은 그대로이며, 이 커맨드도 부수효과 분리
+  불변을 지킨다(상세 규약은 위 "통합 검증" 절).
 <!-- --8<-- [end:body] -->

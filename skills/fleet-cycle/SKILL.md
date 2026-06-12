@@ -108,6 +108,9 @@ contract-blocked·중단·downstream-skip 레포는 **사유와 함께 보류**�
 `보류 — svc-notify: skip (upstream svc-orders 중단)`). **release는 사용자 몫**임을 명시한다 —
 순서·핸드오프는 **제안**이며 release 시점·실행은 사용자가 판단한다.
 
+release 전 `/tide:fleet-verify`로 자식 레포 통합을 확인한다(통합 훅 선언 시). (fleet-cycle은
+통합을 자동 실행하지 않는다 — 안내만; fleet-verify가 별도 명시 호출.)
+
 ## 부수효과 분리 (불변)
 
 fleet-cycle은 milestone→review만 자동화하고, 순서·핸드오프는 **제안**이다. release 시점·실행은

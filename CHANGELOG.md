@@ -8,6 +8,11 @@
      릴리즈 노트만 인클루드하기 위한 마커다. 위 제목·안내 줄은 사이트에 부적절해 제외된다.
      렌더에는 영향 없음. -->
 <!-- --8<-- [start:notes] -->
+### [v1.6.0]
+- **오케스트레이션 4층 — 통합 검증(`/tide:fleet-verify`, 11번째 커맨드)**: 자식 tide 레포들이 각자 사이클을 통과한 뒤, 레포를 가로지르는 통합을 대상 부모의 통합 훅(`.tide-fleet/integration`, 옵트인·parent-level)으로 검증한다. fleet-verify가 자식 레포를 발견해 통합 대상으로 보고하고, 부모 cwd에서 훅을 실행해 **exit 0 = 통합 pass / 비0 = fail**(실패 요약)을 보고한 뒤 "통합 pass면 release 핸드오프 순서대로 수동 release"를 안내한다. 훅 미선언이면 통합 검증 생략(옵트인·graceful).
+- **verification-only(불변)**: fleet-verify는 git commit/tag/push·release·cross-repo git을 하지 않고, 어떤 레포의 `.tide/phase`도 `release`로 쓰지 않는다. 통합 훅은 검증/테스트 명령이어야 한다 — tide-guard는 phase≠release인 레포의 git을 막는 백스톱(release 차단기가 아닌 phase 잠금)이며, 통합 훅에 cross-repo git을 두지 않도록 안내한다.
+- **오케스트레이션 로드맵 1~4층 완성**: 가시성(fleet) → 의존성 선언·계약 비교(`.tide/deps`) → 교차 사이클 자동화(fleet-cycle) → 통합 검증(fleet-verify). 전 계층에서 부수효과 분리 불변(release·cross-repo git 비자동화) 보존. `tests/fleet-verify/` 하니스가 훅 발견/파싱·옵트인 생략·pass/fail·verification-only(스킬 산문 결합)·`.tide-fleet` 발견 무시를 sh·ps1 양쪽 각 18/18 통과. 옵트인 가산 — 단일 레포·훅 미선언 동작 불변, 커맨드 10종·1.0 계약 불변.
+
 ### [v1.5.0]
 - **오케스트레이션 3층 — 교차 사이클 자동화(`/tide:fleet-cycle`, 10번째 커맨드)**: 상위 폴더 단일 세션에서 발견된 자식 tide 레포들의 `milestone → impl → review`를 `.tide/deps` 의존성 순서(위상정렬·피의존 먼저)로 교차 자동 실행하고, 의존성 순서 release 핸드오프를 제시한다. upstream-behind 계약(M17)이 있는 레포는 핸드오프에서 `contract-blocked`로, 사이클이 중단된 레포의 downstream은 `skip`으로 보류 표기된다. 발견 0이면 단일 레포로 graceful 강등.
 - **release·cross-repo git 자동화 제외(불변)**: fleet-cycle은 milestone→review까지만 자동화한다 — 어떤 레포에서도 release를 실행하지 않고, 어떤 레포의 `.tide/phase`도 `release`로 쓰지 않으며, git commit/tag/push·cross-repo git을 자동 실행하지 않는다. release는 순서 있는 핸드오프로 사용자에게 넘긴다. tide-guard는 phase≠release인 레포의 git을 막는 백스톱이고, **사전 점검**이 처리 전 phase=release 잔재(이전 중단된 수동 release) 레포를 제외해 백스톱이 풀린 채 도는 경로를 막는다.
