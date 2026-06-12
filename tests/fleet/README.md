@@ -14,7 +14,7 @@ fleet은 **프롬프트 스킬**이라 실행 바이너리가 없다(tide-guard�
 > **결정적 핵심**(발견·분류·강등)만 스크립트로 덮고, **advisory 서술 품질**은 아래 세션 레벨
 > 수동 절차로 분리한다(M13 앵커링 수동 절차와 동일 분리).
 
-### 시나리오 (sh·ps1 동일, 각 15건)
+### 시나리오 (sh·ps1 동일, 각 23건)
 
 러너는 임시 상위 폴더 아래에 서로 다른 사이클 위치의 자식들을 만든다:
 
@@ -51,6 +51,28 @@ fleet은 **프롬프트 스킬**이라 실행 바이너리가 없다(tide-guard�
 순서에 존재(위상 제약 없음), ⑦ 미존재 형제명(`nowhere`)은 무시(크래시 없이 순서 4노드 유지),
 ⑧ 순환(a↔b)은 `CYCLE` 센티넬로 감지 — fleet 스킬은 이때 상태 기반 순서로 폴백한다(advisory).
 fleet은 순서를 **제안만** 하며 cross-repo git을 자동 실행하지 않는다(부수효과 분리 불변).
+
+### 계약 버전 비교 + BOM 내성 (M17 — `.tide/deps` `>= 버전` 제약·semver·선두 BOM)
+
+`.tide/deps` 의존 줄의 **선택적 `>= 버전` 제약**(`<형제명> >= <버전>`)을 의존 대상의 현재 버전
+(`package.json` `version`)과 **semver(major.minor.patch, 선행 `v` 선택) 비교**해 미달이면 위반
+(`upstream behind`)을 플래그한다. **`>=`만** 지원하고 그 외 연산자는 제약을 무시한다. 버전 파싱
+불가면 비교를 생략한다(크래시·오탐 없음). 파서는 **선두 UTF-8 BOM(`EF BB BF`)을 제거**해 BOM 붙은
+첫 줄(주석·의존명)도 올바로 파싱한다. 버전 제약은 위상정렬 순서를 바꾸지 않는다(이름 의존만 토포 반영).
+
+| 픽스처 | `.tide/deps` 구성 | auth 현재 | 검증 |
+|---|---|---|---|
+| `contract/ok` | `auth >= v0.2.0` | 0.2.0 | **만족**(satisfied — 위반 아님) |
+| `contract/behind` | `auth >= v0.3.0` | 0.2.0 | **위반**(violation — upstream behind) |
+| `contract/otherop` | `auth > v0.1.0` | 0.2.0 | **무시**(none — `>=` 외 연산자, 위반 단정 안 함) |
+| `contract/badver` | `auth >= banana` | 0.2.0 | **비교 생략**(skip — 비표준 버전, 크래시 없음) |
+| `bom/svc` | **선두 BOM** + `# dep file` 주석 + `auth >= v0.2.0` | 0.2.0 | BOM+주석 첫 줄 무시·의존명 파싱·계약 **satisfied** |
+| `bom2/svc` | **선두 BOM** + `auth`(주석 없음) | — | BOM+의존명 첫 줄 이름 매칭 정상 |
+
+검증: ⑨ 계약 만족(`satisfied`)·⑩ 위반(`violation`, upstream behind)·⑪ `>=` 외 연산자 무시
+(`none`)·⑫ 버전 파싱 불가 시 비교 생략(`skip`)·⑬ 버전 제약 줄도 토포 이름 의존 유지(`auth` 먼저)·
+⑭ BOM 붙은 deps의 첫 줄(주석/의존명) 정상 파싱 + BOM'd 줄의 계약 비교 정상. 경고는 **advisory만**
+— fleet은 순서를 바꾸거나 차단·실행하지 않는다(읽기 전용·부수효과 분리 불변).
 
 > 분류·요약·advisory 인자의 정규 taxonomy 단일 원본은 `docs/conventions.md` "멀티 레포
 > 오케스트레이션" 절이며, 이 러너는 그 결정적 동작을 회귀 고정한다(advisory→`/tide:impl M{N}`·

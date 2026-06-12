@@ -73,16 +73,78 @@ function Summarize($parent) {
 }
 
 # --- .tide/deps parse reference: one sibling repo name per line, skip #-comments / blanks, trim ---
+# M17: strip a leading UTF-8 BOM (EF BB BF) before parsing; a dep line may carry an optional
+#   `>= <version>` constraint -> `<name>[ >= <version>]`. Only `>=` supported; other operators
+#   leave the constraint ignored (name only). ReadDeps emits names only (for topo sort); the
+#   version constraint is queried separately via DepRequiredVersion.
+function StripBom($s) {
+    if ($null -ne $s -and $s.Length -gt 0 -and [int]$s[0] -eq 0xFEFF) { return $s.Substring(1) }
+    return $s
+}
+# read raw lines with explicit BOM strip on the first line (independent of Get-Content's own handling)
+function DepLines($f) {
+    $lines = @(Get-Content $f)
+    if ($lines.Count -gt 0) { $lines[0] = StripBom $lines[0] }
+    return $lines
+}
+# strip a trailing `[<>=]...` operator+version clause, return the bare name
+function DepName($line) {
+    return ($line -replace '\s*[<>=].*$', '').Trim()
+}
 function ReadDeps($repoDir) {
     $f = Join-Path $repoDir '.tide\deps'
     if (-not (Test-Path $f)) { return @() }
     $out = @()
-    foreach ($line in (Get-Content $f)) {
+    foreach ($line in (DepLines $f)) {
         $t = $line.Trim()
         if ($t -eq '' -or $t.StartsWith('#')) { continue }   # blank / comment
-        $out += $t
+        $out += (DepName $t)
     }
     return $out
+}
+# required version (>= only) for a given dep name; '' if none or unsupported operator
+function DepRequiredVersion($repoDir, $depName) {
+    $f = Join-Path $repoDir '.tide\deps'
+    if (-not (Test-Path $f)) { return '' }
+    foreach ($line in (DepLines $f)) {
+        $t = $line.Trim()
+        if ($t -eq '' -or $t.StartsWith('#')) { continue }
+        if ((DepName $t) -ne $depName) { continue }
+        $m = [regex]::Match($t, '>=\s*(\S+)')                 # only `>=`; other ops -> no match
+        if ($m.Success) { return $m.Groups[1].Value }
+        return ''
+    }
+    return ''
+}
+# current version of a repo (package.json "version"); '' if absent
+function ReadVersion($repoDir) {
+    $f = Join-Path $repoDir 'package.json'
+    if (-not (Test-Path $f)) { return '' }
+    $m = [regex]::Match((Get-Content $f -Raw), '"version"\s*:\s*"([^"]*)"')
+    if ($m.Success) { return $m.Groups[1].Value }
+    return ''
+}
+# semver compare (major.minor.patch numeric, leading v optional): satisfied | violation | skip
+function SemverGe($current, $required) {
+    $cur = $current -replace '^v', ''
+    $req = $required -replace '^v', ''
+    $rx = '^\d+\.\d+\.\d+$'
+    if ($cur -notmatch $rx -or $req -notmatch $rx) { return 'skip' }
+    $c = $cur.Split('.'); $r = $req.Split('.')
+    for ($i = 0; $i -lt 3; $i++) {
+        $ci = [int]$c[$i]; $ri = [int]$r[$i]
+        if ($ci -ne $ri) { if ($ci -gt $ri) { return 'satisfied' } else { return 'violation' } }
+    }
+    return 'satisfied'
+}
+# contract check: satisfied | violation | skip | none
+#   none = no version constraint (name dep only); skip = version unparseable
+function CheckContract($parent, $repo, $dep) {
+    $req = DepRequiredVersion (Join-Path $parent $repo) $dep
+    if ($req -eq '') { return 'none' }
+    $cur = ReadVersion (Join-Path $parent $dep)
+    if ($cur -eq '') { return 'skip' }
+    return (SemverGe $cur $req)
 }
 
 # --- dependency-aware order reference: topological sort (depended-upon first) + cycle detection ---
@@ -203,6 +265,38 @@ try {
     MkRepo (Join-Path $CY 'b'); W (Join-Path $CY 'b\.tide\deps') 'a'
     Chk "cycle fallback: a<->b cycle detected (CYCLE)" (TopoSort $CY) 'CYCLE'
 
+    # --- contract version comparison (M17): `>= version` constraint + semver + upstream-behind ---
+    # auth (version file 0.2.0) <- dependants with different constraints / operators.
+    $CT = Join-Path $sbx 'contract'; New-Item -ItemType Directory -Force -Path $CT | Out-Null
+    MkRepo (Join-Path $CT 'auth'); W (Join-Path $CT 'auth\package.json') '{ "version": "0.2.0" }'  # current 0.2.0
+    MkRepo (Join-Path $CT 'ok');      W (Join-Path $CT 'ok\.tide\deps')      'auth >= v0.2.0'   # satisfied
+    MkRepo (Join-Path $CT 'behind');  W (Join-Path $CT 'behind\.tide\deps')  'auth >= v0.3.0'   # violation
+    MkRepo (Join-Path $CT 'otherop'); W (Join-Path $CT 'otherop\.tide\deps') 'auth > v0.1.0'    # other op -> ignored
+    MkRepo (Join-Path $CT 'badver');  W (Join-Path $CT 'badver\.tide\deps')  'auth >= banana'   # unparseable -> skip
+
+    Chk "contract satisfied: auth>=0.2.0, current 0.2.0"        (CheckContract $CT 'ok' 'auth')      'satisfied'
+    Chk "contract violation: auth>=0.3.0, current 0.2.0 (upstream behind)" (CheckContract $CT 'behind' 'auth') 'violation'
+    Chk "other operator ignored: auth > v0.1.0 (not a violation)" (CheckContract $CT 'otherop' 'auth') 'none'
+    Chk "unparseable version: auth>=banana (compare skipped)"   (CheckContract $CT 'badver' 'auth')  'skip'
+    # constraint lines still topo-sort by name only (version does not break ordering)
+    $ctord = TopoSort $CT
+    $cia = IdxOf $ctord 'auth'; $cib = IdxOf $ctord 'behind'
+    Chk "contract: version line keeps name dep in topo (auth first)" $(if ($cia -ge 0 -and $cib -ge 0 -and $cia -lt $cib) { 'yes' } else { 'no' }) 'yes'
+
+    # --- BOM tolerance (M17): a .tide/deps written WITH a leading UTF-8 BOM parses correctly ---
+    # Set-Content -Encoding utf8 (the W helper) emits a BOM in PS 5.1, so these files carry a BOM.
+    # First line a `#` comment, second a dependency -> comment skipped + dep name matched.
+    $BM = Join-Path $sbx 'bom'; New-Item -ItemType Directory -Force -Path $BM | Out-Null
+    MkRepo (Join-Path $BM 'auth'); W (Join-Path $BM 'auth\package.json') '{ "version": "0.2.0" }'
+    MkRepo (Join-Path $BM 'svc'); W (Join-Path $BM 'svc\.tide\deps') "# dep file`nauth >= v0.2.0"  # BOM + comment + dep
+    Chk "BOM tolerance: BOM+comment first line skipped, dep parsed" ((ReadDeps (Join-Path $BM 'svc')) -join ',') 'auth'
+    Chk "BOM tolerance: contract compare on BOM'd line (satisfied)" (CheckContract $BM 'svc' 'auth') 'satisfied'
+    # first line itself a BOM+dependency name (no comment) -> BOM does not break name match
+    $BM2 = Join-Path $sbx 'bom2'; New-Item -ItemType Directory -Force -Path $BM2 | Out-Null
+    MkRepo (Join-Path $BM2 'auth')
+    MkRepo (Join-Path $BM2 'svc'); W (Join-Path $BM2 'svc\.tide\deps') 'auth'   # BOM + dep name (no comment)
+    Chk "BOM tolerance: BOM+dep-name first line matches" ((ReadDeps (Join-Path $BM2 'svc')) -join ',') 'auth'
+
     Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail)"
 }
 finally {
@@ -210,5 +304,5 @@ finally {
 }
 
 if ($script:fail -ne 0) { exit 1 }
-Write-Host "# fleet discovery / 5-position classify / 1:1 summary / hidden-skip / degrade / topo-sort / cycle-fallback confirmed"
+Write-Host "# fleet discovery / 5-position classify / 1:1 summary / hidden-skip / degrade / topo-sort / cycle-fallback / contract-version / BOM-tolerance confirmed"
 exit 0

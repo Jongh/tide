@@ -67,15 +67,72 @@ summarize() { # <parent> → "release=N review=N impl=N milestone=N fix=N"
 }
 
 # --- .tide/deps 파싱(참조 구현): 한 줄에 형제 레포명 하나, # 주석·빈 줄 무시, 트림 ---
+# 선두 UTF-8 BOM(EF BB BF) 제거(M17). 의존 줄은 선택적 `>= 버전` 제약을 가질 수 있다(M17):
+#   <형제명>[ >= <버전>]. `>=`만 지원, 그 외 연산자는 제약 무시(이름만). read_deps는 이름만 방출
+#   (위상정렬용); 버전 제약은 dep_required_version으로 따로 조회한다.
+strip_bom() { # stdin → 선두 BOM 제거한 stdout
+    sed '1s/^\xEF\xBB\xBF//'
+}
 read_deps() { # <repo-dir> → 의존 형제명 줄 출력 (없으면 빈 출력)
     f="$1/.tide/deps"
     [ -f "$f" ] || return 0
-    while IFS= read -r line || [ -n "$line" ]; do
+    strip_bom < "$f" | while IFS= read -r line || [ -n "$line" ]; do
         # 앞뒤 공백 트림
         line=$(printf '%s' "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
         case "$line" in ''|'#'*) continue ;; esac           # 빈 줄·주석 무시
-        echo "$line"
-    done < "$f"
+        # `<name> >= <ver>` → 이름만(연산자/버전 제거). `>=` 외 연산자는 이름만 남도록 트림.
+        name=$(printf '%s' "$line" | sed 's/[[:space:]]*[<>=].*$//' | sed 's/[[:space:]]*$//')
+        echo "$name"
+    done
+}
+# 특정 의존 대상의 요구 버전(`>=`만) 추출. 없으면 빈 출력(제약 없음 또는 미지원 연산자).
+dep_required_version() { # <repo-dir> <dep-name> → 요구 버전(없으면 빈)
+    f="$1/.tide/deps"
+    [ -f "$f" ] || return 0
+    strip_bom < "$f" | while IFS= read -r line || [ -n "$line" ]; do
+        line=$(printf '%s' "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+        case "$line" in ''|'#'*) continue ;; esac
+        name=$(printf '%s' "$line" | sed 's/[[:space:]]*[<>=].*$//' | sed 's/[[:space:]]*$//')
+        [ "$name" = "$2" ] || continue
+        # `>=`만: `name >= ver` 형태에서만 버전 추출. 다른 연산자는 무시(빈).
+        case "$line" in
+            *'>='*)
+                ver=$(printf '%s' "$line" | sed 's/^.*>=[[:space:]]*//' | sed 's/[[:space:]].*$//')
+                printf '%s\n' "$ver"
+                ;;
+        esac
+        return 0
+    done
+}
+# 레포의 현재 버전(package.json "version" 필드). 없으면 빈.
+read_version() { # <repo-dir> → X.Y.Z (없으면 빈)
+    f="$1/package.json"
+    [ -f "$f" ] || return 0
+    sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$f" | head -1
+}
+# semver 비교: 현재 >= 요구 인지(major.minor.patch 숫자, 선행 v 선택).
+# 반환: satisfied | violation | skip(파싱 불가). echo로 결과 문자열.
+semver_ge() { # <current> <required> → satisfied|violation|skip
+    cur=$(printf '%s' "$1" | sed 's/^v//')
+    req=$(printf '%s' "$2" | sed 's/^v//')
+    # major.minor.patch 숫자 검증
+    echo "$cur" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo skip; return 0; }
+    echo "$req" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo skip; return 0; }
+    cmaj=${cur%%.*}; crest=${cur#*.}; cmin=${crest%%.*}; cpat=${crest#*.}
+    rmaj=${req%%.*}; rrest=${req#*.}; rmin=${rrest%%.*}; rpat=${rrest#*.}
+    if [ "$cmaj" -ne "$rmaj" ]; then [ "$cmaj" -gt "$rmaj" ] && echo satisfied || echo violation; return 0; fi
+    if [ "$cmin" -ne "$rmin" ]; then [ "$cmin" -gt "$rmin" ] && echo satisfied || echo violation; return 0; fi
+    if [ "$cpat" -ne "$rpat" ]; then [ "$cpat" -gt "$rpat" ] && echo satisfied || echo violation; return 0; fi
+    echo satisfied
+}
+# 계약 검사: <parent> <dependant-repo> <dep-name> → satisfied|violation|skip|none
+# none = 버전 제약 없음(이름 의존만). skip = 버전 파싱 불가.
+check_contract() { # <parent> <repo> <dep>
+    req=$(dep_required_version "$1/$2" "$3")
+    [ -n "$req" ] || { echo none; return 0; }
+    cur=$(read_version "$1/$3")
+    [ -n "$cur" ] || { echo skip; return 0; }
+    semver_ge "$cur" "$req"
 }
 
 # --- 의존성 인식 순서(참조 구현): 위상정렬(피의존 우선) + 순환 감지 폴백 ---
@@ -198,7 +255,44 @@ mk_repo "$CY/a"; mkdir -p "$CY/a/.tide"; printf 'b\n' > "$CY/a/.tide/deps"
 mk_repo "$CY/b"; mkdir -p "$CY/b/.tide"; printf 'a\n' > "$CY/b/.tide/deps"
 chk "순환 폴백: a↔b 순환 감지(CYCLE)" "$(toposort "$CY")" "CYCLE"
 
+# --- 계약 버전 비교(M17): `>= 버전` 제약 + semver 비교 + upstream behind 경고 ---
+# auth(버전 파일 0.2.0) ← 의존측들이 서로 다른 제약/연산자로 의존.
+CT="$SBX/contract"; mkdir -p "$CT"
+mk_repo "$CT/auth"; printf '{ "version": "0.2.0" }\n' > "$CT/auth/package.json"   # 현재 0.2.0
+# 계약 만족: auth >= v0.2.0, 현재 0.2.0 → satisfied
+mk_repo "$CT/ok";        mkdir -p "$CT/ok/.tide";       printf 'auth >= v0.2.0\n'  > "$CT/ok/.tide/deps"
+# 계약 위반(upstream behind): auth >= v0.3.0, 현재 0.2.0 → violation
+mk_repo "$CT/behind";    mkdir -p "$CT/behind/.tide";   printf 'auth >= v0.3.0\n'  > "$CT/behind/.tide/deps"
+# 연산자 외 무시: auth > v0.1.0 → 제약 무시(none, 위반 아님)
+mk_repo "$CT/otherop";   mkdir -p "$CT/otherop/.tide";  printf 'auth > v0.1.0\n'   > "$CT/otherop/.tide/deps"
+# 버전 파싱 불가: auth >= banana → 비교 생략(skip)
+mk_repo "$CT/badver";    mkdir -p "$CT/badver/.tide";   printf 'auth >= banana\n'  > "$CT/badver/.tide/deps"
+
+chk "계약 만족: auth>=0.2.0, 현재 0.2.0"        "$(check_contract "$CT" ok auth)"       "satisfied"
+chk "계약 위반: auth>=0.3.0, 현재 0.2.0(upstream behind)" "$(check_contract "$CT" behind auth)" "violation"
+chk "연산자 외 무시: auth > v0.1.0(위반 아님)"  "$(check_contract "$CT" otherop auth)"  "none"
+chk "버전 파싱 불가: auth>=banana(비교 생략)"   "$(check_contract "$CT" badver auth)"   "skip"
+# 제약 줄도 위상정렬엔 이름만 반영(버전이 토포를 깨지 않음)
+ctord=$(toposort "$CT")
+cia=$(idx_of "$ctord" auth); cib=$(idx_of "$ctord" behind)
+chk "계약: 버전 제약 줄도 토포 이름 의존 유지(auth 먼저)" "$([ "$cia" -ge 0 ] && [ "$cib" -ge 0 ] && [ "$cia" -lt "$cib" ] && echo yes || echo no)" "yes"
+
+# --- BOM 내성(M17): 선두 UTF-8 BOM(EF BB BF) 붙은 .tide/deps의 첫 줄이 올바로 파싱 ---
+# 첫 줄이 BOM+주석, 둘째가 의존명 → 주석 무시 + 의존명 정상 인식.
+BM="$SBX/bom"; mkdir -p "$BM"
+mk_repo "$BM/auth"; printf '{ "version": "0.2.0" }\n' > "$BM/auth/package.json"
+mk_repo "$BM/svc"; mkdir -p "$BM/svc/.tide"
+printf '\357\273\277# dep file\nauth >= v0.2.0\n' > "$BM/svc/.tide/deps"   # 선두 BOM + 주석 + 의존
+chk "BOM 내성: BOM+주석 첫 줄 무시, 의존명 정상 파싱" "$(read_deps "$BM/svc" | tr '\n' ',')" "auth,"
+chk "BOM 내성: BOM 붙은 줄의 계약 비교 정상(satisfied)" "$(check_contract "$BM" svc auth)" "satisfied"
+# 첫 줄 자체가 BOM+의존명인 경우(주석 없이)도 BOM이 이름 매칭을 깨지 않음.
+BM2="$SBX/bom2"; mkdir -p "$BM2"
+mk_repo "$BM2/auth"
+mk_repo "$BM2/svc"; mkdir -p "$BM2/svc/.tide"
+printf '\357\273\277auth\n' > "$BM2/svc/.tide/deps"   # 선두 BOM + 의존명(주석 없음)
+chk "BOM 내성: BOM+의존명 첫 줄 이름 매칭" "$(read_deps "$BM2/svc" | tr '\n' ',')" "auth,"
+
 echo
 echo "# 결과: PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ] || exit 1
-echo "# fleet 발견·5분류·1:1 요약·숨김 무시·강등·위상정렬·순환 폴백 확인됨 (참조 구현 기준)"
+echo "# fleet 발견·5분류·1:1 요약·숨김 무시·강등·위상정렬·순환 폴백·계약 버전 비교·BOM 내성 확인됨 (참조 구현 기준)"
