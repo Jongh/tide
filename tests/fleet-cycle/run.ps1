@@ -1,0 +1,264 @@
+# tide fleet-cycle live test (Windows PowerShell 5.1) -- cross-cycle automation deterministic core
+#
+# fleet-cycle is a prompt skill; the actual cycle run (milestone->impl->review) is LLM behavior.
+# This exercises a REFERENCE of its deterministic core (processing order = topo sort / release
+# EXCLUSION invariant / contract upstream-behind -> contract-blocked / downstream skip on failure)
+# against fixtures. The single source is docs/conventions.md "multi-repo orchestration"; the
+# actual cross-cycle run quality is split into README's session-level manual procedure.
+#
+# ASCII-only source (BOM-independent). git mutating verbs live only in setup (init only -- no
+# commits). release/git are NOT automation targets -- this runner actively asserts release is
+# absent from the automated plan.
+#
+# Usage: & tests\fleet-cycle\run.ps1   (exit 0 if all pass, exit 1 if any fail)
+
+$ErrorActionPreference = 'SilentlyContinue'
+
+$sbx = Join-Path ([System.IO.Path]::GetTempPath()) "tide-fleet-cycle-live.$PID"
+if (Test-Path $sbx) { Remove-Item -Recurse -Force $sbx }
+New-Item -ItemType Directory -Force -Path $sbx | Out-Null
+
+$script:pass = 0; $script:fail = 0
+function Chk($desc, $got, $want) {
+    if ($got -eq $want) { $script:pass++; Write-Host ("PASS  {0,-56} ({1})" -f $desc, $got) }
+    else { $script:fail++; Write-Host ("FAIL  {0,-56} (got {1}, want {2})" -f $desc, $got, $want) }
+}
+function W($path, $text) { $d = Split-Path $path -Parent; if (-not (Test-Path $d)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }; Set-Content -Path $path -Value $text -Encoding utf8 }
+function GitInit($d) { New-Item -ItemType Directory -Force -Path $d | Out-Null; & git -C $d init -q }   # dir must exist before init
+
+# --- discovery reference (fleet reuse): immediate children, skip hidden, git repo AND tide artifacts ---
+function IsTideRepo($d) {
+    $isGit = Test-Path (Join-Path $d '.git')
+    if (-not $isGit) { & git -C $d rev-parse --show-toplevel 2>$null | Out-Null; $isGit = ($LASTEXITCODE -eq 0) }
+    if (-not $isGit) { return $false }
+    foreach ($m in @('docs\milestones', '.tide', 'package.json', 'Cargo.toml', 'pyproject.toml', '.claude-plugin\plugin.json')) {
+        if (Test-Path (Join-Path $d $m)) { return $true }
+    }
+    return $false
+}
+function Discover($parent) {
+    Get-ChildItem -Directory $parent -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notlike '.*' -and (IsTideRepo $_.FullName) } | ForEach-Object { $_.Name } | Sort-Object
+}
+
+# --- .tide/deps parse reference (fleet reuse): one sibling name/line, skip #-comments/blanks, trim, BOM strip ---
+function StripBom($s) {
+    if ($null -ne $s -and $s.Length -gt 0 -and [int]$s[0] -eq 0xFEFF) { return $s.Substring(1) }
+    return $s
+}
+function DepLines($f) {
+    $lines = @(Get-Content $f)
+    if ($lines.Count -gt 0) { $lines[0] = StripBom $lines[0] }
+    return $lines
+}
+function DepName($line) { return ($line -replace '\s*[<>=].*$', '').Trim() }
+function ReadDeps($repoDir) {
+    $f = Join-Path $repoDir '.tide\deps'
+    if (-not (Test-Path $f)) { return @() }
+    $out = @()
+    foreach ($line in (DepLines $f)) {
+        $t = $line.Trim()
+        if ($t -eq '' -or $t.StartsWith('#')) { continue }
+        $out += (DepName $t)
+    }
+    return $out
+}
+function DepRequiredVersion($repoDir, $depName) {
+    $f = Join-Path $repoDir '.tide\deps'
+    if (-not (Test-Path $f)) { return '' }
+    foreach ($line in (DepLines $f)) {
+        $t = $line.Trim()
+        if ($t -eq '' -or $t.StartsWith('#')) { continue }
+        if ((DepName $t) -ne $depName) { continue }
+        $m = [regex]::Match($t, '>=\s*(\S+)')
+        if ($m.Success) { return $m.Groups[1].Value }
+        return ''
+    }
+    return ''
+}
+function ReadVersion($repoDir) {
+    $f = Join-Path $repoDir 'package.json'
+    if (-not (Test-Path $f)) { return '' }
+    $m = [regex]::Match((Get-Content $f -Raw), '"version"\s*:\s*"([^"]*)"')
+    if ($m.Success) { return $m.Groups[1].Value }
+    return ''
+}
+function SemverGe($current, $required) {
+    $cur = $current -replace '^v', ''; $req = $required -replace '^v', ''
+    $rx = '^\d+\.\d+\.\d+$'
+    if ($cur -notmatch $rx -or $req -notmatch $rx) { return 'skip' }
+    $c = $cur.Split('.'); $r = $req.Split('.')
+    for ($i = 0; $i -lt 3; $i++) {
+        $ci = [int]$c[$i]; $ri = [int]$r[$i]
+        if ($ci -ne $ri) { if ($ci -gt $ri) { return 'satisfied' } else { return 'violation' } }
+    }
+    return 'satisfied'
+}
+function CheckContract($parent, $repo, $dep) {
+    $req = DepRequiredVersion (Join-Path $parent $repo) $dep
+    if ($req -eq '') { return 'none' }
+    $cur = ReadVersion (Join-Path $parent $dep)
+    if ($cur -eq '') { return 'skip' }
+    return (SemverGe $cur $req)
+}
+
+# --- processing order reference (fleet reuse): topo sort (depended-upon first) + cycle fallback ---
+function TopoSort($parent) {
+    $nodes = @(Discover $parent)
+    if ($nodes.Count -eq 0) { return '' }
+    $edges = @{}
+    foreach ($r in $nodes) {
+        $kept = @()
+        foreach ($dep in (ReadDeps (Join-Path $parent $r))) {
+            if ($nodes -contains $dep) { $kept += $dep }
+        }
+        $edges[$r] = $kept
+    }
+    $remaining = New-Object System.Collections.ArrayList
+    [void]$remaining.AddRange($nodes)
+    $order = @()
+    while ($remaining.Count -gt 0) {
+        $progressed = $false
+        $next = New-Object System.Collections.ArrayList
+        foreach ($r in $remaining) {
+            $ready = $true
+            foreach ($dep in $edges[$r]) {
+                if ($remaining -contains $dep) { $ready = $false; break }
+            }
+            if ($ready) { $order += $r; $progressed = $true } else { [void]$next.Add($r) }
+        }
+        if (-not $progressed) { return 'CYCLE' }
+        $remaining = $next
+    }
+    return ($order -join ' ')
+}
+function IdxOf($orderStr, $name) {
+    $arr = @($orderStr -split '\s+' | Where-Object { $_ -ne '' })
+    for ($i = 0; $i -lt $arr.Count; $i++) { if ($arr[$i] -eq $name) { return $i } }
+    return -1
+}
+
+# === fleet-cycle specific deterministic core ============================
+
+# --- (1) automated plan stage sequence reference: release-exclusion invariant ---
+# fleet-cycle auto-chains only milestone->impl->review per repo. release is NEVER in the auto
+# plan (side-effect separation invariant; tide-guard blocks git at phase != release).
+function PlanStages { return @('milestone', 'impl', 'review') }
+function PlanHasRelease($stages) {
+    foreach ($s in $stages) { if ($s -eq 'release') { return 'yes' } }
+    return 'no'
+}
+
+# --- (2) release handoff classification reference: a separate handoff list, not automation ---
+# review "able" + no contract violation -> release-ready; contract violation (upstream-behind)
+# -> contract-blocked (held). Automation only produces this list; it does not run release.
+function HandoffClass($parent, $repo, $dep) {
+    switch (CheckContract $parent $repo $dep) {
+        'violation' { return 'contract-blocked' }
+        default     { return 'release-ready' }
+    }
+}
+
+# --- (3) downstream skip on failure reference: transitive dependents (reverse reachability) ---
+function DependentsOf($parent, $failed) {
+    $nodes = @(Discover $parent)
+    $reached = New-Object System.Collections.ArrayList
+    [void]$reached.Add($failed)
+    $frontier = @($failed)
+    while ($frontier.Count -gt 0) {
+        $nextArr = New-Object System.Collections.ArrayList
+        foreach ($r in $nodes) {
+            if ($reached -contains $r) { continue }
+            foreach ($dep in (ReadDeps (Join-Path $parent $r))) {
+                if ($frontier -contains $dep) { [void]$reached.Add($r); [void]$nextArr.Add($r); break }
+            }
+        }
+        $frontier = @($nextArr.ToArray())
+    }
+    $res = @($reached | Where-Object { $_ -ne $failed } | Sort-Object)
+    return ($res -join ' ')
+}
+function ClassifyOnFailure($parent, $failed, $repo) {
+    if ($repo -eq $failed) { return 'failed' }
+    $deps = @((DependentsOf $parent $failed) -split '\s+' | Where-Object { $_ -ne '' })
+    if ($deps -contains $repo) { return 'skip' }
+    return 'ok'
+}
+
+function MkRepo($d) { GitInit $d; W (Join-Path $d 'docs\milestones\M1.md') '# M1' }
+
+try {
+    Write-Host "# tide fleet-cycle live test (PowerShell)"
+    Write-Host "# sandbox: $sbx`n"
+
+    # --- (1) processing order = topo sort (depended-upon first) ---
+    # auth(no deps) <- orders(->auth) <- gateway(->auth) <- notify(->orders)
+    $TP = Join-Path $sbx 'topo'; New-Item -ItemType Directory -Force -Path $TP | Out-Null
+    MkRepo (Join-Path $TP 'auth')
+    MkRepo (Join-Path $TP 'orders');  W (Join-Path $TP 'orders\.tide\deps')  'auth'
+    MkRepo (Join-Path $TP 'gateway'); W (Join-Path $TP 'gateway\.tide\deps') 'auth'
+    MkRepo (Join-Path $TP 'notify');  W (Join-Path $TP 'notify\.tide\deps')  'orders'
+
+    $tord = TopoSort $TP
+    $ia = IdxOf $tord 'auth'; $io = IdxOf $tord 'orders'; $ig = IdxOf $tord 'gateway'; $inf = IdxOf $tord 'notify'
+    $nodeCount = @($tord -split '\s+' | Where-Object { $_ -ne '' }).Count
+    Chk "order: not a cycle (not CYCLE)" $(if ($tord -eq 'CYCLE') { 'yes' } else { 'no' }) 'no'
+    Chk "order: auth before orders (depended-upon first)" $(if ($ia -ge 0 -and $io -ge 0 -and $ia -lt $io) { 'yes' } else { 'no' }) 'yes'
+    Chk "order: auth before gateway" $(if ($ia -ge 0 -and $ig -ge 0 -and $ia -lt $ig) { 'yes' } else { 'no' }) 'yes'
+    Chk "order: orders before notify (transitive)" $(if ($io -ge 0 -and $inf -ge 0 -and $io -lt $inf) { 'yes' } else { 'no' }) 'yes'
+    Chk "order: auth before notify (transitive)" $(if ($ia -ge 0 -and $inf -ge 0 -and $ia -lt $inf) { 'yes' } else { 'no' }) 'yes'
+    Chk "order: all 4 discovered nodes present" "$nodeCount" '4'
+
+    # --- (2) release exclusion (invariant): no release stage in the automated plan ---
+    $stages = PlanStages
+    Chk "release-excl: auto stages = milestone impl review" ($stages -join ' ') 'milestone impl review'
+    Chk "release-excl: no release stage in auto plan" (PlanHasRelease $stages) 'no'
+    Chk "release-excl: auto stages start at milestone" $stages[0] 'milestone'
+    Chk "release-excl: auto stages end at review (not release)" $stages[$stages.Count - 1] 'review'
+
+    # --- (2b) couple release-exclusion to the SKILL artifact: forbidden prose must be present ---
+    # The plan-stage check above is a representation; this fails if the skill prose that actually
+    # enforces the invariant (forbidden list / phase=release backstop+pre-scan) regresses.
+    # ASCII substrings only (keeps this source ASCII; the skill carries the Korean).
+    $skillFile = Join-Path (Split-Path (Split-Path $PSScriptRoot)) 'skills\fleet-cycle\SKILL.md'
+    $skillText = Get-Content $skillFile -Raw
+    Chk "release-excl(skill-coupled): forbidden-list prose present" $(if ($skillText -like '*release / git commit / git tag / git push / cross-repo git*') { 'yes' } else { 'no' }) 'yes'
+    Chk "release-excl(skill-coupled): phase=release backstop/pre-scan prose present" $(if ($skillText -like '*phase=release*') { 'yes' } else { 'no' }) 'yes'
+
+    # --- (3) contract-blocked: upstream-behind dep -> held in handoff ---
+    # auth(0.2.0) <- orders(auth >= v0.3.0 -> upstream behind) / gateway(auth >= v0.2.0 -> satisfied)
+    $CT = Join-Path $sbx 'contract'; New-Item -ItemType Directory -Force -Path $CT | Out-Null
+    MkRepo (Join-Path $CT 'auth'); W (Join-Path $CT 'auth\package.json') '{ "version": "0.2.0" }'
+    MkRepo (Join-Path $CT 'orders');  W (Join-Path $CT 'orders\.tide\deps')  'auth >= v0.3.0'
+    MkRepo (Join-Path $CT 'gateway'); W (Join-Path $CT 'gateway\.tide\deps') 'auth >= v0.2.0'
+    Chk "contract-blocked: orders(auth>=0.3.0, cur 0.2.0) -> held" (HandoffClass $CT 'orders' 'auth') 'contract-blocked'
+    Chk "release-ready: gateway(auth>=0.2.0, cur 0.2.0) -> able"   (HandoffClass $CT 'gateway' 'auth') 'release-ready'
+
+    # --- (4) downstream skip on failure: auth failed -> all dependents skip, independent ok ---
+    # auth <- orders(->auth) <- gateway(->auth) <- notify(->orders) , solo(independent)
+    $FL = Join-Path $sbx 'fail'; New-Item -ItemType Directory -Force -Path $FL | Out-Null
+    MkRepo (Join-Path $FL 'auth')
+    MkRepo (Join-Path $FL 'orders');  W (Join-Path $FL 'orders\.tide\deps')  'auth'
+    MkRepo (Join-Path $FL 'gateway'); W (Join-Path $FL 'gateway\.tide\deps') 'auth'
+    MkRepo (Join-Path $FL 'notify');  W (Join-Path $FL 'notify\.tide\deps')  'orders'
+    MkRepo (Join-Path $FL 'solo')
+
+    Chk "downstream: auth dependents (transitive) = gateway notify orders" (DependentsOf $FL 'auth') 'gateway notify orders'
+    Chk "downstream: auth failed -> orders=skip"  (ClassifyOnFailure $FL 'auth' 'orders')  'skip'
+    Chk "downstream: auth failed -> gateway=skip" (ClassifyOnFailure $FL 'auth' 'gateway') 'skip'
+    Chk "downstream: auth failed -> notify=skip (transitive)" (ClassifyOnFailure $FL 'auth' 'notify') 'skip'
+    Chk "downstream: auth failed -> solo=ok (independent kept)" (ClassifyOnFailure $FL 'auth' 'solo') 'ok'
+    Chk "downstream: auth itself=failed" (ClassifyOnFailure $FL 'auth' 'auth') 'failed'
+    Chk "downstream: orders failed -> notify=skip" (ClassifyOnFailure $FL 'orders' 'notify') 'skip'
+    Chk "downstream: orders failed -> gateway=ok (unrelated)" (ClassifyOnFailure $FL 'orders' 'gateway') 'ok'
+    Chk "downstream: orders failed -> solo=ok" (ClassifyOnFailure $FL 'orders' 'solo') 'ok'
+
+    Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail)"
+}
+finally {
+    Remove-Item -Recurse -Force $sbx -ErrorAction SilentlyContinue
+}
+
+if ($script:fail -ne 0) { exit 1 }
+Write-Host "# fleet-cycle processing-order / release-exclusion / contract-blocked / downstream-skip confirmed"
+exit 0

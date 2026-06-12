@@ -8,6 +8,11 @@
      릴리즈 노트만 인클루드하기 위한 마커다. 위 제목·안내 줄은 사이트에 부적절해 제외된다.
      렌더에는 영향 없음. -->
 <!-- --8<-- [start:notes] -->
+### [v1.5.0]
+- **오케스트레이션 3층 — 교차 사이클 자동화(`/tide:fleet-cycle`, 10번째 커맨드)**: 상위 폴더 단일 세션에서 발견된 자식 tide 레포들의 `milestone → impl → review`를 `.tide/deps` 의존성 순서(위상정렬·피의존 먼저)로 교차 자동 실행하고, 의존성 순서 release 핸드오프를 제시한다. upstream-behind 계약(M17)이 있는 레포는 핸드오프에서 `contract-blocked`로, 사이클이 중단된 레포의 downstream은 `skip`으로 보류 표기된다. 발견 0이면 단일 레포로 graceful 강등.
+- **release·cross-repo git 자동화 제외(불변)**: fleet-cycle은 milestone→review까지만 자동화한다 — 어떤 레포에서도 release를 실행하지 않고, 어떤 레포의 `.tide/phase`도 `release`로 쓰지 않으며, git commit/tag/push·cross-repo git을 자동 실행하지 않는다. release는 순서 있는 핸드오프로 사용자에게 넘긴다. tide-guard는 phase≠release인 레포의 git을 막는 백스톱이고, **사전 점검**이 처리 전 phase=release 잔재(이전 중단된 수동 release) 레포를 제외해 백스톱이 풀린 채 도는 경로를 막는다.
+- **라이브 실증**: `tests/fleet-cycle/` 하니스가 처리 순서(위상정렬)·release 제외·contract-blocked·downstream-skip + 불변을 강제하는 스킬 산문(금지 목록·백스톱/사전점검) 결합 검증을 sh·ps1 양쪽 각 23/23 통과. 옵트인 가산 — 단일 레포·미선언 동작 불변, 커맨드 9종·읽기 전용 fleet·부수효과 분리·`.tide/phase` 계약 불변.
+
 ### [v1.4.0]
 - **오케스트레이션 2층 sub-step — `.tide/deps` `>=` 계약 버전 비교(옵트인)**: 의존 줄에 최소 버전을 선언하면(`<형제 레포명> >= <버전>`, 예 `svc-auth >= v0.3.0`), `/tide:fleet`이 의존 대상 레포의 현재 버전과 semver(major.minor.patch) 비교해 미달이면 권장 순서/advisory에 **`⚠ upstream behind`** 경고(그 레포를 먼저 올려야 함)를 표기한다. `>=`만 지원하고 그 외 연산자·비표준 버전은 경고에 그쳐 위반으로 단정하지 않는다. 위상정렬 순서·그래프는 버전 제약과 무관하게 불변. 버전 제약 없는 줄은 현행 동작 그대로(하위 호환 옵트인).
 - **`.tide/deps` BOM 내성**: 파서가 선두 UTF-8 BOM(`EF BB BF`)을 제거해, Windows 편집기·`Set-Content -Encoding utf8`로 만든 BOM 붙은 deps 파일의 첫 줄(주석·의존명)도 올바로 파싱한다.

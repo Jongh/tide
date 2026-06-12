@@ -15,12 +15,16 @@ tide는 porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴�
 
                   └──────────── /tide:cycle ────────────┘  (release 직전 정지)
 
-                          /tide:status — 언제든 현재 위치 확인 (읽기 전용)
-                          /tide:fleet  — 여러 자식 레포 교차 개요 (읽기 전용)
+                          /tide:status      — 언제든 현재 위치 확인 (읽기 전용)
+                          /tide:fleet       — 여러 자식 레포 교차 개요 (읽기 전용)
+                          /tide:fleet-cycle — 그 순서대로 milestone→review 자동 실행 (멀티 레포, release 제외)
 ```
 
 `/tide:status`·`/tide:fleet`은 **사이클 단계가 아니다** — kickoff→…→release 흐름 밖에 있는
 읽기 전용 보조 커맨드다(`status`는 현재 레포 위치, `fleet`은 여러 자식 레포 교차 개요).
+`/tide:fleet-cycle`은 그와 짝을 이루는 **멀티 레포 자동화 보조** 커맨드다 — fleet이 읽기 전용
+개요라면, fleet-cycle은 그 발견·순서대로 각 레포의 `milestone → review`를 자동 실행한다
+(release는 제외 — 아래 "멀티 레포 오케스트레이션" 절).
 
 **수동 단계별 호출 vs `/tide:cycle` 자동 체이닝**: 평소엔 각 단계를 직접 호출하지만,
 `/tide:cycle`은 `milestone → impl → review`를 한 번에 이어 실행한다(필요 시 milestone부터,
@@ -112,18 +116,23 @@ tide는 porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴�
   매니페스트(`.tide/deps`)를 도입해 **순서 인식**(어느 레포를 먼저 처리해야 하는지)을
   가능하게 한다. 아래 "의존성 선언 (`.tide/deps`)"·"의존성 인식 순서 규칙" 절이 그 단일
   원본이다.
-- **③ 3층 — 교차 사이클 자동화**: 여러 레포의 `milestone → review`까지를 교차로 이어
-  실행한다. **release는 제외** — 부수효과 분리상 레포별 수동으로 유지한다(아래 불변 참조).
+- **③ 3층 — 교차 사이클 자동화 (활성 — 이번 마일스톤)**: 여러 레포의 `milestone → review`
+  까지를 교차로 이어 실행한다(`/tide:fleet-cycle`). fleet의 발견·위상정렬·계약을 재사용해
+  처리 순서(피의존 먼저)를 정하고 각 레포 루트에 앵커해 그 레포의 `/tide:cycle` 의미를 돌린다.
+  **release는 제외** — 부수효과 분리상 레포별 수동으로 유지한다(아래 불변 참조). 아래
+  "교차 사이클 자동화 (`/tide:fleet-cycle`)" 절이 그 단일 원본이다.
 - **④ 4층 — 통합 검증**: 프로젝트 정의 통합 테스트 훅으로 자식 레포들을 가로지르는 통합을
   검증한다.
 
-**3~4층은 후속 마일스톤**이다 — 이번 마일스톤은 1층(가시성, 구현됨) 위에 **2층(의존성 선언)**을
-올린다.
+**4층은 후속 마일스톤**이다 — 이번 마일스톤은 1·2층(가시성·의존성 선언, 구현됨) 위에
+**3층(교차 사이클 자동화)**을 올린다.
 
 ### 부수효과 분리 불변
 
 멀티 레포 토대에서도 부수효과 분리 원칙(위 "사이클" 절)은 그대로다. **2층(의존성 인식)에서도
-동일하다** — 의존성 그래프로 권장 순서를 산출해도 fleet은 그 순서를 제안만 한다.
+동일하다** — 의존성 그래프로 권장 순서를 산출해도 fleet은 그 순서를 제안만 한다. **3층(교차
+사이클 자동화)에서도 동일하다** — fleet-cycle은 milestone→review까지만 자동화하고 release·
+cross-repo git은 자동화하지 않는다(아래 "교차 사이클 자동화" 절 참조).
 
 - 오케스트레이션은 **cross-repo `git commit/tag/push`를 자동화하지 않는다**. release는 항상
   **레포별 수동**(`/tide:release`)이며, tide-guard와 레포별 격리(위 "멀티 레포 / 대상 레포"
@@ -131,6 +140,13 @@ tide는 porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴�
 - fleet은 **advisory만** 한다 — 위상정렬한 권장 처리 순서를 **제안**할 뿐 어떤 레포에도
   사이클·git을 **자동 실행하지 않는다**. 강제·자동 집행 없음. 실제 처리 순서·시점은 사용자가
   판단한다.
+- fleet-cycle은 **milestone→review만 자동화**한다 — 각 레포에서 `release`·git commit/tag/push·
+  cross-repo git을 자동 실행하지 않고, **어떤 레포의 `.tide/phase`도 `release`로 쓰지 않는다**.
+  release 미발생의 실제 보장은 그 **규율**이며, tide-guard는 phase≠release인 레포의 git을 막는
+  **백스톱**(release 차단기가 아님 — `/tide:release`가 phase=release를 먼저 써서 가드를 푼다)이다.
+  fleet-cycle은 처리 전 **phase=release 잔재 레포를 제외**해 백스톱이 풀린 채 도는 것을 막는다
+  (아래 "교차 사이클 자동화"의 사전 점검). 순서 release 핸드오프는 **제안**이며 release 시점·실행은
+  사용자가 판단한다.
 
 ### 의존성 선언 (`.tide/deps`)
 
@@ -220,6 +236,49 @@ tide는 porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴�
   레포들의 의존 그래프로 순서를 산출하고, 순환·미선언·미존재명은 위 규칙대로 폴백·무시한다.
   선언이 전혀 없으면 종전처럼 각 레포의 상태로만 순서를 산출한다(옵트인·하위 호환).
 
+### 교차 사이클 자동화 (`/tide:fleet-cycle`)
+
+3층(교차 사이클 자동화)의 **단일 원본**이다. `/tide:fleet-cycle` 스킬·실증이 이를 인용한다.
+fleet이 **읽기 전용 개요**(발견·순서·계약을 보기만)라면, fleet-cycle은 **그 순서대로
+milestone→review를 자동 실행**하는 행위 커맨드다 — release는 제외(아래 불변).
+
+- **대상·발견·순서**: 대상 부모(기본 = 세션 cwd, 선택 인자로 경로)의 자식 tide 레포를
+  위 "발견 규약"으로 발견(직속 1단계·git·tide 산출물·숨김 무시)하고, `.tide/deps` 위상정렬
+  (위 "의존성 인식 순서 규칙")로 **처리 순서**(피의존 먼저)를 정한다. 순환이면 보고 + 상태
+  기반 순서로 폴백, 미선언 레포는 독립 노드.
+- **레포별 실행(앵커)**: 처리 순서대로 각 레포를 **그 레포 루트에 앵커**(위 "멀티 레포 /
+  대상 레포"의 cwd 규율)해 `/tide:cycle` 의미를 실행한다 — 즉 그 레포의 보고서 상태로
+  시작점을 정해(impl 보고서 없음→impl부터, 있고 review 없음→review부터, 둘 다 있음→새
+  milestone) `milestone → impl → review`를 잇는다. 산출물·`.tide/phase`·테스트·서브에이전트는
+  그 레포 루트 기준(레포별 격리). **release는 실행하지 않는다**(아래 불변).
+- **release 제외(불변)**: fleet-cycle은 **milestone→review까지만** 자동화한다. 어떤 레포에서도
+  `release`를 실행하지 않고, **어떤 레포의 `.tide/phase`도 `release`로 쓰지 않으며**, git
+  commit/tag/push·cross-repo git을 자동 실행하지 않는다. release 미발생의 실제 보장은 이
+  **규율**(release를 호출하지도 phase=release를 쓰지도 않음)이다. tide-guard는 phase≠release인
+  레포의 git을 막는 **백스톱**이지 release 차단기가 아니다(`/tide:release`는 git 전에
+  phase=release를 먼저 써서 가드를 푼다). release는 아래 "핸드오프"로 사용자에게 넘긴다.
+- **사전 점검(필수)**: 처리 시작 전 각 자식 레포의 `.tide/phase`를 읽어, **`release`로 남아 있는
+  레포(이전 중단된 수동 release의 잔재)는 처리에서 제외하고 경고**한다 — 그 레포는 가드가 풀린
+  상태라 사이클을 돌리지 않는다(수동 정리: 그 레포 phase를 idle로). 이로써 백스톱이 풀린 채
+  도는 경로를 막는다.
+- **계약 인식(M17)**: 레포 X가 의존 Y에 `>= 버전` 계약을 두고 Y가 **upstream-behind**(위
+  "계약 비교 규칙")면, X의 사이클은 돌리되 release 핸드오프에서 X를 **"contract-blocked:
+  Y를 먼저 release/upgrade 필요"**로 표기한다(X를 release-ready로 단정하지 않는다).
+- **실패·중단 처리**: 한 레포의 사이클이 중단되면(전제조건 미충족·테스트 실패·review 판정
+  "불가") 그 레포를 **"중단"으로 기록**하고, 위상정렬상 **그 레포에 의존하는 downstream
+  레포는 건너뛴다**(upstream 미완 → downstream 처리 보류, 사유 기록). 그와 무관한 독립 레포는
+  계속 진행한다(전체 중단이 아니라 부분 진행 + 명확한 보고). 각 레포 사이클 자체의 중단
+  처리는 `/tide:cycle` 규칙을 그대로 따른다.
+- **출력(집계)**: ① **처리 순서 표** — 레포명 | 시작 단계 | 도달 단계 | review 판정/추천
+  버전 | 비고(중단·skip·contract-blocked). ② **의존성 순서 release 핸드오프** — review "가능"인
+  레포를 위상정렬 순서로 `1) /tide:release vX.Y.Z (repo)` 나열하되, contract-blocked·중단·
+  downstream-skip은 사유와 함께 보류로 표기한다. release는 사용자 몫임을 명시한다.
+- **부수효과 분리 불변 재확인**: fleet-cycle은 milestone→review만 자동화하고, release·cross-repo
+  git은 자동화하지 않는다(위 "부수효과 분리 불변" 절). 순서·핸드오프는 **제안**이며 release
+  시점·실행은 사용자가 판단한다.
+- **발견 0 강등**: 자식 tide 레포를 못 찾으면 단일 레포로 graceful 강등한다(현재 레포
+  `/tide:cycle` 권유) — 단일 레포·미선언 동작 불변(옵트인 가산).
+
 ## 템플릿
 
 - 각 스킬 디렉터리에 동봉된 `template.md`가 마일스톤·보고서 **형식의 단일 원본**이다:
@@ -302,6 +361,7 @@ release 1번 검사는 사용자가 버전 인자와 함께 강행 의사를 명
 | review | git commit / git tag / git push | 프롬프트 + hook(git) |
 | status | 파일 생성·수정 / git 작업 | 프롬프트 |
 | fleet | 파일 생성·수정 / `.tide/phase` 변경 / git 작업 | 프롬프트 |
+| fleet-cycle | git commit/tag/push (release·cross-repo git 비자동화) | 프롬프트 + hook(git) |
 | retro | 회고 문서(`docs/reports/retro.md`) 외 파일 생성·수정 / `.tide/phase` 변경 / git 작업 | 프롬프트 |
 | cycle | git commit / git tag / git push (release 단계는 체이닝에서 제외) | 프롬프트 + hook(git) |
 | release | (없음 — 유일하게 git 조작 허용) | 프리플라이트 통과 필요 |
@@ -343,4 +403,9 @@ tide는 **v1.0.0부터 아래를 안정(stable) 계약으로 선언**한다. 안
   여기에 읽기 전용 멀티 레포 개요 커맨드 `/tide:fleet`이 **v1.2.0부터 가산**으로 더해진다.
   새 커맨드 추가는 1.0 안정성 절이 명시적으로 허용하는 하위 호환 minor 가산이다 — 기존 8종의
   안정 계약을 약화하지 않는다(상세 규약은 위 "멀티 레포 오케스트레이션" 절).
+- **가산 커맨드 — `/tide:fleet-cycle` (v1.5.0부터)**: 읽기 전용 fleet과 별개로, 여러 자식 레포의
+  `milestone → review`를 의존성 순서로 자동 실행하는 **행위** 커맨드 `/tide:fleet-cycle`이
+  **v1.5.0부터 가산**으로 더해진다 — **release는 제외**(milestone→review만, git 금지). 위 8종
+  안정 계약·읽기 전용 fleet 서술은 그대로이며, 새 행위 커맨드도 부수효과 분리 불변(release·
+  cross-repo git 비자동화)을 지킨다(상세 규약은 위 "교차 사이클 자동화" 절).
 <!-- --8<-- [end:body] -->
