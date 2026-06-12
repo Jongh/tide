@@ -20,7 +20,8 @@ porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴리즈)�
 
 > **멀티 레포(MSA) 운용**: 상위 폴더 단일 세션에서 여러 자식 레포를 가로질러
 > 운용하는 실전 사용법은 **[docs/orchestration.md](docs/orchestration.md)**
-> (오케스트레이션 사용 가이드)를 참고하세요.
+> (오케스트레이션 사용 가이드)를 참고하세요. 단일 세션이 멀티 레포 맥락(직속 자식 tide 레포
+> 2개 이상)이면 `/tide:status`·`/tide:kickoff`가 `/tide:fleet`을 한 줄로 안내합니다(읽기 전용 advisory).
 
 `/tide:cycle`은 `milestone → impl → review`를 한 번에 이어 실행하고(impl 단계에서
 마일스톤 태스크의 `(deps:)`를 읽어 독립 태스크는 **서브에이전트로 동시 실행**·의존
