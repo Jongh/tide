@@ -13,6 +13,7 @@ porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴리즈)�
               └──────────── /tide:cycle ────────────┘  (release 직전 정지)
 
               /tide:status — 언제든 현재 위치와 다음 커맨드 확인 (읽기 전용)
+              /tide:fleet  — 상위 폴더의 여러 자식 레포 교차 개요 (읽기 전용, 멀티 레포)
 ```
 
 `/tide:cycle`은 `milestone → impl → review`를 한 번에 이어 실행하고(impl 단계에서
@@ -42,6 +43,7 @@ porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴리즈)�
 | `/tide:release` | 프리플라이트 → 버전 범프 → CHANGELOG → commit → tag → push | 릴리즈 커밋·태그 |
 | `/tide:retro` | 누적 사이클 회고 — 반복 문제·수용 트레이드오프·미반영 후속 집계 (읽기 전용) | `docs/reports/retro.md` (회고 문서) |
 | `/tide:status` | 사이클 현재 상태 + 다음 권장 커맨드 (읽기 전용) | (없음 — 보고만) |
+| `/tide:fleet [부모 경로]` | 상위 폴더의 여러 자식 tide 레포 교차 개요 + 조정 계획 (읽기 전용, 멀티 레포) | (없음 — 보고만) |
 
 ## 설치
 
@@ -52,7 +54,7 @@ porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴리즈)�
 /plugin install tide@tide
 ```
 
-커맨드 8종과 tide-guard hook이 **함께** 활성화됩니다. 프로젝트별 hook 설치 절차는
+커맨드 9종과 tide-guard hook이 **함께** 활성화됩니다. 프로젝트별 hook 설치 절차는
 없습니다 — 가드는 플러그인이 `${CLAUDE_PLUGIN_ROOT}` 경로의 hook으로 직접 제공합니다.
 
 > Windows 참고: hook은 `sh`로 실행되므로 Git for Windows가 필요합니다
@@ -84,7 +86,7 @@ cp -r skills/* ~/.claude/skills/
 
 ```
 .claude-plugin/   plugin.json·marketplace.json (플러그인/마켓플레이스 매니페스트)
-skills/           스킬 8종 — {단계}/SKILL.md (+ milestone·impl·review·retro는 template.md 동봉)
+skills/           스킬 9종 — {단계}/SKILL.md (+ milestone·impl·review·retro는 template.md 동봉)
 hooks/            hooks.json + tide-guard.sh·.ps1 (git 작업 가드)
 docs/             규약·마일스톤·보고서·프로젝트 컨텍스트 (이 저장소 자체의 tide 사이클 기록)
 ```
@@ -92,7 +94,7 @@ docs/             규약·마일스톤·보고서·프로젝트 컨텍스트 (�
 ## 명명 규약
 
 - 호출: `/tide:{단계}` — 플러그인 네임스페이스가 내장 스킬·다른 플러그인과의 충돌을 방지
-- `/tide:` 까지 입력하면 탭 자동완성으로 8종이 함께 표시됩니다
+- `/tide:` 까지 입력하면 탭 자동완성으로 커맨드 9종이 함께 표시됩니다
 
 ## 규약
 
@@ -109,6 +111,8 @@ tide는 **v1.0.0부터 다음을 안정(stable) 계약으로 선언**합니다:
 - **보고서·마일스톤 형식**: 마일스톤 문서·완료보고서·리뷰보고서·회고 문서의 섹션 구조.
 
 이 계약들은 하위 호환을 지킵니다 — **하위 호환을 깨는 변경(호출명 제거·역할 변경·계약 의미 변경 등)은 다음 major(v2.0.0)에서만** 합니다. minor·patch는 가산·정리·견고화만 합니다.
+
+> **가산 커맨드** — 위 8종은 v1.0 안정 계약 그대로이며, 읽기 전용 멀티 레포 개요 커맨드 `/tide:fleet`이 **v1.2.0부터 하위 호환 가산**으로 더해졌습니다(새 커맨드 추가는 minor 가산 — 1.0 안정성 절이 허용). 상세는 [docs/conventions.md](docs/conventions.md)의 "멀티 레포 오케스트레이션" 절.
 
 ## CHANGELOG
 

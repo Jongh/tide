@@ -8,18 +8,20 @@
 - **형태**: Claude Code 플러그인 (코드 런타임 없음 — 마크다운 프롬프트 + 셸 hook으로 구성)
 - **언어**: Markdown(스킬·문서), POSIX sh + PowerShell(가드 hook), JSON(매니페스트)
 - **외부 의존성**: 런타임 의존성 없음. Windows에서 hook 실행에 Git for Windows의 `sh` 필요
-- **버전**: 0.7.0 (`.claude-plugin/plugin.json`이 단일 버전 원본)
+- **버전 원본**: `.claude-plugin/plugin.json` (이 문서는 버전 숫자를 복제하지 않는다 — 드리프트 방지)
 
 ## 디렉터리 구조
 
 | 경로 | 역할 |
 |---|---|
 | `.claude-plugin/` | `plugin.json`·`marketplace.json` — 플러그인/마켓플레이스 매니페스트 (버전 원본) |
-| `skills/` | 스킬 8종 — `{kickoff,milestone,impl,review,release,status,cycle,retro}/SKILL.md`. milestone·impl·review·retro는 `template.md` 동봉 |
+| `skills/` | 스킬 9종 — `{kickoff,milestone,impl,review,release,status,cycle,retro,fleet}/SKILL.md`. milestone·impl·review·retro는 `template.md` 동봉 (fleet은 읽기 전용 멀티 레포 개요) |
 | `hooks/` | `hooks.json`(PreToolUse 등록) + `tide-guard.sh`(원본 로직)·`tide-guard.ps1`(보조 사본) |
 | `docs/milestones/` | 마일스톤 문서 `M{N}.md` |
 | `docs/reports/` | 완료보고서 `M{N}-impl.md`·리뷰보고서 `M{N}-review.md` |
 | `docs/conventions.md` | 단계별 규약 단일 원본 |
+| `tests/` | 라이브 실증 하니스 (`multi-repo/` 등 — 자기완결형 `run.sh`·`run.ps1`, 자동 러너 없는 도그푸딩 검증 수단) |
+| `site/` | MkDocs 사이트 (`mkdocs.yml`·`docs/` — 문서 사이트 빌드 입력) |
 | `.tide/` | 로컬 상태 파일(`phase`) — `.gitignore` 대상, 커밋 안 함 |
 
 ## 진입점 · 빌드/테스트
@@ -27,8 +29,10 @@
 - **진입점**: 슬래시 커맨드 `/tide:{단계}` (플러그인 설치 시 노출). 가드는 PreToolUse hook으로 자동 활성
 - **빌드**: 없음 (해석형 마크다운/셸)
 - **테스트**: 자동화된 테스트 러너 없음. 검증 수단은 **플러그인 재설치 후 새 세션 드라이런/도그푸딩**
-  (스킬 노출 확인, 가드 차단/통과 확인, 템플릿 경로 치환 확인). 가드 스크립트 수정 시
-  `.sh`·`.ps1` 두 사본을 함께 갱신
+  (스킬 노출 확인, 가드 차단/통과 확인, 템플릿 경로 치환 확인)과 **`tests/`의 자기완결형 라이브
+  하니스** — `tests/multi-repo`(repo-root 인식·앵커링·cwd 규율 실증)가 현재 수단이고, M14에서
+  `tests/fleet`(fleet 발견·교차 집계 실증)이 더해질 예정이다(양 셸 `run.sh`·`run.ps1`). 가드
+  스크립트 수정 시 `.sh`·`.ps1` 두 사본을 함께 갱신
 - **개발 사이클**: tide 자신을 도그푸딩 — `/tide:milestone → impl → review → release`
 
 ## 배포 위생 (패키지에 포함되는 파일)
@@ -64,10 +68,14 @@
   회피)는 `skills/release/SKILL.md`, 메타 용어 누수 방지·빌드 출력 검증 규약은
   `docs/conventions.md`(버전·CHANGELOG 절). 릴리즈 노트의 단일 원본은 `CHANGELOG.md`이며
   README의 CHANGELOG 섹션은 포인터만 둔다(이중 갱신 제거)
-- **멀티 레포 / 대상 레포**: 각 커맨드는 시작 시 "대상 레포 루트"를 정해(기본=세션 레포,
+- **멀티 레포 / 대상 레포**(M13 토대): 각 커맨드는 시작 시 "대상 레포 루트"를 정해(기본=세션 레포,
   현행 동일) 산출물 앵커링·git/테스트 cwd를 그 루트 기준으로 두고, repo-root 인식 가드가
   같은 루트의 `.tide/phase`를 읽어 레포별 격리가 성립한다(가산). 단일 원본은
   `docs/conventions.md`의 "멀티 레포 / 대상 레포" 절
+- **fleet 개요**(M14, `/tide:fleet`): 상위 폴더 단일 세션에서 직속 하위의 여러 자식 tide 레포를
+  발견해 사이클 상태(마일스톤·판정·버전·phase)를 교차 집계하고 advisory 다음 행동 계획을 제시하는
+  **읽기 전용 9번째 가산 커맨드**(파일·phase·git 변경 없음, status·retro와 동일 강제). 단일 원본은
+  `docs/conventions.md`의 "멀티 레포 오케스트레이션" 절
 - **1.0 안정성·메타 규칙**(v1.0.0~): 커맨드 8종 호출명·역할, 단계별 규약, `.tide/phase`/
   tide-guard 계약, 보고서·마일스톤 형식은 1.0부터 안정(stable)이고 하위 호환을 깨는 변경은
   다음 major에서만 한다. 또한 규약·단일 원본을 새로 더하면 그것을 강제·반영할 실행 수단
@@ -77,4 +85,5 @@
 ## 메타
 
 - 생성: `/tide:kickoff` 브라운필드 감지 (M4 자기적용) — 2026-06-11 기준
-- 감지 근거: 커밋 4개 + 기존 스킬/hook 소스 + M1~M6 마일스톤 보유 → 진행 중 프로젝트
+- 감지 근거(최초 감지 시점 기준 — 역사값, 이후 갱신하지 않음): 커밋 4개 + 기존 스킬/hook 소스 +
+  M1~M6 마일스톤 보유 → 진행 중 프로젝트

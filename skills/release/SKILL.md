@@ -54,3 +54,6 @@ argument-hint: "v0.1.0 (생략 시 리뷰보고서의 추천 버전 기준)"
 3. **CHANGELOG/README 릴리즈 노트에 사이트에서 제외하기로 한 용어(외부 저장소명 등)를
    literal로 쓰지 않는다.** 이 문서들은 단일 원본화(snippets)로 사이트 콘텐츠에 그대로
    유입될 수 있다. 제외 용어 처리는 `docs/conventions.md`의 규약을 따른다.
+4. **버전은 버전 파일(`plugin.json`)만 범프한다.** `docs/project-context.md`는 버전 숫자를
+   복제하지 않으므로 release가 갱신하지 않는다 — 드리프트 차단은 갱신 단계 추가가 아니라
+   복제 제거로 해결된다.
