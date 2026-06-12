@@ -80,29 +80,38 @@ read_deps() { # <repo-dir> → 의존 형제명 줄 출력 (없으면 빈 출력
         # 앞뒤 공백 트림
         line=$(printf '%s' "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
         case "$line" in ''|'#'*) continue ;; esac           # 빈 줄·주석 무시
-        # `<name> >= <ver>` → 이름만(연산자/버전 제거). `>=` 외 연산자는 이름만 남도록 트림.
-        name=$(printf '%s' "$line" | sed 's/[[:space:]]*[<>=].*$//' | sed 's/[[:space:]]*$//')
+        # 이름 = 첫 공백 토큰(규약 포맷 `<name> <op> <ver>`), 무공백 형(`auth>=v`)은 연산자에서 절단.
+        # 어떤 연산자든(미지 `~>` 포함) 이름은 보존된다 → 토포 의존 엣지가 유지된다(규약 불변).
+        name=$(printf '%s' "$line" | awk '{print $1}' | sed -E 's/(>=|<=|==|=|>|<).*$//')
         echo "$name"
     done
 }
-# 특정 의존 대상의 요구 버전(`>=`만) 추출. 없으면 빈 출력(제약 없음 또는 미지원 연산자).
-dep_required_version() { # <repo-dir> <dep-name> → 요구 버전(없으면 빈)
+# 특정 의존 대상의 요구 제약(연산자+버전) 추출. 없으면 빈 출력(제약 없음).
+# M20: 전체 연산자 지원 — `>=`·`>`·`=`(`==`)·`<=`·`<`. 출력 형식: "<op> <ver>" (한 줄).
+#   연산자 토큰을 길이 우선(>=, <=, ==, =, >, <)으로 인식한다.
+dep_required_constraint() { # <repo-dir> <dep-name> → "<op> <ver>"(없으면 빈)
     f="$1/.tide/deps"
     [ -f "$f" ] || return 0
     strip_bom < "$f" | while IFS= read -r line || [ -n "$line" ]; do
         line=$(printf '%s' "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
         case "$line" in ''|'#'*) continue ;; esac
-        name=$(printf '%s' "$line" | sed 's/[[:space:]]*[<>=].*$//' | sed 's/[[:space:]]*$//')
+        name=$(printf '%s' "$line" | awk '{print $1}' | sed -E 's/(>=|<=|==|=|>|<).*$//')
         [ "$name" = "$2" ] || continue
-        # `>=`만: `name >= ver` 형태에서만 버전 추출. 다른 연산자는 무시(빈).
-        case "$line" in
-            *'>='*)
-                ver=$(printf '%s' "$line" | sed 's/^.*>=[[:space:]]*//' | sed 's/[[:space:]].*$//')
-                printf '%s\n' "$ver"
-                ;;
+        # 연산자=둘째 토큰, 버전=셋째 토큰(공백 구분 — 규약 포맷 `<name> <op> <ver>`).
+        # 둘째 토큰이 알려진 연산자가 아니면(부재/`~>` 등) 제약 없음 = none(이름 의존만 — 토포 보존).
+        op=$(printf '%s' "$line" | awk '{print $2}')
+        ver=$(printf '%s' "$line" | awk '{print $3}')
+        case "$op" in
+            '>='|'<='|'=='|'='|'>'|'<') printf '%s %s\n' "$op" "$ver" ;;
+            *) ;;                                           # 미지/부재 연산자 → none
         esac
         return 0
     done
+}
+# 하위 호환 별칭: `>=` 제약일 때만 버전을 방출(기존 호출부·기대 유지).
+dep_required_version() { # <repo-dir> <dep-name> → 요구 버전(>=만, 없으면 빈)
+    c=$(dep_required_constraint "$1" "$2")
+    case "$c" in '>= '*) printf '%s\n' "${c#'>= '}" ;; esac
 }
 # 레포의 현재 버전(package.json "version" 필드). 없으면 빈.
 read_version() { # <repo-dir> → X.Y.Z (없으면 빈)
@@ -110,29 +119,48 @@ read_version() { # <repo-dir> → X.Y.Z (없으면 빈)
     [ -f "$f" ] || return 0
     sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$f" | head -1
 }
-# semver 비교: 현재 >= 요구 인지(major.minor.patch 숫자, 선행 v 선택).
-# 반환: satisfied | violation | skip(파싱 불가). echo로 결과 문자열.
-semver_ge() { # <current> <required> → satisfied|violation|skip
+# semver 3원 비교: 현재 vs 요구(major.minor.patch 숫자, 선행 v 선택).
+# 반환: gt | lt | eq | skip(파싱 불가). echo로 결과 문자열.
+semver_cmp() { # <current> <required> → gt|lt|eq|skip
     cur=$(printf '%s' "$1" | sed 's/^v//')
     req=$(printf '%s' "$2" | sed 's/^v//')
-    # major.minor.patch 숫자 검증
     echo "$cur" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo skip; return 0; }
     echo "$req" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo skip; return 0; }
     cmaj=${cur%%.*}; crest=${cur#*.}; cmin=${crest%%.*}; cpat=${crest#*.}
     rmaj=${req%%.*}; rrest=${req#*.}; rmin=${rrest%%.*}; rpat=${rrest#*.}
-    if [ "$cmaj" -ne "$rmaj" ]; then [ "$cmaj" -gt "$rmaj" ] && echo satisfied || echo violation; return 0; fi
-    if [ "$cmin" -ne "$rmin" ]; then [ "$cmin" -gt "$rmin" ] && echo satisfied || echo violation; return 0; fi
-    if [ "$cpat" -ne "$rpat" ]; then [ "$cpat" -gt "$rpat" ] && echo satisfied || echo violation; return 0; fi
-    echo satisfied
+    if [ "$cmaj" -ne "$rmaj" ]; then [ "$cmaj" -gt "$rmaj" ] && echo gt || echo lt; return 0; fi
+    if [ "$cmin" -ne "$rmin" ]; then [ "$cmin" -gt "$rmin" ] && echo gt || echo lt; return 0; fi
+    if [ "$cpat" -ne "$rpat" ]; then [ "$cpat" -gt "$rpat" ] && echo gt || echo lt; return 0; fi
+    echo eq
+}
+# 연산자 평가: <op> <current> <required> → satisfied|violation|skip|none
+#   지원: >= > = == <= < . 알 수 없는 연산자 → none(무시, 위반 단정 안 함).
+#   비표준 버전(파싱 불가) → skip.
+eval_op() { # <op> <current> <required>
+    c=$(semver_cmp "$2" "$3")
+    [ "$c" = skip ] && { echo skip; return 0; }
+    case "$1" in
+        '>=') { [ "$c" = gt ] || [ "$c" = eq ]; } && echo satisfied || echo violation ;;
+        '>')  [ "$c" = gt ]                       && echo satisfied || echo violation ;;
+        '='|'==') [ "$c" = eq ]                   && echo satisfied || echo violation ;;
+        '<=') { [ "$c" = lt ] || [ "$c" = eq ]; } && echo satisfied || echo violation ;;
+        '<')  [ "$c" = lt ]                        && echo satisfied || echo violation ;;
+        *)    echo none ;;                         # 알 수 없는 연산자 → 무시
+    esac
+}
+# 하위 호환 별칭: `>=` 의미의 2항 semver 비교(satisfied|violation|skip).
+semver_ge() { # <current> <required> → satisfied|violation|skip
+    eval_op '>=' "$1" "$2"
 }
 # 계약 검사: <parent> <dependant-repo> <dep-name> → satisfied|violation|skip|none
-# none = 버전 제약 없음(이름 의존만). skip = 버전 파싱 불가.
+# none = 버전 제약 없음/알 수 없는 연산자(이름 의존만). skip = 버전 파싱 불가.
 check_contract() { # <parent> <repo> <dep>
-    req=$(dep_required_version "$1/$2" "$3")
-    [ -n "$req" ] || { echo none; return 0; }
+    c=$(dep_required_constraint "$1/$2" "$3")
+    [ -n "$c" ] || { echo none; return 0; }
+    op=${c%% *}; req=${c#* }
     cur=$(read_version "$1/$3")
     [ -n "$cur" ] || { echo skip; return 0; }
-    semver_ge "$cur" "$req"
+    eval_op "$op" "$cur" "$req"
 }
 
 # --- 의존성 인식 순서(참조 구현): 위상정렬(피의존 우선) + 순환 감지 폴백 ---
@@ -229,6 +257,22 @@ EMPTY="$SBX/empty"; mkdir -p "$EMPTY/just-a-folder"
 e=$(discover "$EMPTY" | tr -d '\n')
 chk "발견 0 → graceful 강등(빈 결과)" "${e:-EMPTY}" "EMPTY"
 
+# --- 다중 자리 마일스톤(M10+) 픽스처 (M14 사소4): sort -V가 M10 > M9 > M2를 올바로 선택 ---
+# M2·M9·M10이 공존할 때 최신 마일스톤이 M10(다중 자리)으로 집혀야 한다(단순 사전순이면 M9가 잘못 집힘).
+MD="$SBX/multidigit"; mkdir -p "$MD/docs/milestones" "$MD/docs/reports"; git -C "$MD" init -q
+printf '# M2\n'  > "$MD/docs/milestones/M2.md"
+printf '# M9\n'  > "$MD/docs/milestones/M9.md"
+printf '# M10\n' > "$MD/docs/milestones/M10.md"
+latest=$(ls "$MD"/docs/milestones/M*.md 2>/dev/null | sort -V | tail -1)
+chk "다중 자리: 최신 마일스톤 = M10 (M9 아님)" "$(basename "$latest" .md)" "M10"
+# 분류도 최신(M10)을 기준으로 한다: M10-impl만 있고 M10-review 없음 → review 대기.
+printf '# M10 impl\n' > "$MD/docs/reports/M10-impl.md"
+chk "다중 자리: 분류는 M10 기준(review 대기)" "$(classify "$MD")" "review-pending"
+# M9 산출물이 있어도 M10이 최신이라 분류에 영향 없음(정렬이 M10을 집음).
+printf '# M9 impl\n' > "$MD/docs/reports/M9-impl.md"
+printf '## release verdict\n\n**가능**\n' > "$MD/docs/reports/M9-review.md"
+chk "다중 자리: M9 완료 산출물이 있어도 분류는 M10(review 대기)" "$(classify "$MD")" "review-pending"
+
 # --- 의존성 인식 순서 픽스처/시나리오 (M16: .tide/deps 위상정렬·폴백) ---
 
 # 위상정렬: auth(무의존) ← orders(→auth) ← gateway(→auth) ← solo(미선언 독립)
@@ -255,27 +299,63 @@ mk_repo "$CY/a"; mkdir -p "$CY/a/.tide"; printf 'b\n' > "$CY/a/.tide/deps"
 mk_repo "$CY/b"; mkdir -p "$CY/b/.tide"; printf 'a\n' > "$CY/b/.tide/deps"
 chk "순환 폴백: a↔b 순환 감지(CYCLE)" "$(toposort "$CY")" "CYCLE"
 
-# --- 계약 버전 비교(M17): `>= 버전` 제약 + semver 비교 + upstream behind 경고 ---
+# --- 계약 버전 비교(M17→M20): 전체 연산자 제약 + semver 비교 + upstream behind 경고 ---
 # auth(버전 파일 0.2.0) ← 의존측들이 서로 다른 제약/연산자로 의존.
+# M20: `>=`·`>`·`=`(`==`)·`<=`·`<` 각각 satisfied/violation, 알 수 없는 연산자 → 무시(none),
+#      비표준 버전 → skip. 기존 `>=` 시나리오는 그대로 유지한다.
 CT="$SBX/contract"; mkdir -p "$CT"
 mk_repo "$CT/auth"; printf '{ "version": "0.2.0" }\n' > "$CT/auth/package.json"   # 현재 0.2.0
-# 계약 만족: auth >= v0.2.0, 현재 0.2.0 → satisfied
-mk_repo "$CT/ok";        mkdir -p "$CT/ok/.tide";       printf 'auth >= v0.2.0\n'  > "$CT/ok/.tide/deps"
-# 계약 위반(upstream behind): auth >= v0.3.0, 현재 0.2.0 → violation
-mk_repo "$CT/behind";    mkdir -p "$CT/behind/.tide";   printf 'auth >= v0.3.0\n'  > "$CT/behind/.tide/deps"
-# 연산자 외 무시: auth > v0.1.0 → 제약 무시(none, 위반 아님)
-mk_repo "$CT/otherop";   mkdir -p "$CT/otherop/.tide";  printf 'auth > v0.1.0\n'   > "$CT/otherop/.tide/deps"
-# 버전 파싱 불가: auth >= banana → 비교 생략(skip)
-mk_repo "$CT/badver";    mkdir -p "$CT/badver/.tide";   printf 'auth >= banana\n'  > "$CT/badver/.tide/deps"
+mkdep() { mkdir -p "$CT/$1/.tide"; mk_repo "$CT/$1"; printf '%s\n' "$2" > "$CT/$1/.tide/deps"; }
+# >= : 만족(현재 0.2.0 >= 0.2.0) / 위반(현재 0.2.0 >= 0.3.0, upstream behind)
+mkdep ge_ok     'auth >= v0.2.0'
+mkdep ge_bad    'auth >= v0.3.0'
+# >  : 만족(0.2.0 > 0.1.0) / 위반(0.2.0 > 0.2.0)
+mkdep gt_ok     'auth > v0.1.0'
+mkdep gt_bad    'auth > v0.2.0'
+# =  : 만족(0.2.0 = 0.2.0) / 위반(0.2.0 = 0.3.0). `==` 동의어도 만족 확인.
+mkdep eq_ok     'auth = v0.2.0'
+mkdep eq_bad    'auth = v0.3.0'
+mkdep eqeq_ok   'auth == v0.2.0'
+mkdep eqeq_bad  'auth == v0.3.0'
+# <= : 만족(0.2.0 <= 0.2.0) / 위반(0.2.0 <= 0.1.0)
+mkdep le_ok     'auth <= v0.2.0'
+mkdep le_bad    'auth <= v0.1.0'
+# <  : 만족(0.2.0 < 0.3.0) / 위반(0.2.0 < 0.2.0)
+mkdep lt_ok     'auth < v0.3.0'
+mkdep lt_bad    'auth < v0.2.0'
+# 알 수 없는 연산자(`~>`, 기호 포함) → 무시(none, 위반 단정 안 함). 이름 의존은 보존(토포 엣지 유지).
+mkdep unkop     'auth ~> v0.1.0'
+# 알 수 없는 연산자(`~`, 기호 없음) → 무시(none). 이름 의존 보존(M20-review #1/#4 근원 수정 회귀 고정).
+mkdep unksym    'auth ~ v0.1.0'
+# 비표준 버전: auth >= banana → 비교 생략(skip)
+mkdep badver    'auth >= banana'
 
-chk "계약 만족: auth>=0.2.0, 현재 0.2.0"        "$(check_contract "$CT" ok auth)"       "satisfied"
-chk "계약 위반: auth>=0.3.0, 현재 0.2.0(upstream behind)" "$(check_contract "$CT" behind auth)" "violation"
-chk "연산자 외 무시: auth > v0.1.0(위반 아님)"  "$(check_contract "$CT" otherop auth)"  "none"
-chk "버전 파싱 불가: auth>=banana(비교 생략)"   "$(check_contract "$CT" badver auth)"   "skip"
+chk "계약 >= 만족: auth>=0.2.0, 현재 0.2.0"     "$(check_contract "$CT" ge_ok auth)"   "satisfied"
+chk "계약 >= 위반: auth>=0.3.0(upstream behind)" "$(check_contract "$CT" ge_bad auth)" "violation"
+chk "계약 > 만족: auth>0.1.0, 현재 0.2.0"       "$(check_contract "$CT" gt_ok auth)"   "satisfied"
+chk "계약 > 위반: auth>0.2.0, 현재 0.2.0"       "$(check_contract "$CT" gt_bad auth)"  "violation"
+chk "계약 = 만족: auth=0.2.0, 현재 0.2.0"       "$(check_contract "$CT" eq_ok auth)"   "satisfied"
+chk "계약 = 위반: auth=0.3.0, 현재 0.2.0"       "$(check_contract "$CT" eq_bad auth)"  "violation"
+chk "계약 == 만족: auth==0.2.0(= 동의어)"       "$(check_contract "$CT" eqeq_ok auth)" "satisfied"
+chk "계약 == 위반: auth==0.3.0, 현재 0.2.0"     "$(check_contract "$CT" eqeq_bad auth)" "violation"
+chk "계약 <= 만족: auth<=0.2.0, 현재 0.2.0"     "$(check_contract "$CT" le_ok auth)"   "satisfied"
+chk "계약 <= 위반: auth<=0.1.0, 현재 0.2.0"     "$(check_contract "$CT" le_bad auth)"  "violation"
+chk "계약 < 만족: auth<0.3.0, 현재 0.2.0"       "$(check_contract "$CT" lt_ok auth)"   "satisfied"
+chk "계약 < 위반: auth<0.2.0, 현재 0.2.0"       "$(check_contract "$CT" lt_bad auth)"  "violation"
+chk "알 수 없는 연산자 무시: auth ~> v0.1.0(위반 아님)" "$(check_contract "$CT" unkop auth)" "none"
+chk "알 수 없는 연산자 무시: auth ~ v0.1.0(기호 없음, 위반 아님)" "$(check_contract "$CT" unksym auth)" "none"
+# 미지 연산자라도 이름 의존은 보존 — read_deps가 바른 이름(auth)을 방출해야 한다(엣지 유실 금지).
+chk "미지 연산자(~>) 이름 의존 보존: read_deps=auth" "$(read_deps "$CT/unkop" | tr '\n' ',')" "auth,"
+chk "미지 연산자(~) 이름 의존 보존: read_deps=auth"  "$(read_deps "$CT/unksym" | tr '\n' ',')" "auth,"
+chk "비표준 버전: auth>=banana(비교 생략)"      "$(check_contract "$CT" badver auth)"  "skip"
 # 제약 줄도 위상정렬엔 이름만 반영(버전이 토포를 깨지 않음)
 ctord=$(toposort "$CT")
-cia=$(idx_of "$ctord" auth); cib=$(idx_of "$ctord" behind)
+cia=$(idx_of "$ctord" auth); cib=$(idx_of "$ctord" ge_bad)
 chk "계약: 버전 제약 줄도 토포 이름 의존 유지(auth 먼저)" "$([ "$cia" -ge 0 ] && [ "$cib" -ge 0 ] && [ "$cia" -lt "$cib" ] && echo yes || echo no)" "yes"
+# 미지 연산자 줄도 토포 엣지 보존: unkop·unksym이 auth보다 뒤(auth 의존 유지)
+ciu=$(idx_of "$ctord" unkop); cis=$(idx_of "$ctord" unksym)
+chk "미지 연산자(~>) 토포 엣지 보존(auth가 unkop보다 앞)" "$([ "$cia" -ge 0 ] && [ "$ciu" -ge 0 ] && [ "$cia" -lt "$ciu" ] && echo yes || echo no)" "yes"
+chk "미지 연산자(~) 토포 엣지 보존(auth가 unksym보다 앞)" "$([ "$cia" -ge 0 ] && [ "$cis" -ge 0 ] && [ "$cia" -lt "$cis" ] && echo yes || echo no)" "yes"
 
 # --- BOM 내성(M17): 선두 UTF-8 BOM(EF BB BF) 붙은 .tide/deps의 첫 줄이 올바로 파싱 ---
 # 첫 줄이 BOM+주석, 둘째가 의존명 → 주석 무시 + 의존명 정상 인식.
@@ -295,4 +375,4 @@ chk "BOM 내성: BOM+의존명 첫 줄 이름 매칭" "$(read_deps "$BM2/svc" | 
 echo
 echo "# 결과: PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ] || exit 1
-echo "# fleet 발견·5분류·1:1 요약·숨김 무시·강등·위상정렬·순환 폴백·계약 버전 비교·BOM 내성 확인됨 (참조 구현 기준)"
+echo "# fleet 발견·5분류·1:1 요약·숨김 무시·강등·다중 자리 마일스톤·위상정렬·순환 폴백·전체 연산자 계약 비교·BOM 내성 확인됨 (참조 구현 기준)"

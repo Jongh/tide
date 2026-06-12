@@ -8,6 +8,12 @@
      릴리즈 노트만 인클루드하기 위한 마커다. 위 제목·안내 줄은 사이트에 부적절해 제외된다.
      렌더에는 영향 없음. -->
 <!-- --8<-- [start:notes] -->
+### [v2.0.0]
+- **2.0 안정 계약 재기준(동작 무파괴)**: 오케스트레이션 에픽(로드맵 1~4층) 완성 surface를 **stable로 동결 선언**한다 — v1.0.0이 "안정 선언" major였던 것과 동형의 **계약 재기준**이며 호환을 깨지 않는다. **커맨드 11종**(기존 8종 + `/tide:fleet`·`/tide:fleet-cycle`·`/tide:fleet-verify`)의 호출명·역할과 **오케스트레이션 규약**(부수효과 분리 불변·`.tide/deps` 의존/계약 비교·`.tide-fleet/integration` 통합 훅·tide-guard 백스톱)을 안정 계약으로 동결한다. `.tide/phase`·tide-guard·보고서·마일스톤 형식은 1.0 계약 그대로 유지. 하위 호환을 깨는 변경은 다음 major(v3.0.0)에서만 한다.
+- **계약 비교 연산자 확장(가산)**: `.tide/deps`의 버전 제약이 `>=`만이 아니라 **`>=`·`>`·`=`(또는 `==`)·`<=`·`<` 전체 연산자**를 지원한다 — 의존 대상의 현재 버전과 요구 버전을 `vX.Y.Z` major.minor.patch로 비교해 불만족이면 의존 레포 줄에 `⚠ contract` 경고(연산자·요구·현재 명시)를 advisory로 표기한다. 알 수 없는 연산자·비표준 버전은 무시·경고하되 위반으로 단정하지 않으며, 이름 의존은 보존돼 위상정렬 순서·그래프는 불변이다. 기존 `>=`·미선언 deps 동작 불변(순수 가산).
+- **통합 훅 git-verb 가드라일(advisory) + 자산 정리·견고화**: `/tide:fleet-verify`가 통합 훅 실행 전 git commit/tag/push·release 토큰(정석 cross-repo 형태 `git -C <dir> …` 포함)을 점검해 경고한다(강제 차단 아님 — verification-only 불변 유지). 백로그 이월 항목을 각각 fix(다중 자리 마일스톤 M10+ 픽스처·gitignore 마이그레이션 노트·가드라일)·수용·환경-이월로 명시 종결. **오케스트레이션 사용 가이드**(`docs/orchestration.md`, 사이트 노출)를 신설해 발견→deps/계약 선언→fleet-cycle→fleet-verify→순서 release를 워크드 예제로 설명한다.
+- **라이브 실증**: `tests/fleet`(전체 연산자 satisfied/violation·미지 연산자 이름 의존 보존·다중 자리 M10+·BOM)·`tests/fleet-verify`(git-verb 가드라일 cross-repo 포함·verification-only)를 sh·ps1 양쪽 각 41/41·29/29 통과. 적대적 검증으로 참조 구현↔계약·사이트↔stable 선언 정합을 확인.
+
 ### [v1.6.0]
 - **오케스트레이션 4층 — 통합 검증(`/tide:fleet-verify`, 11번째 커맨드)**: 자식 tide 레포들이 각자 사이클을 통과한 뒤, 레포를 가로지르는 통합을 대상 부모의 통합 훅(`.tide-fleet/integration`, 옵트인·parent-level)으로 검증한다. fleet-verify가 자식 레포를 발견해 통합 대상으로 보고하고, 부모 cwd에서 훅을 실행해 **exit 0 = 통합 pass / 비0 = fail**(실패 요약)을 보고한 뒤 "통합 pass면 release 핸드오프 순서대로 수동 release"를 안내한다. 훅 미선언이면 통합 검증 생략(옵트인·graceful).
 - **verification-only(불변)**: fleet-verify는 git commit/tag/push·release·cross-repo git을 하지 않고, 어떤 레포의 `.tide/phase`도 `release`로 쓰지 않는다. 통합 훅은 검증/테스트 명령이어야 한다 — tide-guard는 phase≠release인 레포의 git을 막는 백스톱(release 차단기가 아닌 phase 잠금)이며, 통합 훅에 cross-repo git을 두지 않도록 안내한다.

@@ -27,6 +27,7 @@ fleet-verify는 **프롬프트 스킬**이고 실제 통합 훅 실행(부모 cw
 | 2 | **옵트인 생략** | `nohook`(파일 없음) / `emptyhook`(주석·빈 줄뿐) | 둘 다 유효 줄 0 → **skip**(통합 훅 미선언), skip이면 실행 분류도 skip |
 | 3 | **pass/fail 분류** | `passhook`(`exit 0`) / `failhook`(`exit 1`) / `multifail`(`exit 0`→`exit 1`) | exit 0 = **pass**, 비0 = **fail**, 다단계 중 하나라도 비0 → fail (git 동사 미사용) |
 | 4 | **verification-only** | 자동 단계열 참조 = `discover hook report` + `skills/fleet-verify/SKILL.md` grep | 자동 계획에 **`release`·`git` 단계 없음**, report로 종료(릴리즈 아님); SKILL.md에 **금지 목록**(release / git commit / git tag / git push / cross-repo git)·**verification-only** 산문 존재 |
+| 4c | **git-verb 가드라일** (M20 advisory) | `guardrail-git`(`git push`) / `guardrail-release`(`npm run release`) / `guardrail-clean`(`npm test`·`docker compose up -d`) / `guardrail-mixed`(`npm test`+`git commit`) | 훅 명령에 git commit/tag/push·release 토큰 있으면 **warn**(가드라일 플래그), 클린 훅은 **ok**, 미선언은 **skip**. 다단계 중 하나라도 git-verb면 전체 warn. 참조 함수 `has_git_verb`/`HasGitVerb`. **토큰은 FIXTURE 문자열일 뿐 실행 안 됨**(실행 전 점검·경고, 차단 아님) |
 | 5 | **`.tide-fleet/` 발견 무시** | `discover/auth`·`orders`(자식 레포) + `.tide-fleet`(통합 훅 보관소, 가짜 tide 산출물 포함) | 발견은 자식 레포 `auth orders`만, **`.tide-fleet` 미포함**(숨김 dot 디렉터리), 2노드 |
 
 #### 훅 발견/파싱 (시나리오 1)
@@ -56,6 +57,18 @@ fleet-verify는 통합 훅(검증/테스트)만 실행하며 **git commit/tag/pu
 금지 목록·verification-only 불변)이 회귀하면 fail하도록 SKILL.md를 grep해
 **결합**한다(적대 리뷰 대응). `run.ps1`은 ASCII 소스라 ASCII 부분 문자열만 매칭한다(한국어는
 스킬이 보유).
+
+#### git-verb 가드라일 (시나리오 4c — M20 advisory)
+
+fleet-verify는 verification-only라 통합 훅에 git commit/tag/push·release가 합법적으로 필요한 변형은
+드물다(major-safe). 훅을 실행하기 **전에** 명령에 그런 토큰이 있는지 `has_git_verb`/`HasGitVerb`로
+점검해, 있으면 **warn**(cross-repo git 누수 인지)·없으면 **ok**·미선언이면 **skip**으로 분류한다.
+다단계 훅 중 한 줄이라도 git-verb면 전체 warn이다. **정석 cross-repo 형태**(`git -C <dir> push`·
+`git --git-dir=… commit` 등 git과 동사 사이에 인자가 끼는 형태)도 잡는다(M20-review #5 — 매칭이
+`git <동사>` 인접형만 보면 누수가 빠져나간다). 읽기 전용 git(`git status`)은 변이 동사가 없어 **warn하지
+않는다**(오탐 방지). 가드라일은 훅 실행을 **강제 차단하지 않으며**(advisory), 토큰은 픽스처 파일 안의
+**문자열일 뿐 실행되지 않는다**(러너 명령줄 밖). M19 적대 검증이 짚은 훅 공격 표면을 advisory 가드라일로
+좁힌다.
 
 #### `.tide-fleet/` 발견 무시 (시나리오 5)
 

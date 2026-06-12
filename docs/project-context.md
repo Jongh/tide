@@ -15,14 +15,15 @@
 | 경로 | 역할 |
 |---|---|
 | `.claude-plugin/` | `plugin.json`·`marketplace.json` — 플러그인/마켓플레이스 매니페스트 (버전 원본) |
-| `skills/` | 스킬 9종 — `{kickoff,milestone,impl,review,release,status,cycle,retro,fleet}/SKILL.md`. milestone·impl·review·retro는 `template.md` 동봉 (fleet은 읽기 전용 멀티 레포 개요) |
+| `skills/` | 스킬 11종 — `{kickoff,milestone,impl,review,release,status,cycle,retro,fleet,fleet-cycle,fleet-verify}/SKILL.md`. milestone·impl·review·retro는 `template.md` 동봉 (fleet은 읽기 전용 멀티 레포 개요, fleet-cycle은 교차 사이클 자동화, fleet-verify는 통합 검증) |
 | `hooks/` | `hooks.json`(PreToolUse 등록) + `tide-guard.sh`(원본 로직)·`tide-guard.ps1`(보조 사본) |
 | `docs/milestones/` | 마일스톤 문서 `M{N}.md` |
 | `docs/reports/` | 완료보고서 `M{N}-impl.md`·리뷰보고서 `M{N}-review.md` |
 | `docs/conventions.md` | 단계별 규약 단일 원본 |
 | `tests/` | 라이브 실증 하니스 (`multi-repo/` 등 — 자기완결형 `run.sh`·`run.ps1`, 자동 러너 없는 도그푸딩 검증 수단) |
 | `site/` | MkDocs 사이트 (`mkdocs.yml`·`docs/` — 문서 사이트 빌드 입력) |
-| `.tide/` | 로컬 상태 파일(`phase`) — `.gitignore` 대상, 커밋 안 함 |
+| `.tide/` | `phase`(로컬 상태 — `.gitignore` 대상, 커밋 안 함) + `deps`(의존성 선언 — 커밋함). gitignore 범위는 `.tide/`가 아니라 `.tide/phase`만 |
+| `.tide-fleet/` | 부모 레벨 통합 훅(`integration`) — fleet-verify가 읽는 cross-repo 검증 명령(옵트인). 숨김 디렉터리라 fleet 발견에서 제외 |
 
 ## 진입점 · 빌드/테스트
 
@@ -30,9 +31,11 @@
 - **빌드**: 없음 (해석형 마크다운/셸)
 - **테스트**: 자동화된 테스트 러너 없음. 검증 수단은 **플러그인 재설치 후 새 세션 드라이런/도그푸딩**
   (스킬 노출 확인, 가드 차단/통과 확인, 템플릿 경로 치환 확인)과 **`tests/`의 자기완결형 라이브
-  하니스** — `tests/multi-repo`(repo-root 인식·앵커링·cwd 규율 실증)가 현재 수단이고, M14에서
-  `tests/fleet`(fleet 발견·교차 집계 실증)이 더해질 예정이다(양 셸 `run.sh`·`run.ps1`). 가드
-  스크립트 수정 시 `.sh`·`.ps1` 두 사본을 함께 갱신
+  하니스** — `tests/multi-repo`(repo-root 인식·앵커링·cwd 규율)와 오케스트레이션 참조 구현
+  하니스 `tests/fleet`(발견·5분류·위상정렬·전체 연산자 계약 비교·다중 자리 마일스톤 M10+)·
+  `tests/fleet-cycle`(release 제외·downstream-skip)·`tests/fleet-verify`(verification-only·git-verb
+  가드라일)가 모두 존재한다(양 셸 `run.sh`·`run.ps1`). 가드 스크립트 수정 시 `.sh`·`.ps1` 두 사본을
+  함께 갱신
 - **개발 사이클**: tide 자신을 도그푸딩 — `/tide:milestone → impl → review → release`
 
 ## 배포 위생 (패키지에 포함되는 파일)
@@ -72,15 +75,49 @@
   현행 동일) 산출물 앵커링·git/테스트 cwd를 그 루트 기준으로 두고, repo-root 인식 가드가
   같은 루트의 `.tide/phase`를 읽어 레포별 격리가 성립한다(가산). 단일 원본은
   `docs/conventions.md`의 "멀티 레포 / 대상 레포" 절
-- **fleet 개요**(M14, `/tide:fleet`): 상위 폴더 단일 세션에서 직속 하위의 여러 자식 tide 레포를
-  발견해 사이클 상태(마일스톤·판정·버전·phase)를 교차 집계하고 advisory 다음 행동 계획을 제시하는
-  **읽기 전용 9번째 가산 커맨드**(파일·phase·git 변경 없음, status·retro와 동일 강제). 단일 원본은
-  `docs/conventions.md`의 "멀티 레포 오케스트레이션" 절
-- **1.0 안정성·메타 규칙**(v1.0.0~): 커맨드 8종 호출명·역할, 단계별 규약, `.tide/phase`/
-  tide-guard 계약, 보고서·마일스톤 형식은 1.0부터 안정(stable)이고 하위 호환을 깨는 변경은
-  다음 major에서만 한다. 또한 규약·단일 원본을 새로 더하면 그것을 강제·반영할 실행 수단
-  (스킬 프리플라이트·hook·CI 트리거·빌드)도 같은 사이클에 함께 손본다 — 단일 원본은
-  `docs/conventions.md`의 "1.0 안정성"·"규약↔실행/인프라 동기화" 절
+- **오케스트레이션 로드맵 1~4층**(상위 폴더 단일 세션·멀티 레포 MSA): 안전·고가치인 아래층부터
+  4층으로 쌓는다 — ① **1층 가시성**(`/tide:fleet`, 읽기 전용 발견·교차 상태·advisory 계획),
+  ② **2층 의존성/계약 선언**(`.tide/deps` — 형제 레포 의존 + 선택적 계약 버전 제약, 위상정렬
+  순서 인식), ③ **3층 교차 사이클 자동화**(`/tide:fleet-cycle` — 의존성 순서로 각 레포
+  `milestone→review` 자동 실행 + 순서 release 핸드오프, **release 제외**), ④ **4층 통합 검증**
+  (`/tide:fleet-verify` — 부모 레벨 통합 훅 `.tide-fleet/integration`으로 cross-repo 통합을
+  **verification-only** 검증). 부수효과 분리 불변은 모든 층에서 유지(fleet advisory·fleet-cycle
+  release 제외·fleet-verify verification-only). 단일 원본은 `docs/conventions.md`의 "멀티 레포
+  오케스트레이션" 절, **실전 사용법은 `docs/orchestration.md`**(발견→deps/계약→fleet-cycle→
+  fleet-verify→순서 release 워크드 예제)
+- **계약 비교 연산자**(`.tide/deps`): 의존 줄에 선택적 버전 제약 `<형제명>[ <op> <버전>]`을 둘 수
+  있고, 전체 비교 연산자(`>=`·`>`·`=`(또는 `==`)·`<=`·`<`)를 지원한다. 만족이면 무표기, 불만족이면
+  `⚠ contract` 경고(연산자·요구·현재 표기, `>=` 위반 = upstream behind). 알 수 없는 연산자·비표준
+  버전은 무시하고 경고(안전 측). 위상정렬 순서는 버전 제약과 무관하게 불변 — 경고는 줄 표기일 뿐.
+  단일 원본은 `docs/conventions.md`의 "계약 비교 규칙" 절
+- **2.0 안정성·메타 규칙**(v2.0.0~ 재기준): **커맨드 11종**(기존 8종 + `/tide:fleet`·
+  `/tide:fleet-cycle`·`/tide:fleet-verify`) 호출명·역할과 **오케스트레이션 규약**(부수효과 분리
+  불변·`.tide/deps`·계약 비교·`.tide-fleet/integration`)이 2.0부터 안정(stable)으로 동결되고,
+  `.tide/phase`/tide-guard 계약·보고서·마일스톤 형식은 1.0 그대로 유지(불변)된다. 2.0은 동작
+  파괴 없는 **계약 재기준**(v1.0.0의 "안정 선언" major와 동형)이며, 하위 호환을 깨는 변경은 다음
+  major(3.0)에서만 한다(v1.x 가산 이력은 보존 표기). 또한 규약·단일 원본을 새로 더하면 그것을
+  강제·반영할 실행 수단(스킬 프리플라이트·hook·CI 트리거·빌드)도 같은 사이클에 함께 손본다 —
+  단일 원본은 `docs/conventions.md`의 "2.0 안정성"·"규약↔실행/인프라 동기화" 절
+
+## 이월 항목 처분 원장
+
+M20(에픽 마감)에서 회고 백로그의 이월·견고화 항목을 **각각 fix·수용(사유)·환경-이월(사유)** 중
+하나로 명시 종결해 백로그를 실제로 비웠다. 이 원장은 그 처분을 기록한다(상세 근거는 M20 마일스톤
+"이월 항목 종결 원장" 표).
+
+| 항목 | 출처 | 처분 |
+|---|---|---|
+| 다중 자리 마일스톤(M10+) 픽스처 | M14 사소4 | **fix** — `tests/fleet` 분류·정렬에 M10+ 픽스처 추가 |
+| gitignore 마이그레이션 노트 | M16 사소2 | **fix** — README에 "기존 프로젝트는 deps 채택 시 `.tide/`→`.tide/phase`로 좁혀라" 한 줄 |
+| 통합 훅 git-verb 가드라일 | M19 사소2 | **fix** — fleet-verify가 훅 실행 전 git/release 토큰 점검·경고(advisory) |
+| 참조 버전 파일 범위·pre-release | M17 사소2 | **fix(문서)** — 참조 구현은 `package.json`만, pre-release는 skip 명시 |
+| jq 추출 분기 실증 | M13-impl#1 | **환경-이월** — 로컬 jq 부재. 정적 검토 + "jq 환경 재실행" 노트(동작 동일 기대), 회고에서 닫음 |
+| 워크트리 격리 병합 경로 | M9-impl#3 | **수용** — 기본은 공유 트리(비겹침), 워크트리는 impl 스킬의 선택적 고급 경로로 이미 문서화. 별도 구현 불요 |
+| README masthead 외부 귀속 | M12 | **수용** — 사이트만 제외, 저장소 원본 보존(원 의도). 변경 없음 |
+| 브라우저 런타임 렌더·병렬 폴백 종단·retro 자기입력 비용 | M11~M12·M6 | **환경-이월/수용** — 세션·배포 수동 검증 영역. 저위험으로 회고에서 닫음(필요 시 별도) |
+
+이로써 오케스트레이션 에픽의 잔여 후속은 fix/수용/환경-이월로 전부 종결됐고, **로드맵 항목 미반영은
+0**이다 — 백로그가 닫혔다.
 
 ## 메타
 

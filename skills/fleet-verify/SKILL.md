@@ -48,6 +48,14 @@ milestone→review를 의존성 순서로 자동 실행하는 반면, fleet-veri
 
 ## 실행·보고
 
+**git-verb 가드라일(실행 전 점검·advisory)**: 통합 훅 명령(들)을 실행하기 **전에** 각 훅 줄에
+**git commit/tag/push·release로 보이는 토큰**(예: `git commit`·`git tag`·`git push`·`release`)이
+있는지 점검한다. 있으면 **경고**한다 — 예: `⚠ 통합 훅에 git/release로 보이는 토큰 —
+fleet-verify는 verification-only`. 이는 **advisory**다 — 훅 실행을 **강제 차단하지 않는다**(검증
+훅에 git이 합법적으로 필요한 변형이 있을 수 있음 — major-safe). 사용자가 cross-repo git 누수를
+인지하도록 surface만 좁힌다(M19 적대 검증이 짚은 훅 공격 표면 완화). 경고 후에도 훅은 그대로
+실행한다 — 차단은 verification-only 불변·tide-guard 백스톱이 맡는다.
+
 통합 훅 명령(들)을 **대상 부모 cwd에서 실행**한다(개별 레포가 아니라 부모에서 — 통합은
 fleet 전체 개념). 결과는 **exit 코드**로 판정한다:
 - **exit 0 = 통합 pass**.

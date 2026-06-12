@@ -9,7 +9,7 @@
 /plugin install tide@tide
 ```
 
-커맨드 8종과 tide-guard hook이 **함께** 활성화됩니다. 프로젝트별 hook 설치 절차는
+커맨드 11종과 tide-guard hook이 **함께** 활성화됩니다. 프로젝트별 hook 설치 절차는
 없습니다 — 가드는 플러그인이 `${CLAUDE_PLUGIN_ROOT}` 경로의 hook으로 직접 제공합니다.
 
 !!! note "Windows 참고"

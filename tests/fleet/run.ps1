@@ -44,8 +44,9 @@ function Discover($parent) {
 
 # --- classification reference: /tide:status next-command judgment (5 positions, ASCII labels) ---
 function Classify($r) {
+    # natural sort on the numeric milestone index (M10 > M9, multi-digit safe; sh uses `sort -V`)
     $ms = Get-ChildItem (Join-Path $r 'docs\milestones') -Filter 'M*.md' -ErrorAction SilentlyContinue |
-        Sort-Object Name | Select-Object -Last 1
+        Sort-Object { [int]([regex]::Match($_.BaseName, '\d+').Value) } | Select-Object -Last 1
     if (-not $ms) { return 'milestone-needed' }
     $n = $ms.BaseName
     $rep = Join-Path $r 'docs\reports'
@@ -87,9 +88,12 @@ function DepLines($f) {
     if ($lines.Count -gt 0) { $lines[0] = StripBom $lines[0] }
     return $lines
 }
-# strip a trailing `[<>=]...` operator+version clause, return the bare name
+# bare repo name = first whitespace-delimited token (spec format `<name> <op> <ver>`);
+# a no-space form (`auth>=v`) is cut at the operator. ANY operator (incl. unknown `~>`) keeps the
+# name intact -> the topo dependency edge survives (spec invariant).
 function DepName($line) {
-    return ($line -replace '\s*[<>=].*$', '').Trim()
+    $first = ($line.Trim() -split '\s+')[0]
+    return ($first -replace '(>=|<=|==|=|>|<).*$', '')
 }
 function ReadDeps($repoDir) {
     $f = Join-Path $repoDir '.tide\deps'
@@ -102,18 +106,28 @@ function ReadDeps($repoDir) {
     }
     return $out
 }
-# required version (>= only) for a given dep name; '' if none or unsupported operator
-function DepRequiredVersion($repoDir, $depName) {
+# required constraint (operator + version) for a given dep name; '' if no constraint.
+# M20: full operators -> `>=`, `>`, `=`(`==`), `<=`, `<`. Returns "<op> <ver>" (single string).
+#   op = 2nd whitespace token, ver = 3rd; an unknown/absent 2nd token -> '' (none, name dep only).
+function DepRequiredConstraint($repoDir, $depName) {
     $f = Join-Path $repoDir '.tide\deps'
     if (-not (Test-Path $f)) { return '' }
     foreach ($line in (DepLines $f)) {
         $t = $line.Trim()
         if ($t -eq '' -or $t.StartsWith('#')) { continue }
         if ((DepName $t) -ne $depName) { continue }
-        $m = [regex]::Match($t, '>=\s*(\S+)')                 # only `>=`; other ops -> no match
-        if ($m.Success) { return $m.Groups[1].Value }
-        return ''
+        $tok = $t -split '\s+'
+        if ($tok.Count -ge 3 -and (@('>=','<=','==','=','>','<') -contains $tok[1])) {
+            return ($tok[1] + ' ' + $tok[2])
+        }
+        return ''   # name-only or unknown operator -> none
     }
+    return ''
+}
+# back-compat alias: emit version only when the constraint is `>=` (keeps prior callers/expectations)
+function DepRequiredVersion($repoDir, $depName) {
+    $c = DepRequiredConstraint $repoDir $depName
+    if ($c -like '>= *') { return $c.Substring(3) }
     return ''
 }
 # current version of a repo (package.json "version"); '' if absent
@@ -124,8 +138,8 @@ function ReadVersion($repoDir) {
     if ($m.Success) { return $m.Groups[1].Value }
     return ''
 }
-# semver compare (major.minor.patch numeric, leading v optional): satisfied | violation | skip
-function SemverGe($current, $required) {
+# semver 3-way compare (major.minor.patch numeric, leading v optional): gt | lt | eq | skip
+function SemverCmp($current, $required) {
     $cur = $current -replace '^v', ''
     $req = $required -replace '^v', ''
     $rx = '^\d+\.\d+\.\d+$'
@@ -133,18 +147,39 @@ function SemverGe($current, $required) {
     $c = $cur.Split('.'); $r = $req.Split('.')
     for ($i = 0; $i -lt 3; $i++) {
         $ci = [int]$c[$i]; $ri = [int]$r[$i]
-        if ($ci -ne $ri) { if ($ci -gt $ri) { return 'satisfied' } else { return 'violation' } }
+        if ($ci -ne $ri) { if ($ci -gt $ri) { return 'gt' } else { return 'lt' } }
     }
-    return 'satisfied'
+    return 'eq'
+}
+# operator eval: <op> <current> <required> -> satisfied | violation | skip | none
+#   supported: >= > = == <= < . Unknown operator -> none (ignored, not a violation).
+#   non-standard version (unparseable) -> skip.
+function EvalOp($op, $current, $required) {
+    $c = SemverCmp $current $required
+    if ($c -eq 'skip') { return 'skip' }
+    switch ($op) {
+        '>='    { if ($c -eq 'gt' -or $c -eq 'eq') { return 'satisfied' } else { return 'violation' } }
+        '>'     { if ($c -eq 'gt')                 { return 'satisfied' } else { return 'violation' } }
+        '='     { if ($c -eq 'eq')                 { return 'satisfied' } else { return 'violation' } }
+        '=='    { if ($c -eq 'eq')                 { return 'satisfied' } else { return 'violation' } }
+        '<='    { if ($c -eq 'lt' -or $c -eq 'eq') { return 'satisfied' } else { return 'violation' } }
+        '<'     { if ($c -eq 'lt')                 { return 'satisfied' } else { return 'violation' } }
+        default { return 'none' }                  # unknown operator -> ignore
+    }
+}
+# back-compat alias: 2-arg `>=` semver compare (satisfied | violation | skip)
+function SemverGe($current, $required) {
+    return (EvalOp '>=' $current $required)
 }
 # contract check: satisfied | violation | skip | none
-#   none = no version constraint (name dep only); skip = version unparseable
+#   none = no version constraint / unknown operator (name dep only); skip = version unparseable
 function CheckContract($parent, $repo, $dep) {
-    $req = DepRequiredVersion (Join-Path $parent $repo) $dep
-    if ($req -eq '') { return 'none' }
+    $c = DepRequiredConstraint (Join-Path $parent $repo) $dep
+    if ($c -eq '') { return 'none' }
+    $op = $c.Split(' ')[0]; $req = $c.Substring($op.Length + 1)
     $cur = ReadVersion (Join-Path $parent $dep)
     if ($cur -eq '') { return 'skip' }
-    return (SemverGe $cur $req)
+    return (EvalOp $op $cur $req)
 }
 
 # --- dependency-aware order reference: topological sort (depended-upon first) + cycle detection ---
@@ -236,6 +271,23 @@ try {
     $e = (Discover $EMPTY) -join ','
     Chk "discover 0 -> graceful degrade (empty)" $(if ($e) { $e } else { 'EMPTY' }) 'EMPTY'
 
+    # --- multi-digit milestone (M10+) fixture (M14 minor#4): natural sort picks M10 over M9/M2 ---
+    # With M2/M9/M10 present, the latest milestone must be M10 (a lexical sort would wrongly pick M9).
+    $MD = Join-Path $sbx 'multidigit'; GitInit $MD
+    W (Join-Path $MD 'docs\milestones\M2.md')  '# M2'
+    W (Join-Path $MD 'docs\milestones\M9.md')  '# M9'
+    W (Join-Path $MD 'docs\milestones\M10.md') '# M10'
+    $latest = Get-ChildItem (Join-Path $MD 'docs\milestones') -Filter 'M*.md' |
+        Sort-Object { [int]([regex]::Match($_.BaseName, '\d+').Value) } | Select-Object -Last 1
+    Chk "multi-digit: latest milestone = M10 (not M9)" $latest.BaseName 'M10'
+    # classification keys off the latest (M10): only M10-impl present, no M10-review -> review-pending
+    W (Join-Path $MD 'docs\reports\M10-impl.md') '# M10 impl'
+    Chk "multi-digit: classify keyed on M10 (review-pending)" (Classify $MD) 'review-pending'
+    # even with completed M9 artifacts, M10 is latest so classification is unaffected
+    W (Join-Path $MD 'docs\reports\M9-impl.md') '# M9 impl'
+    W (Join-Path $MD 'docs\reports\M9-review.md') ("## release verdict`n`n**" + $OK + "**`n")
+    Chk "multi-digit: M9-complete artifacts ignored, classify is M10 (review-pending)" (Classify $MD) 'review-pending'
+
     # --- dependency-aware order fixtures/scenarios (M16: .tide/deps topo sort / fallback) ---
 
     function MkRepo($d) { GitInit $d; W (Join-Path $d 'docs\milestones\M1.md') '# M1' }
@@ -265,23 +317,55 @@ try {
     MkRepo (Join-Path $CY 'b'); W (Join-Path $CY 'b\.tide\deps') 'a'
     Chk "cycle fallback: a<->b cycle detected (CYCLE)" (TopoSort $CY) 'CYCLE'
 
-    # --- contract version comparison (M17): `>= version` constraint + semver + upstream-behind ---
+    # --- contract version comparison (M17 -> M20): full operators + semver + upstream-behind ---
     # auth (version file 0.2.0) <- dependants with different constraints / operators.
+    # M20: `>=`, `>`, `=`(`==`), `<=`, `<` each satisfied/violation; unknown op -> ignored (none);
+    #      non-standard version -> skip. Existing `>=` scenarios retained.
     $CT = Join-Path $sbx 'contract'; New-Item -ItemType Directory -Force -Path $CT | Out-Null
     MkRepo (Join-Path $CT 'auth'); W (Join-Path $CT 'auth\package.json') '{ "version": "0.2.0" }'  # current 0.2.0
-    MkRepo (Join-Path $CT 'ok');      W (Join-Path $CT 'ok\.tide\deps')      'auth >= v0.2.0'   # satisfied
-    MkRepo (Join-Path $CT 'behind');  W (Join-Path $CT 'behind\.tide\deps')  'auth >= v0.3.0'   # violation
-    MkRepo (Join-Path $CT 'otherop'); W (Join-Path $CT 'otherop\.tide\deps') 'auth > v0.1.0'    # other op -> ignored
-    MkRepo (Join-Path $CT 'badver');  W (Join-Path $CT 'badver\.tide\deps')  'auth >= banana'   # unparseable -> skip
+    function MkDep($name, $line) { MkRepo (Join-Path $CT $name); W (Join-Path $CT "$name\.tide\deps") $line }
+    MkDep 'ge_ok'   'auth >= v0.2.0'   # >= satisfied (0.2.0 >= 0.2.0)
+    MkDep 'ge_bad'  'auth >= v0.3.0'   # >= violation (upstream behind)
+    MkDep 'gt_ok'   'auth > v0.1.0'    # >  satisfied (0.2.0 > 0.1.0)
+    MkDep 'gt_bad'  'auth > v0.2.0'    # >  violation (0.2.0 > 0.2.0)
+    MkDep 'eq_ok'   'auth = v0.2.0'    # =  satisfied
+    MkDep 'eq_bad'  'auth = v0.3.0'    # =  violation
+    MkDep 'eqeq_ok' 'auth == v0.2.0'   # == synonym satisfied
+    MkDep 'eqeq_bad' 'auth == v0.3.0'  # == synonym violation
+    MkDep 'le_ok'   'auth <= v0.2.0'   # <= satisfied (0.2.0 <= 0.2.0)
+    MkDep 'le_bad'  'auth <= v0.1.0'   # <= violation
+    MkDep 'lt_ok'   'auth < v0.3.0'    # <  satisfied (0.2.0 < 0.3.0)
+    MkDep 'lt_bad'  'auth < v0.2.0'    # <  violation (0.2.0 < 0.2.0)
+    MkDep 'unkop'   'auth ~> v0.1.0'   # unknown operator (with symbol) -> ignored (none), name kept
+    MkDep 'unksym'  'auth ~ v0.1.0'    # unknown operator (no symbol)   -> ignored (none), name kept
+    MkDep 'badver'  'auth >= banana'   # non-standard version -> skip
 
-    Chk "contract satisfied: auth>=0.2.0, current 0.2.0"        (CheckContract $CT 'ok' 'auth')      'satisfied'
-    Chk "contract violation: auth>=0.3.0, current 0.2.0 (upstream behind)" (CheckContract $CT 'behind' 'auth') 'violation'
-    Chk "other operator ignored: auth > v0.1.0 (not a violation)" (CheckContract $CT 'otherop' 'auth') 'none'
-    Chk "unparseable version: auth>=banana (compare skipped)"   (CheckContract $CT 'badver' 'auth')  'skip'
+    Chk "contract >= satisfied: auth>=0.2.0, current 0.2.0"   (CheckContract $CT 'ge_ok' 'auth')   'satisfied'
+    Chk "contract >= violation: auth>=0.3.0 (upstream behind)" (CheckContract $CT 'ge_bad' 'auth') 'violation'
+    Chk "contract > satisfied: auth>0.1.0, current 0.2.0"     (CheckContract $CT 'gt_ok' 'auth')   'satisfied'
+    Chk "contract > violation: auth>0.2.0, current 0.2.0"     (CheckContract $CT 'gt_bad' 'auth')  'violation'
+    Chk "contract = satisfied: auth=0.2.0, current 0.2.0"     (CheckContract $CT 'eq_ok' 'auth')   'satisfied'
+    Chk "contract = violation: auth=0.3.0, current 0.2.0"     (CheckContract $CT 'eq_bad' 'auth')  'violation'
+    Chk "contract == satisfied: auth==0.2.0 (= synonym)"      (CheckContract $CT 'eqeq_ok' 'auth') 'satisfied'
+    Chk "contract == violation: auth==0.3.0, current 0.2.0"   (CheckContract $CT 'eqeq_bad' 'auth') 'violation'
+    Chk "contract <= satisfied: auth<=0.2.0, current 0.2.0"   (CheckContract $CT 'le_ok' 'auth')   'satisfied'
+    Chk "contract <= violation: auth<=0.1.0, current 0.2.0"   (CheckContract $CT 'le_bad' 'auth')  'violation'
+    Chk "contract < satisfied: auth<0.3.0, current 0.2.0"     (CheckContract $CT 'lt_ok' 'auth')   'satisfied'
+    Chk "contract < violation: auth<0.2.0, current 0.2.0"     (CheckContract $CT 'lt_bad' 'auth')  'violation'
+    Chk "unknown operator ignored: auth ~> v0.1.0 (not a violation)" (CheckContract $CT 'unkop' 'auth') 'none'
+    Chk "unknown operator ignored: auth ~ v0.1.0 (no symbol, not a violation)" (CheckContract $CT 'unksym' 'auth') 'none'
+    # unknown operator still keeps the name dep -> ReadDeps must emit the bare name (edge not dropped)
+    Chk "unknown op (~>) keeps name dep: ReadDeps=auth" ((ReadDeps (Join-Path $CT 'unkop')) -join ',') 'auth'
+    Chk "unknown op (~) keeps name dep: ReadDeps=auth"  ((ReadDeps (Join-Path $CT 'unksym')) -join ',') 'auth'
+    Chk "non-standard version: auth>=banana (compare skipped)" (CheckContract $CT 'badver' 'auth') 'skip'
     # constraint lines still topo-sort by name only (version does not break ordering)
     $ctord = TopoSort $CT
-    $cia = IdxOf $ctord 'auth'; $cib = IdxOf $ctord 'behind'
+    $cia = IdxOf $ctord 'auth'; $cib = IdxOf $ctord 'ge_bad'
     Chk "contract: version line keeps name dep in topo (auth first)" $(if ($cia -ge 0 -and $cib -ge 0 -and $cia -lt $cib) { 'yes' } else { 'no' }) 'yes'
+    # unknown-operator lines keep their topo edge too: unkop/unksym after auth (auth dep retained)
+    $ciu = IdxOf $ctord 'unkop'; $cis = IdxOf $ctord 'unksym'
+    Chk "unknown op (~>) keeps topo edge (auth before unkop)" $(if ($cia -ge 0 -and $ciu -ge 0 -and $cia -lt $ciu) { 'yes' } else { 'no' }) 'yes'
+    Chk "unknown op (~) keeps topo edge (auth before unksym)" $(if ($cia -ge 0 -and $cis -ge 0 -and $cia -lt $cis) { 'yes' } else { 'no' }) 'yes'
 
     # --- BOM tolerance (M17): a .tide/deps written WITH a leading UTF-8 BOM parses correctly ---
     # Set-Content -Encoding utf8 (the W helper) emits a BOM in PS 5.1, so these files carry a BOM.
@@ -304,5 +388,5 @@ finally {
 }
 
 if ($script:fail -ne 0) { exit 1 }
-Write-Host "# fleet discovery / 5-position classify / 1:1 summary / hidden-skip / degrade / topo-sort / cycle-fallback / contract-version / BOM-tolerance confirmed"
+Write-Host "# fleet discovery / 5-position classify / 1:1 summary / hidden-skip / degrade / multi-digit-milestone / topo-sort / cycle-fallback / full-operator contract / BOM-tolerance confirmed"
 exit 0

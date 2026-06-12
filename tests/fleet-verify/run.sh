@@ -75,6 +75,28 @@ EOF
     [ "$rc" -eq 0 ] && echo pass || echo fail
 }
 
+# --- git-verb 가드라일(참조 구현, M20 advisory): 훅 명령에 git/release 토큰이 있으면 경고 ---
+# fleet-verify는 verification-only라 통합 훅에 git commit/tag/push·release가 합법적으로 필요한
+# 변형은 드물다(major-safe). 훅 실행 전 명령에 그런 토큰이 있으면 경고로 인지시킨다(차단 아님).
+# 토큰 매칭은 FIXTURE 문자열에 대한 grep일 뿐 — 이 토큰들은 실행되지 않는다(러너 명령줄 밖).
+has_git_verb() { # <command-line> → yes(가드라일 플래그)|no
+    # `git` 토큰과 변이 동사(commit/tag/push) 사이에 인자가 있어도 잡는다 — 정석 cross-repo 형태
+    # `git -C <dir> push`·`git --git-dir=… commit`가 빠져나가지 않도록(M20-review #5). release 토큰도.
+    printf '%s' "$1" | grep -Eiq '(^|[^a-z])git[^a-z].*(commit|tag|push)([^a-z]|$)|[[:space:]]release([^a-z]|$)|^release([^a-z]|$)' \
+        && echo yes || echo no
+}
+# 훅 가드라일 분류: 유효 훅 줄 중 하나라도 git-verb면 warn, 아니면(유효 줄 ≥1) ok, 미선언이면 skip.
+hook_guardrail() { # <parent> → ok|warn|skip
+    case "$(hook_class "$1")" in skip) echo skip; return 0 ;; esac
+    flag=no
+    while IFS= read -r cmd; do
+        [ "$(has_git_verb "$cmd")" = yes ] && { flag=yes; break; }
+    done <<EOF
+$(read_hook "$1")
+EOF
+    [ "$flag" = yes ] && echo warn || echo ok
+}
+
 # --- verification-only 표상(참조 구현): 자동 계획 단계열에 release/git 단계 없음 ---
 # fleet-verify는 통합 훅(검증/테스트)만 실행한다. 자동 계획은 결코 release/git 단계를 포함하지
 # 않는다(부수효과 분리 불변, tide-guard가 phase≠release에서 git 차단). 이 참조는 그 부재를 표상.
@@ -140,6 +162,34 @@ chk "verification-only(스킬 결합): 금지 목록 산문 존재" \
 chk "verification-only(스킬 결합): verification-only 산문 존재" \
     "$([ -f "$SKILL_FILE" ] && grep -qF 'verification-only' "$SKILL_FILE" && echo yes || echo no)" "yes"
 
+# --- (4c) 통합 훅 git-verb 가드라일(M20 advisory): git/release 토큰 → warn, 클린 훅 → ok ---
+# 훅 명령 내부의 git 토큰은 FIXTURE 문자열일 뿐 실행되지 않는다(가드라일은 실행 전 점검·경고).
+GV="$SBX/guardrail-git"; mkdir -p "$GV/.tide-fleet"
+printf 'git push\n' > "$GV/.tide-fleet/integration"     # git 누수 가능 훅(FIXTURE) → 경고
+chk "가드라일: 훅에 git push → warn"          "$(hook_guardrail "$GV")" "warn"
+chk "가드라일: has_git_verb(git push)=yes"    "$(has_git_verb 'git push')" "yes"
+GR="$SBX/guardrail-release"; mkdir -p "$GR/.tide-fleet"
+printf 'npm run release\n' > "$GR/.tide-fleet/integration"  # release 토큰(FIXTURE) → 경고
+chk "가드라일: 훅에 release 토큰 → warn"      "$(hook_guardrail "$GR")" "warn"
+CL="$SBX/guardrail-clean"; mkdir -p "$CL/.tide-fleet"
+printf '# verify only\nnpm test\ndocker compose up -d\n' > "$CL/.tide-fleet/integration"  # 클린 훅
+chk "가드라일: 클린 훅(npm test) → ok"        "$(hook_guardrail "$CL")" "ok"
+chk "가드라일: has_git_verb(npm test)=no"     "$(has_git_verb 'npm test')" "no"
+# 정석 cross-repo 형태(git과 동사 사이 인자)도 잡아야 한다(M20-review #5 회귀 고정).
+CR="$SBX/guardrail-crossrepo"; mkdir -p "$CR/.tide-fleet"
+printf 'git -C ../svc-auth push\n' > "$CR/.tide-fleet/integration"   # cross-repo git(FIXTURE) → 경고
+chk "가드라일: 훅에 git -C <dir> push → warn"  "$(hook_guardrail "$CR")" "warn"
+chk "가드라일: has_git_verb(git -C dir push)=yes" "$(has_git_verb 'git -C ../svc-auth push')" "yes"
+chk "가드라일: has_git_verb(git --git-dir=… commit)=yes" "$(has_git_verb 'git --git-dir=svc/.git commit -m x')" "yes"
+# 읽기 전용 git(git status)은 변이 동사가 없으므로 경고하지 않는다(오탐 방지).
+chk "가드라일: has_git_verb(git status)=no(읽기 전용)" "$(has_git_verb 'git -C ../svc status')" "no"
+# 다단계 중 하나라도 git-verb면 전체 warn(클린 줄과 혼합돼도 누수 인지).
+MX="$SBX/guardrail-mixed"; mkdir -p "$MX/.tide-fleet"
+printf 'npm test\ngit commit -m x\n' > "$MX/.tide-fleet/integration"   # 클린+git 혼합(FIXTURE)
+chk "가드라일: 클린+git 혼합 → warn"          "$(hook_guardrail "$MX")" "warn"
+# 미선언이면 가드라일도 skip(옵트인 불변)
+chk "가드라일: 훅 미선언 → skip"              "$(hook_guardrail "$NH")" "skip"
+
 # --- (5) `.tide-fleet/` 발견 무시: 숨김 디렉터리라 자식 레포로 안 잡힘 ---
 DS="$SBX/discover"; mkdir -p "$DS"
 mk_repo "$DS/auth"
@@ -155,4 +205,4 @@ chk "발견 무시: 발견 2노드(숨김 제외)"     "$(discover "$DS" | wc -l
 echo
 echo "# 결과: PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ] || exit 1
-echo "# fleet-verify 훅 발견/파싱·옵트인 생략·pass/fail 분류·verification-only(무릴리즈/무git)·.tide-fleet 발견 무시 확인됨 (참조 구현 기준)"
+echo "# fleet-verify 훅 발견/파싱·옵트인 생략·pass/fail 분류·verification-only(무릴리즈/무git)·git-verb 가드라일·.tide-fleet 발견 무시 확인됨 (참조 구현 기준)"

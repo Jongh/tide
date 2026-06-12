@@ -81,6 +81,27 @@ function RunHook($parent) {
     if ($rc -eq 0) { return 'pass' } else { return 'fail' }
 }
 
+# --- git-verb guardrail reference (M20 advisory): warn if a hook command carries git/release ---
+# fleet-verify is verification-only, so a hook legitimately needing git commit/tag/push or release
+# is rare (major-safe). Before running the hook, flag such tokens so the user notices cross-repo git
+# leakage (advisory, not a hard block). The token match is a regex over FIXTURE strings only -- these
+# tokens are never executed (they live in fixture files, not on the runner command line).
+function HasGitVerb($cmd) {
+    # allow args between `git` and the mutating verb so cross-repo forms `git -C <dir> push` /
+    # `git --git-dir=... commit` are flagged too (M20-review #5), not just the bare `git <verb>` form.
+    if ($cmd -match '(^|[^a-zA-Z])git[^a-zA-Z].*(commit|tag|push)([^a-zA-Z]|$)') { return 'yes' }
+    if ($cmd -match '(^|\s)release([^a-zA-Z]|$)') { return 'yes' }
+    return 'no'
+}
+# hook guardrail class: warn if any valid hook line has a git-verb, else ok (>=1 valid line), skip if none.
+function HookGuardrail($parent) {
+    if ((HookClass $parent) -eq 'skip') { return 'skip' }
+    foreach ($cmd in (ReadHook $parent)) {
+        if ((HasGitVerb $cmd) -eq 'yes') { return 'warn' }
+    }
+    return 'ok'
+}
+
 # --- verification-only reference: automated plan stage sequence has no release/git stage ---
 # fleet-verify runs only the integration hook (verify/test). The automated plan NEVER includes a
 # release/git stage (side-effect separation invariant; tide-guard blocks git at phase != release).
@@ -142,6 +163,33 @@ try {
     Chk "verification-only(skill-coupled): forbidden-list prose present" $(if ($skillText -like '*release / git commit / git tag / git push / cross-repo git*') { 'yes' } else { 'no' }) 'yes'
     Chk "verification-only(skill-coupled): verification-only prose present" $(if ($skillText -like '*verification-only*') { 'yes' } else { 'no' }) 'yes'
 
+    # --- (4c) integration-hook git-verb guardrail (M20 advisory): git/release -> warn, clean -> ok ---
+    # The git tokens inside hook commands are FIXTURE strings, never executed (guardrail = pre-run check).
+    $GV = Join-Path $sbx 'guardrail-git'; New-Item -ItemType Directory -Force -Path (Join-Path $GV '.tide-fleet') | Out-Null
+    Set-Content -Path (Join-Path $GV '.tide-fleet\integration') -Value 'git push' -Encoding utf8   # git-leak hook (fixture)
+    Chk "guardrail: hook with git push -> warn" (HookGuardrail $GV) 'warn'
+    Chk "guardrail: HasGitVerb(git push)=yes" (HasGitVerb 'git push') 'yes'
+    $GR = Join-Path $sbx 'guardrail-release'; New-Item -ItemType Directory -Force -Path (Join-Path $GR '.tide-fleet') | Out-Null
+    Set-Content -Path (Join-Path $GR '.tide-fleet\integration') -Value 'npm run release' -Encoding utf8   # release token (fixture)
+    Chk "guardrail: hook with release token -> warn" (HookGuardrail $GR) 'warn'
+    $CL = Join-Path $sbx 'guardrail-clean'; New-Item -ItemType Directory -Force -Path (Join-Path $CL '.tide-fleet') | Out-Null
+    Set-Content -Path (Join-Path $CL '.tide-fleet\integration') -Value "# verify only`nnpm test`ndocker compose up -d" -Encoding utf8   # clean hook
+    Chk "guardrail: clean hook (npm test) -> ok" (HookGuardrail $CL) 'ok'
+    Chk "guardrail: HasGitVerb(npm test)=no" (HasGitVerb 'npm test') 'no'
+    # canonical cross-repo form (args between git and verb) must also be flagged (M20-review #5)
+    $CR = Join-Path $sbx 'guardrail-crossrepo'; New-Item -ItemType Directory -Force -Path (Join-Path $CR '.tide-fleet') | Out-Null
+    Set-Content -Path (Join-Path $CR '.tide-fleet\integration') -Value 'git -C ../svc-auth push' -Encoding utf8   # cross-repo git (fixture)
+    Chk "guardrail: hook with git -C <dir> push -> warn" (HookGuardrail $CR) 'warn'
+    Chk "guardrail: HasGitVerb(git -C dir push)=yes" (HasGitVerb 'git -C ../svc-auth push') 'yes'
+    Chk "guardrail: HasGitVerb(git --git-dir=... commit)=yes" (HasGitVerb 'git --git-dir=svc/.git commit -m x') 'yes'
+    # read-only git (git status) has no mutating verb -> not flagged (false-positive guard)
+    Chk "guardrail: HasGitVerb(git status)=no (read-only)" (HasGitVerb 'git -C ../svc status') 'no'
+    # any git-verb among multiple lines -> whole hook warns (leak noticed even when mixed with clean lines)
+    $MX = Join-Path $sbx 'guardrail-mixed'; New-Item -ItemType Directory -Force -Path (Join-Path $MX '.tide-fleet') | Out-Null
+    Set-Content -Path (Join-Path $MX '.tide-fleet\integration') -Value "npm test`ngit commit -m x" -Encoding utf8   # clean+git mix (fixture)
+    Chk "guardrail: clean+git mix -> warn" (HookGuardrail $MX) 'warn'
+    Chk "guardrail: undeclared hook -> skip" (HookGuardrail $NH) 'skip'
+
     # --- (5) .tide-fleet/ discovery-ignore: hidden dir is never a child repo ---
     $DS = Join-Path $sbx 'discover'; New-Item -ItemType Directory -Force -Path $DS | Out-Null
     MkRepo (Join-Path $DS 'auth')
@@ -166,5 +214,5 @@ finally {
 }
 
 if ($script:fail -ne 0) { exit 1 }
-Write-Host "# fleet-verify hook-discovery/parse / opt-in-skip / pass-fail / verification-only / .tide-fleet-ignore confirmed"
+Write-Host "# fleet-verify hook-discovery/parse / opt-in-skip / pass-fail / verification-only / git-verb-guardrail / .tide-fleet-ignore confirmed"
 exit 0
