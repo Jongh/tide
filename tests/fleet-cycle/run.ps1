@@ -14,6 +14,10 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+$ROOT = Split-Path (Split-Path $PSScriptRoot)
+. (Join-Path $ROOT 'tests\lib\discover.ps1')   # IsTideRepo + Discover (single source)
+. (Join-Path $ROOT 'tests\lib\toposort.ps1')   # TopoSort (single source; ReadDeps defined by this harness)
+
 $sbx = Join-Path ([System.IO.Path]::GetTempPath()) "tide-fleet-cycle-live.$PID"
 if (Test-Path $sbx) { Remove-Item -Recurse -Force $sbx }
 New-Item -ItemType Directory -Force -Path $sbx | Out-Null
@@ -26,20 +30,7 @@ function Chk($desc, $got, $want) {
 function W($path, $text) { $d = Split-Path $path -Parent; if (-not (Test-Path $d)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }; Set-Content -Path $path -Value $text -Encoding utf8 }
 function GitInit($d) { New-Item -ItemType Directory -Force -Path $d | Out-Null; & git -C $d init -q }   # dir must exist before init
 
-# --- discovery reference (fleet reuse): immediate children, skip hidden, git repo AND tide artifacts ---
-function IsTideRepo($d) {
-    $isGit = Test-Path (Join-Path $d '.git')
-    if (-not $isGit) { & git -C $d rev-parse --show-toplevel 2>$null | Out-Null; $isGit = ($LASTEXITCODE -eq 0) }
-    if (-not $isGit) { return $false }
-    foreach ($m in @('docs\milestones', '.tide', 'package.json', 'Cargo.toml', 'pyproject.toml', '.claude-plugin\plugin.json')) {
-        if (Test-Path (Join-Path $d $m)) { return $true }
-    }
-    return $false
-}
-function Discover($parent) {
-    Get-ChildItem -Directory $parent -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -notlike '.*' -and (IsTideRepo $_.FullName) } | ForEach-Object { $_.Name } | Sort-Object
-}
+# IsTideRepo + Discover moved to tests\lib\discover.ps1 (single source); dot-sourced at top.
 
 # --- .tide/deps parse reference (fleet reuse): one sibling name/line, skip #-comments/blanks, trim, BOM strip ---
 function StripBom($s) {
@@ -102,36 +93,7 @@ function CheckContract($parent, $repo, $dep) {
     return (SemverGe $cur $req)
 }
 
-# --- processing order reference (fleet reuse): topo sort (depended-upon first) + cycle fallback ---
-function TopoSort($parent) {
-    $nodes = @(Discover $parent)
-    if ($nodes.Count -eq 0) { return '' }
-    $edges = @{}
-    foreach ($r in $nodes) {
-        $kept = @()
-        foreach ($dep in (ReadDeps (Join-Path $parent $r))) {
-            if ($nodes -contains $dep) { $kept += $dep }
-        }
-        $edges[$r] = $kept
-    }
-    $remaining = New-Object System.Collections.ArrayList
-    [void]$remaining.AddRange($nodes)
-    $order = @()
-    while ($remaining.Count -gt 0) {
-        $progressed = $false
-        $next = New-Object System.Collections.ArrayList
-        foreach ($r in $remaining) {
-            $ready = $true
-            foreach ($dep in $edges[$r]) {
-                if ($remaining -contains $dep) { $ready = $false; break }
-            }
-            if ($ready) { $order += $r; $progressed = $true } else { [void]$next.Add($r) }
-        }
-        if (-not $progressed) { return 'CYCLE' }
-        $remaining = $next
-    }
-    return ($order -join ' ')
-}
+# TopoSort moved to tests\lib\toposort.ps1 (single source; ReadDeps defined by this harness); dot-sourced at top.
 function IdxOf($orderStr, $name) {
     $arr = @($orderStr -split '\s+' | Where-Object { $_ -ne '' })
     for ($i = 0; $i -lt $arr.Count; $i++) { if ($arr[$i] -eq $name) { return $i } }

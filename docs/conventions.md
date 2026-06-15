@@ -472,6 +472,15 @@ release 1번 검사는 사용자가 버전 인자와 함께 강행 의사를 명
   카운트/카탈로그 표 미재선언, 재수기화 시 FAIL), (B3) 카탈로그 완전성(각 커맨드 이름이 카탈로그에
   `/tide:<name>`으로 등장). 단일 원본화한 카탈로그 = `docs/commands.md`, 사이트 셸 = `conventions`·
   `orchestration`·`changelog`·`commands` 4종, 집행 = `tests/discover` 가드.
+- 적용 예(M23, 테스트 참조 구현 단일 원본화): fleet 계열 하니스가 4중(× 2셸)으로 복제하던 발견·
+  위상정렬 참조 구현(`is_tide_repo`·`discover`·`toposort`)을 `tests/lib/{discover,toposort}.{sh,ps1}`
+  **공유 라이브러리** 단일 원본으로 추출하고, 4개 하니스(`discover`·`fleet`·`fleet-cycle`·`fleet-verify`)가
+  이를 source한다. 규약(발견·위상정렬) 변경 시 한 곳만 고치면 되며, 동작 보존은 전 하니스가 동일
+  PASS 수로 통과함으로 검증한다(`read_deps`처럼 하니스별로 남는 헬퍼는 source 후에도 로컬 정의 유지 —
+  함수는 호출 시점에 해석되므로 순서 무관).
+- 회고 아카이브 관례: `docs/reports/retro.md`는 최근 사이클만 두고 과거 섹션은 `retro-archive.md`로
+  분리한다(열람·입력 비용 감소). `/tide:retro`는 종전대로 `retro.md`를 **입력에서 제외**하고 새 섹션을
+  `retro.md` 최상단에 누적하므로, 분할은 집계에 영향이 없다(behavior-neutral·과거 보존).
 
 ## 2.0 안정성
 

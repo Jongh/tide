@@ -12,6 +12,11 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+# Resolve repo root from the script location; dot-source the shared discovery/topo libraries.
+$ROOT = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+. (Join-Path $ROOT 'tests\lib\discover.ps1')
+. (Join-Path $ROOT 'tests\lib\toposort.ps1')
+
 $OK  = [string]([char]0xAC00 + [char]0xB2A5)   # ga-neung U+AC00 U+B2A5 (release-able)
 $BAD = [string]([char]0xBD88 + [char]0xAC00)   # bul-ga  U+BD88 U+AC00 (blocked)
 
@@ -27,20 +32,7 @@ function Chk($desc, $got, $want) {
 function W($path, $text) { $d = Split-Path $path -Parent; if (-not (Test-Path $d)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }; Set-Content -Path $path -Value $text -Encoding utf8 }
 function GitInit($d) { New-Item -ItemType Directory -Force -Path $d | Out-Null; & git -C $d init -q }   # dir must exist before init
 
-# --- discovery reference: immediate children, skip hidden (dot) dirs, git repo AND tide artifacts ---
-function IsTideRepo($d) {
-    $isGit = Test-Path (Join-Path $d '.git')
-    if (-not $isGit) { & git -C $d rev-parse --show-toplevel 2>$null | Out-Null; $isGit = ($LASTEXITCODE -eq 0) }
-    if (-not $isGit) { return $false }
-    foreach ($m in @('docs\milestones', '.tide', 'package.json', 'Cargo.toml', 'pyproject.toml', '.claude-plugin\plugin.json')) {
-        if (Test-Path (Join-Path $d $m)) { return $true }
-    }
-    return $false
-}
-function Discover($parent) {
-    Get-ChildItem -Directory $parent -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -notlike '.*' -and (IsTideRepo $_.FullName) } | ForEach-Object { $_.Name } | Sort-Object
-}
+# IsTideRepo/Discover: tests\lib\discover.ps1 (single source)
 
 # --- classification reference: /tide:status next-command judgment (5 positions, ASCII labels) ---
 function Classify($r) {
@@ -182,41 +174,7 @@ function CheckContract($parent, $repo, $dep) {
     return (EvalOp $op $cur $req)
 }
 
-# --- dependency-aware order reference: topological sort (depended-upon first) + cycle detection ---
-# Names not in the discovered set are ignored (safe side). Unconsumed nodes -> cycle -> sentinel CYCLE.
-function TopoSort($parent) {
-    $nodes = @(Discover $parent)                              # discovered repos (sorted)
-    if ($nodes.Count -eq 0) { return '' }
-
-    # edges: keep only deps that are in the discovered set (ignore unknown names)
-    $edges = @{}
-    foreach ($r in $nodes) {
-        $kept = @()
-        foreach ($dep in (ReadDeps (Join-Path $parent $r))) {
-            if ($nodes -contains $dep) { $kept += $dep }
-        }
-        $edges[$r] = $kept
-    }
-
-    $remaining = New-Object System.Collections.ArrayList
-    [void]$remaining.AddRange($nodes)
-    $order = @()
-    # Kahn variant: emit nodes whose deps are all already emitted; no progress -> cycle.
-    while ($remaining.Count -gt 0) {
-        $progressed = $false
-        $next = New-Object System.Collections.ArrayList
-        foreach ($r in $remaining) {
-            $ready = $true
-            foreach ($dep in $edges[$r]) {
-                if ($remaining -contains $dep) { $ready = $false; break }  # dep not yet emitted
-            }
-            if ($ready) { $order += $r; $progressed = $true } else { [void]$next.Add($r) }
-        }
-        if (-not $progressed) { return 'CYCLE' }
-        $remaining = $next
-    }
-    return ($order -join ' ')
-}
+# TopoSort: tests\lib\toposort.ps1 (single source; ReadDeps defined by this harness)
 
 # index of <name> in a space-joined order string (-1 if absent)
 function IdxOf($orderStr, $name) {

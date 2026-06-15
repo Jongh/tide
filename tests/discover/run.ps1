@@ -20,6 +20,7 @@ $JONG = [string][char]0xC885
 
 # Resolve repo root from the script location (like tests/fleet).
 $ROOT = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+. (Join-Path $ROOT 'tests\lib\discover.ps1')
 
 $sbx = Join-Path ([System.IO.Path]::GetTempPath()) "tide-discover-live.$PID"
 if (Test-Path $sbx) { Remove-Item -Recurse -Force $sbx }
@@ -35,20 +36,7 @@ function GitInit($d) { New-Item -ItemType Directory -Force -Path $d | Out-Null; 
 
 # === Part A -- detection threshold =====================================
 
-# --- discovery reference (fleet reused): immediate children, skip hidden (dot) dirs, git repo AND tide artifacts ---
-function IsTideRepo($d) {
-    $isGit = Test-Path (Join-Path $d '.git')
-    if (-not $isGit) { & git -C $d rev-parse --show-toplevel 2>$null | Out-Null; $isGit = ($LASTEXITCODE -eq 0) }
-    if (-not $isGit) { return $false }
-    foreach ($m in @('docs\milestones', '.tide', 'package.json', 'Cargo.toml', 'pyproject.toml', '.claude-plugin\plugin.json')) {
-        if (Test-Path (Join-Path $d $m)) { return $true }
-    }
-    return $false
-}
-function Discover($parent) {
-    Get-ChildItem -Directory $parent -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -notlike '.*' -and (IsTideRepo $_.FullName) } | ForEach-Object { $_.Name } | Sort-Object
-}
+# IsTideRepo/Discover: tests\lib\discover.ps1 (single source)
 
 # --- detection hint reference: count child tide repos; >=2 -> "hint N=<count>", else "none" ---
 function DetectHint($parent) {

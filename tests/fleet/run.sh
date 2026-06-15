@@ -13,6 +13,12 @@
 # 사용: sh tests/fleet/run.sh   (성공 시 exit 0, 하나라도 실패 시 exit 1)
 
 set -u
+
+# 레포 루트는 스크립트 위치에서 해석. 공유 발견/위상정렬 라이브러리를 source한다.
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+. "$ROOT/tests/lib/discover.sh"
+. "$ROOT/tests/lib/toposort.sh"
+
 SBX="${TMPDIR:-/tmp}/tide-fleet-live.$$"
 rm -rf "$SBX"; mkdir -p "$SBX"
 trap 'rm -rf "$SBX"' EXIT
@@ -23,21 +29,7 @@ chk() { # <desc> <got> <want>
     else fail=$((fail + 1)); printf 'FAIL  %-52s (got %s, want %s)\n' "$1" "$2" "$3"; fi
 }
 
-# --- 발견 규약(참조 구현): 직속 1단계, 숨김(.) 무시, git 레포 AND tide 산출물 ---
-is_tide_repo() { # <dir>
-    d="$1"
-    { git -C "$d" rev-parse --show-toplevel >/dev/null 2>&1 || [ -d "$d/.git" ]; } || return 1
-    [ -d "$d/docs/milestones" ] || [ -d "$d/.tide" ] || [ -f "$d/package.json" ] || \
-        [ -f "$d/Cargo.toml" ] || [ -f "$d/pyproject.toml" ] || [ -f "$d/.claude-plugin/plugin.json" ]
-}
-discover() { # <parent> → 직속 자식 tide 레포 basename 정렬 출력
-    for d in "$1"/*/ ; do
-        [ -d "$d" ] || continue
-        base=$(basename "${d%/}")
-        case "$base" in .*) continue ;; esac          # 숨김(dot) 디렉터리 무시
-        if is_tide_repo "${d%/}"; then echo "$base"; fi
-    done | sort
-}
+# is_tide_repo/discover: tests/lib/discover.sh (단일 원본)
 
 # --- 분류(참조 구현): /tide:status 다음 커맨드 판단 규칙 (5 position, ASCII 라벨) ---
 classify() { # <repo> → 라벨
@@ -163,53 +155,7 @@ check_contract() { # <parent> <repo> <dep>
     eval_op "$op" "$cur" "$req"
 }
 
-# --- 의존성 인식 순서(참조 구현): 위상정렬(피의존 우선) + 순환 감지 폴백 ---
-# 발견 집합에 없는 이름은 무시(안전 측). 모든 노드를 소비 못하면 순환 → 센티넬 CYCLE.
-toposort() { # <parent> → "depA depB ..."(공백 구분, 피의존 먼저) | "CYCLE"
-    parent="$1"
-    nodes=$(discover "$parent")                              # 발견된 레포(정렬됨)
-    [ -n "$nodes" ] || { echo ""; return 0; }
-
-    # edges_<repo> = 발견 집합에 든 의존 대상만(미존재명 무시)
-    set -- $nodes
-    for r in $nodes; do
-        kept=""
-        for dep in $(read_deps "$parent/$r"); do
-            for n in $nodes; do                              # 발견 집합 멤버십 검사
-                if [ "$dep" = "$n" ]; then kept="$kept $dep"; break; fi
-            done
-        done
-        eval "edges_$r=\"$kept\""
-    done
-
-    remaining="$nodes"
-    order=""
-    # Kahn 변형: 미해결 의존이 0인 노드를 발견 순서대로 방출, 진전 없으면 순환.
-    while [ -n "$(printf '%s' "$remaining" | tr -d '[:space:]')" ]; do
-        progressed=0
-        next_remaining=""
-        for r in $remaining; do
-            eval "deps=\$edges_$r"
-            ready=1
-            for dep in $deps; do
-                # dep이 아직 remaining에 있으면(아직 미방출) 이 노드는 대기
-                for rem in $remaining; do
-                    if [ "$dep" = "$rem" ]; then ready=0; break; fi
-                done
-                [ "$ready" -eq 1 ] || break
-            done
-            if [ "$ready" -eq 1 ]; then
-                order="$order $r"; progressed=1
-            else
-                next_remaining="$next_remaining $r"
-            fi
-        done
-        if [ "$progressed" -eq 0 ]; then echo "CYCLE"; return 0; fi
-        remaining="$next_remaining"
-    done
-    # 선두 공백 제거
-    printf '%s\n' "$order" | sed 's/^[[:space:]]*//'
-}
+# toposort: tests/lib/toposort.sh (단일 원본; read_deps는 이 하니스가 정의)
 
 # 순서 문자열에서 어떤 레포가 다른 레포보다 앞에 오는지(인덱스 비교)
 idx_of() { # <order-string> <name> → 0-based 인덱스(없으면 -1)

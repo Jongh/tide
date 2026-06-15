@@ -19,6 +19,7 @@ set -u
 
 # 레포 루트는 스크립트 위치에서 해석(tests/fleet 규약과 동일).
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+. "$ROOT/tests/lib/discover.sh"
 
 SBX="${TMPDIR:-/tmp}/tide-discover-live.$$"
 rm -rf "$SBX"; mkdir -p "$SBX"
@@ -32,21 +33,7 @@ chk() { # <desc> <got> <want>
 
 # === Part A — 감지 임계값 (detection threshold) =========================
 
-# --- 발견 규약(참조 구현, fleet 재사용): 직속 1단계, 숨김(.) 무시, git 레포 AND tide 산출물 ---
-is_tide_repo() { # <dir>
-    d="$1"
-    { git -C "$d" rev-parse --show-toplevel >/dev/null 2>&1 || [ -d "$d/.git" ]; } || return 1
-    [ -d "$d/docs/milestones" ] || [ -d "$d/.tide" ] || [ -f "$d/package.json" ] || \
-        [ -f "$d/Cargo.toml" ] || [ -f "$d/pyproject.toml" ] || [ -f "$d/.claude-plugin/plugin.json" ]
-}
-discover() { # <parent> → 직속 자식 tide 레포 basename 정렬 출력
-    for d in "$1"/*/ ; do
-        [ -d "$d" ] || continue
-        base=$(basename "${d%/}")
-        case "$base" in .*) continue ;; esac          # 숨김(dot) 디렉터리 무시
-        if is_tide_repo "${d%/}"; then echo "$base"; fi
-    done | sort
-}
+# is_tide_repo/discover: tests/lib/discover.sh (단일 원본)
 
 # --- 감지 힌트(참조 구현): 자식 tide 레포 수를 세고 ≥2면 hint, 미만이면 none ---
 # 출력: 발견 수 ≥ 2 → "hint N=<count>"; 0·1개 → "none". (status·kickoff advisory 임계값 재현)

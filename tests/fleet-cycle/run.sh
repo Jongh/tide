@@ -14,6 +14,9 @@
 # 사용: sh tests/fleet-cycle/run.sh   (성공 시 exit 0, 하나라도 실패 시 exit 1)
 
 set -u
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$ROOT/tests/lib/discover.sh"   # is_tide_repo + discover (단일 원본)
+. "$ROOT/tests/lib/toposort.sh"   # toposort (단일 원본; read_deps는 아래 하니스가 정의)
 SBX="${TMPDIR:-/tmp}/tide-fleet-cycle-live.$$"
 rm -rf "$SBX"; mkdir -p "$SBX"
 trap 'rm -rf "$SBX"' EXIT
@@ -24,21 +27,7 @@ chk() { # <desc> <got> <want>
     else fail=$((fail + 1)); printf 'FAIL  %-56s (got %s, want %s)\n' "$1" "$2" "$3"; fi
 }
 
-# --- 발견 규약(참조 구현): 직속 1단계, 숨김(.) 무시, git 레포 AND tide 산출물 (fleet 재사용) ---
-is_tide_repo() { # <dir>
-    d="$1"
-    { git -C "$d" rev-parse --show-toplevel >/dev/null 2>&1 || [ -d "$d/.git" ]; } || return 1
-    [ -d "$d/docs/milestones" ] || [ -d "$d/.tide" ] || [ -f "$d/package.json" ] || \
-        [ -f "$d/Cargo.toml" ] || [ -f "$d/pyproject.toml" ] || [ -f "$d/.claude-plugin/plugin.json" ]
-}
-discover() { # <parent> → 직속 자식 tide 레포 basename 정렬 출력
-    for d in "$1"/*/ ; do
-        [ -d "$d" ] || continue
-        base=$(basename "${d%/}")
-        case "$base" in .*) continue ;; esac          # 숨김(dot) 디렉터리 무시
-        if is_tide_repo "${d%/}"; then echo "$base"; fi
-    done | sort
-}
+# is_tide_repo + discover는 tests/lib/discover.sh로 이관(단일 원본). 위에서 source.
 
 # --- .tide/deps 파싱(참조 구현, fleet 재사용): 형제명 하나/줄, # 주석·빈 줄 무시, 트림, BOM 제거 ---
 strip_bom() { sed '1s/^\xEF\xBB\xBF//'; }
@@ -93,39 +82,7 @@ check_contract() { # <parent> <repo> <dep> → satisfied|violation|skip|none
     semver_ge "$cur" "$req"
 }
 
-# --- 처리 순서(참조 구현, fleet 재사용): 위상정렬(피의존 먼저) + 순환 폴백 ---
-toposort() { # <parent> → "depA depB ..."(피의존 먼저) | "CYCLE"
-    parent="$1"
-    nodes=$(discover "$parent")
-    [ -n "$nodes" ] || { echo ""; return 0; }
-    for r in $nodes; do
-        kept=""
-        for dep in $(read_deps "$parent/$r"); do
-            for n in $nodes; do
-                if [ "$dep" = "$n" ]; then kept="$kept $dep"; break; fi
-            done
-        done
-        eval "edges_$r=\"$kept\""
-    done
-    remaining="$nodes"; order=""
-    while [ -n "$(printf '%s' "$remaining" | tr -d '[:space:]')" ]; do
-        progressed=0; next_remaining=""
-        for r in $remaining; do
-            eval "deps=\$edges_$r"; ready=1
-            for dep in $deps; do
-                for rem in $remaining; do
-                    if [ "$dep" = "$rem" ]; then ready=0; break; fi
-                done
-                [ "$ready" -eq 1 ] || break
-            done
-            if [ "$ready" -eq 1 ]; then order="$order $r"; progressed=1
-            else next_remaining="$next_remaining $r"; fi
-        done
-        if [ "$progressed" -eq 0 ]; then echo "CYCLE"; return 0; fi
-        remaining="$next_remaining"
-    done
-    printf '%s\n' "$order" | sed 's/^[[:space:]]*//'
-}
+# toposort는 tests/lib/toposort.sh로 이관(단일 원본; read_deps는 위 하니스가 정의). 상단에서 source.
 idx_of() { # <order-string> <name> → 0-based 인덱스(없으면 -1)
     i=0
     for w in $1; do

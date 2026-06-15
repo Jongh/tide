@@ -15,6 +15,8 @@
 # 사용: sh tests/fleet-verify/run.sh   (성공 시 exit 0, 하나라도 실패 시 exit 1)
 
 set -u
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$ROOT/tests/lib/discover.sh"   # is_tide_repo + discover (단일 원본)
 SBX="${TMPDIR:-/tmp}/tide-fleet-verify-live.$$"
 rm -rf "$SBX"; mkdir -p "$SBX"
 trap 'rm -rf "$SBX"' EXIT
@@ -25,22 +27,7 @@ chk() { # <desc> <got> <want>
     else fail=$((fail + 1)); printf 'FAIL  %-56s (got %s, want %s)\n' "$1" "$2" "$3"; fi
 }
 
-# --- 발견 규약(참조 구현): 직속 1단계, 숨김(.) 무시, git 레포 AND tide 산출물 (fleet 재사용) ---
-# `.tide-fleet/`는 숨김(dot) 디렉터리라 자식 레포로 잡히지 않는다(통합 훅 보관소, 자식 아님).
-is_tide_repo() { # <dir>
-    d="$1"
-    { git -C "$d" rev-parse --show-toplevel >/dev/null 2>&1 || [ -d "$d/.git" ]; } || return 1
-    [ -d "$d/docs/milestones" ] || [ -d "$d/.tide" ] || [ -f "$d/package.json" ] || \
-        [ -f "$d/Cargo.toml" ] || [ -f "$d/pyproject.toml" ] || [ -f "$d/.claude-plugin/plugin.json" ]
-}
-discover() { # <parent> → 직속 자식 tide 레포 basename 정렬 출력
-    for d in "$1"/*/ ; do
-        [ -d "$d" ] || continue
-        base=$(basename "${d%/}")
-        case "$base" in .*) continue ;; esac          # 숨김(dot) 디렉터리 무시(.tide-fleet 포함)
-        if is_tide_repo "${d%/}"; then echo "$base"; fi
-    done | sort
-}
+# is_tide_repo + discover는 tests/lib/discover.sh로 이관(단일 원본; .tide-fleet 숨김 무시 포함). 위에서 source.
 
 # --- 통합 훅 파싱(참조 구현): `.tide-fleet/integration` 읽기, 선두 BOM 제거, # 주석·빈 줄 무시 ---
 strip_bom() { sed '1s/^\xEF\xBB\xBF//'; }

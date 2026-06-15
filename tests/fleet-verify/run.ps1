@@ -16,6 +16,9 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+$ROOT = Split-Path (Split-Path $PSScriptRoot)
+. (Join-Path $ROOT 'tests\lib\discover.ps1')   # IsTideRepo + Discover (single source)
+
 $sbx = Join-Path ([System.IO.Path]::GetTempPath()) "tide-fleet-verify-live.$PID"
 if (Test-Path $sbx) { Remove-Item -Recurse -Force $sbx }
 New-Item -ItemType Directory -Force -Path $sbx | Out-Null
@@ -28,21 +31,7 @@ function Chk($desc, $got, $want) {
 function W($path, $text) { $d = Split-Path $path -Parent; if (-not (Test-Path $d)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }; Set-Content -Path $path -Value $text -Encoding utf8 }
 function GitInit($d) { New-Item -ItemType Directory -Force -Path $d | Out-Null; & git -C $d init -q }   # dir must exist before init
 
-# --- discovery reference (fleet reuse): immediate children, skip hidden, git repo AND tide artifacts ---
-# .tide-fleet/ is a hidden (dot) dir so it is never picked up as a child repo (hook store, not a child).
-function IsTideRepo($d) {
-    $isGit = Test-Path (Join-Path $d '.git')
-    if (-not $isGit) { & git -C $d rev-parse --show-toplevel 2>$null | Out-Null; $isGit = ($LASTEXITCODE -eq 0) }
-    if (-not $isGit) { return $false }
-    foreach ($m in @('docs\milestones', '.tide', 'package.json', 'Cargo.toml', 'pyproject.toml', '.claude-plugin\plugin.json')) {
-        if (Test-Path (Join-Path $d $m)) { return $true }
-    }
-    return $false
-}
-function Discover($parent) {
-    Get-ChildItem -Directory $parent -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -notlike '.*' -and (IsTideRepo $_.FullName) } | ForEach-Object { $_.Name } | Sort-Object
-}
+# IsTideRepo + Discover moved to tests\lib\discover.ps1 (single source; .tide-fleet hidden-skip included); dot-sourced at top.
 
 # --- integration hook parse reference: read .tide-fleet/integration, strip leading BOM, skip #/blank ---
 function StripBom($s) {
