@@ -95,37 +95,80 @@ try {
     Chk "A: hidden child (.hidden-svc) not discovered" ([bool]((Discover $PH) -match 'hidden')).ToString() 'False'
     Chk "A: discover = svc-a,svc-b (hidden excluded)" ((Discover $PH) -join ',') 'svc-a,svc-b'
 
-    # === Part B -- command-count drift guard =============================
+    # === Part B -- single-source freeze: canonical catalog + drift guard ====
+    # (M22) the command catalog is single-sourced in docs/commands.md; the site page is a snippet shell.
+    # The guard checks (B1) count-declaration consistency, (B2) the site catalog page is a shell (not a
+    # re-duplication), (B3) catalog completeness (each command name present). Extends M20-review #6.
 
     # actual command skill count = number of skills/*/SKILL.md files
     $N = @(Get-ChildItem (Join-Path $ROOT 'skills') -Directory -ErrorAction SilentlyContinue |
         Where-Object { Test-Path (Join-Path $_.FullName 'SKILL.md') }).Count
     Chk "B: actual command skill count measured (>0)" $(if ($N -gt 0) { 'ok' } else { 'no' }) 'ok'
 
-    # canonical declaration sites must declare "N<jong>" (e.g. 11<jong>); divergence -> FAIL.
+    $README    = Join-Path $ROOT 'README.md'
+    $CONV      = Join-Path $ROOT 'docs\conventions.md'
+    $CANON_CMD = Join-Path $ROOT 'docs\commands.md'        # new canonical command catalog (single source)
+    $SITE_CMD  = Join-Path $ROOT 'site\docs\commands.md'   # site shell (snippet include)
+    $SITE_GS   = Join-Path $ROOT 'site\docs\getting-started.md'
+
+    # PS 5.1 Get-Content mis-decodes UTF-8-without-BOM; read with explicit UTF-8 so the Korean counter
+    # token (U+C885) and other multibyte content match byte-correctly.
+    function ReadUtf8($file) {
+        if (-not (Test-Path $file)) { return $null }
+        return [System.IO.File]::ReadAllText($file, [System.Text.Encoding]::UTF8)
+    }
+
+    # (B1) count-declaration consistency -- "N<jong>" sites match the actual skill count; divergence -> FAIL.
+    #      site/docs/commands.md is now a shell (no count) -> replaced by canonical docs/commands.md.
     function DeclaredHasCount($file, $count) {
-        if (-not (Test-Path $file)) { return 'no' }
-        # PS 5.1 Get-Content mis-decodes UTF-8-without-BOM; read with explicit UTF-8 so the Korean
-        # counter token (U+C885) matches the canonical "N<jong>" declaration byte-correctly.
-        $raw = [System.IO.File]::ReadAllText($file, [System.Text.Encoding]::UTF8)
+        $raw = ReadUtf8 $file
+        if ($null -eq $raw) { return 'no' }
         if ($raw.Contains("$count$JONG")) { return 'yes' } else { return 'no' }
     }
-    $README   = Join-Path $ROOT 'README.md'
-    $CONV     = Join-Path $ROOT 'docs\conventions.md'
-    $SITE_CMD = Join-Path $ROOT 'site\docs\commands.md'
-    $SITE_GS  = Join-Path $ROOT 'site\docs\getting-started.md'
+    Chk "B1: docs/commands.md declares N$JONG (canonical)" (DeclaredHasCount $CANON_CMD $N) 'yes'
+    Chk "B1: README.md declares N$JONG"                    (DeclaredHasCount $README $N)    'yes'
+    Chk "B1: docs/conventions.md declares N$JONG"          (DeclaredHasCount $CONV $N)      'yes'
+    Chk "B1: site/docs/getting-started.md declares N$JONG" (DeclaredHasCount $SITE_GS $N)   'yes'
 
-    Chk "B: README.md declares N$JONG"                 (DeclaredHasCount $README $N)   'yes'
-    Chk "B: docs/conventions.md declares N$JONG"       (DeclaredHasCount $CONV $N)     'yes'
-    Chk "B: site/docs/commands.md declares N$JONG"     (DeclaredHasCount $SITE_CMD $N) 'yes'
-    Chk "B: site/docs/getting-started.md declares N$JONG" (DeclaredHasCount $SITE_GS $N) 'yes'
+    # (B2) the site catalog page is a snippet shell -- has the include AND re-declares neither the count
+    #      nor the catalog table. Re-duplication (catalog regression) -> FAIL, enforcing single-sourcing.
+    function IsSnippetShell($file, $count) {
+        $raw = ReadUtf8 $file
+        if ($null -eq $raw) { return 'no' }
+        if (-not $raw.Contains('8<-- "docs/commands.md:body"')) { return 'no' }   # include present
+        if ($raw.Contains("$count$JONG")) { return 'no' }                          # count re-declared
+        if ($raw.Contains('|---|---|---|---|')) { return 'no' }                     # catalog table re-declared
+        return 'yes'
+    }
+    Chk "B2: site/docs/commands.md is a snippet shell (not re-duplicated)" (IsSnippetShell $SITE_CMD $N) 'yes'
 
-    # negative control: a different count (N+1) must NOT appear in any canonical file (drift would be caught).
+    # (B3) catalog completeness -- each command name appears as /tide:<name> in the canonical catalog.
+    #      Catches name-level drift (missing/renamed command) that the count-only guard could not.
+    #      Require a boundary after the name (not a letter/hyphen) so /tide:fleet is NOT satisfied by
+    #      /tide:fleet-cycle alone (fleet != fleet-cycle) -- the assertion targets intent, not substring.
+    function HasCommand($file, $name) {
+        $raw = ReadUtf8 $file
+        if ($null -eq $raw) { return 'no' }
+        $pat = '/tide:' + $name + '([^a-z-]|$)'
+        if ($raw -match $pat) { return 'yes' } else { return 'no' }
+    }
+    $allNamesOk = 'yes'
+    foreach ($d in Get-ChildItem (Join-Path $ROOT 'skills') -Directory -ErrorAction SilentlyContinue) {
+        if (Test-Path (Join-Path $d.FullName 'SKILL.md')) {
+            if ((HasCommand $CANON_CMD $d.Name) -ne 'yes') { $allNamesOk = 'no' }
+        }
+    }
+    Chk "B3: all command names appear in docs/commands.md catalog" $allNamesOk 'yes'
+
+    # name negative control: a bogus command (/tide:bogus) must NOT appear (name check discriminates).
+    Chk "B3: name control -- /tide:bogus not in catalog" (HasCommand $CANON_CMD 'bogus') 'no'
+
+    # count negative control: a different count (N+1) must NOT appear in any count-declaration file.
     $WRONG = $N + 1
-    Chk "B: drift control -- README has no $WRONG$JONG"            (DeclaredHasCount $README $WRONG)   'no'
-    Chk "B: drift control -- conventions has no $WRONG$JONG"       (DeclaredHasCount $CONV $WRONG)     'no'
-    Chk "B: drift control -- site/commands has no $WRONG$JONG"     (DeclaredHasCount $SITE_CMD $WRONG) 'no'
-    Chk "B: drift control -- site/getting-started has no $WRONG$JONG" (DeclaredHasCount $SITE_GS $WRONG) 'no'
+    Chk "B1: drift control -- docs/commands.md has no $WRONG$JONG"     (DeclaredHasCount $CANON_CMD $WRONG) 'no'
+    Chk "B1: drift control -- README has no $WRONG$JONG"               (DeclaredHasCount $README $WRONG)    'no'
+    Chk "B1: drift control -- conventions has no $WRONG$JONG"          (DeclaredHasCount $CONV $WRONG)      'no'
+    Chk "B1: drift control -- site/getting-started has no $WRONG$JONG" (DeclaredHasCount $SITE_GS $WRONG)   'no'
 
     Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) (actual command skills N=$N)"
 }
@@ -134,5 +177,5 @@ finally {
 }
 
 if ($script:fail -ne 0) { exit 1 }
-Write-Host "# discover detection threshold (>=2->hint / <2->none / single-repo->none / hidden-not-counted) + command-count drift guard (actual == canonical declaration) confirmed"
+Write-Host "# discover detection threshold (>=2->hint / <2->none / single-repo->none / hidden-not-counted) + single-source freeze (B1 count / B2 site shell / B3 catalog completeness, canonical=docs/commands.md) confirmed"
 exit 0

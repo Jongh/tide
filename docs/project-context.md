@@ -20,8 +20,9 @@
 | `docs/milestones/` | 마일스톤 문서 `M{N}.md` |
 | `docs/reports/` | 완료보고서 `M{N}-impl.md`·리뷰보고서 `M{N}-review.md` |
 | `docs/conventions.md` | 단계별 규약 단일 원본 |
+| `docs/commands.md` | 커맨드 카탈로그 단일 원본(11종 역할·인자·산출물·금지). 사이트 `commands.md`가 `pymdownx.snippets`로 본문(`[start:body]`) 인클루드 — `tests/discover` 가드가 카운트·셸·이름 완전성을 집행 |
 | `tests/` | 라이브 실증 하니스 (`multi-repo/` 등 — 자기완결형 `run.sh`·`run.ps1`, 자동 러너 없는 도그푸딩 검증 수단) |
-| `site/` | MkDocs 사이트 (`mkdocs.yml`·`docs/` — 문서 사이트 빌드 입력) |
+| `site/` | MkDocs 사이트 (`mkdocs.yml`·`docs/` — 문서 사이트 빌드 입력). `conventions`·`orchestration`·`changelog`·`commands` 4종은 저장소 원본을 `pymdownx.snippets`로 인클루드하는 **스니펫 셸**(수기 복제 아님) |
 | `.tide/` | `phase`(로컬 상태 — `.gitignore` 대상, 커밋 안 함) + `deps`(의존성 선언 — 커밋함). gitignore 범위는 `.tide/`가 아니라 `.tide/phase`만 |
 | `.tide-fleet/` | 부모 레벨 통합 훅(`integration`) — fleet-verify가 읽는 cross-repo 검증 명령(옵트인). 숨김 디렉터리라 fleet 발견에서 제외 |
 

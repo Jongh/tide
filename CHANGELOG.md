@@ -8,6 +8,11 @@
      릴리즈 노트만 인클루드하기 위한 마커다. 위 제목·안내 줄은 사이트에 부적절해 제외된다.
      렌더에는 영향 없음. -->
 <!-- --8<-- [start:notes] -->
+### [v2.2.0]
+- **사이트 단일 원본화 — 커맨드 카탈로그를 캐노니컬 `docs/commands.md`로 동결(정리)**: 그동안 `site/docs/commands.md`에 수기로 복제돼 있던 커맨드 카탈로그(한눈에 보기 표 + 11종 절)를 새 캐노니컬 문서 `docs/commands.md` 단일 원본으로 끌어오고, 사이트 페이지는 `pymdownx.snippets`로 본문을 인클루드하는 **스니펫 셸**로 전환했다(기존 `conventions`·`orchestration`·`changelog`와 동형). 카탈로그 본문은 **바이트 보존 이동**이라 렌더 출력 불변. 회고가 M11~M20 내내 지목한 "수기 사이트 페이지 표류" 군집의 잔존 뿌리를 단일 원본화로 닫았다.
+- **드리프트 가드 확장 — 개수→이름 완전성 + 셸 검증**: `tests/discover` 가드를 (B1) `N종` 카운트 선언 정합(캐노니컬 = `docs/commands.md`), (B2) 사이트 카탈로그 페이지가 스니펫 셸인지(인클루드 보유·카운트/표 미재선언, 재수기화 시 FAIL), (B3) 카탈로그 완전성(각 커맨드 이름이 `/tide:<name>` **경계 일치**로 등장 — `fleet`이 `fleet-cycle`에 substring으로 걸려 거짓 통과하지 않도록)까지 확장했다. 새 단일 원본을 더하면 강제 수단도 같은 사이클에(2.0 메타 규칙).
+- **라이브 실증**: `tests/discover` 하니스가 감지 임계값 + 단일 원본 동결(B1/B2/B3)을 sh·ps1 양쪽 각 19/19 통과. `tests/fleet`·`fleet-cycle`·`fleet-verify`·`multi-repo` 회귀 불변. 전부 하위 호환 정리 가산 — 커맨드 11종 이름·역할(2.0 stable 계약)·`.tide/phase`/tide-guard·보고서·마일스톤 형식 불변, 사이트 렌더 출력 불변.
+
 ### [v2.1.0]
 - **오케스트레이션 발견성 — 멀티 레포 맥락 감지 힌트(가산)**: `/tide:status`·`/tide:kickoff`가 본래 작업을 마친 뒤, 현재 세션 위치의 직속 자식 tide 레포(발견 규약 재사용 — git 레포 AND tide 산출물, 숨김 디렉터리 제외)가 **2개 이상**이면 출력 맨 끝에 `여러 자식 tide 레포 N개 감지 — 교차 개요는 /tide:fleet` 한 줄을 advisory로 덧붙인다. **2개 미만(단일 레포 세션 포함)이면 아무 것도 덧붙이지 않는다**(소음 0). 읽기 전용·advisory — status는 종전대로 완전 읽기 전용, kickoff는 골격 생성 외 동작 불변이고 힌트는 fleet을 자동 실행하지 않는다. 발견성 규약은 `docs/conventions.md` "멀티 레포 오케스트레이션"이 단일 원본.
 - **커맨드 수 드리프트 가드**: `skills/*/SKILL.md`로 존재하는 실제 커맨드 스킬 개수와 캐노니컬 문서·사이트(`README`·`conventions`·`site/docs/commands`·`site/docs/getting-started`)가 선언하는 "N종" 수가 어긋나면 FAIL하는 가드를 `tests/discover`에 추가했다 — 커맨드 증감 시 선언 갱신을 강제한다(수기 사이트 페이지의 커맨드 수 표류 회귀 고정).

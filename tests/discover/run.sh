@@ -95,35 +95,67 @@ chk "A: 자식 2개 + 숨김 tide 자식 → hint N=2(숨김 미카운트)" "$(d
 chk "A: 숨김 자식(.hidden-svc) 미발견"             "$(discover "$PH" | grep -c hidden)" "0"
 chk "A: 발견 = svc-a,svc-b (숨김 제외)"            "$(discover "$PH" | tr '\n' ',')" "svc-a,svc-b,"
 
-# === Part B — 커맨드 수 드리프트 가드 (command-count guard) ==============
+# === Part B — 단일 원본 동결: 카탈로그 단일 원본 + 드리프트 가드 ==========
+# (M22) 커맨드 카탈로그를 docs/commands.md 단일 원본으로 끌어오고, 사이트는 스니펫 셸이다.
+# 가드는 (B1) 카운트 선언 정합, (B2) 사이트 카탈로그 페이지가 셸(재복제 아님),
+# (B3) 카탈로그 완전성(각 커맨드 이름 등장)을 검증한다 — M20 리뷰 #6 회귀 고정의 확장.
 
 # 실제 커맨드 스킬 개수 = skills/*/SKILL.md 파일 수.
 N=$(ls "$ROOT"/skills/*/SKILL.md 2>/dev/null | grep -c .)
 chk "B: 실제 커맨드 스킬 개수 측정(>0)" "$([ "$N" -gt 0 ] && echo ok || echo no)" "ok"
 
-# 캐노니컬 선언 위치가 "N종"(예: 11종)을 선언하는지 grep 결합 검증(불일치면 FAIL).
-# 선언 수를 실제 스킬 수와 어긋나게 바꾸면 이 가드가 FAIL한다(M20 리뷰 #6 회귀 고정).
+README="$ROOT/README.md"
+CONV="$ROOT/docs/conventions.md"
+CANON_CMD="$ROOT/docs/commands.md"        # 새 캐노니컬 커맨드 카탈로그(단일 원본)
+SITE_CMD="$ROOT/site/docs/commands.md"    # 사이트 셸(스니펫 인클루드)
+SITE_GS="$ROOT/site/docs/getting-started.md"
+
+# (B1) 카운트 선언 정합 — "N종"(예: 11종) 선언 파일이 실제 스킬 수와 일치(불일치면 FAIL).
+#      site/docs/commands.md는 이제 셸이라 카운트 비보유 → 캐노니컬 docs/commands.md로 대체.
 declared_has_count() { # <file> <N> → yes|no
     [ -f "$1" ] && grep -qF "${2}종" "$1" && echo yes || echo no
 }
-README="$ROOT/README.md"
-CONV="$ROOT/docs/conventions.md"
-SITE_CMD="$ROOT/site/docs/commands.md"
-SITE_GS="$ROOT/site/docs/getting-started.md"
+chk "B1: docs/commands.md 가 ${N}종 선언(캐노니컬)"     "$(declared_has_count "$CANON_CMD" "$N")" "yes"
+chk "B1: README.md 가 ${N}종 선언"                     "$(declared_has_count "$README" "$N")" "yes"
+chk "B1: docs/conventions.md 가 ${N}종 선언"           "$(declared_has_count "$CONV" "$N")" "yes"
+chk "B1: site/docs/getting-started.md 가 ${N}종 선언"  "$(declared_has_count "$SITE_GS" "$N")" "yes"
 
-chk "B: README.md 가 ${N}종 선언"                "$(declared_has_count "$README" "$N")" "yes"
-chk "B: docs/conventions.md 가 ${N}종 선언"      "$(declared_has_count "$CONV" "$N")" "yes"
-chk "B: site/docs/commands.md 가 ${N}종 선언"    "$(declared_has_count "$SITE_CMD" "$N")" "yes"
-chk "B: site/docs/getting-started.md 가 ${N}종 선언" "$(declared_has_count "$SITE_GS" "$N")" "yes"
+# (B2) 사이트 카탈로그 페이지가 스니펫 셸인지 — 인클루드 보유 AND 카운트·카탈로그 표 미재선언.
+#      재수기화(카탈로그 복귀) 시 FAIL → 단일 원본화를 강제한다.
+is_snippet_shell() { # <file> <N> → yes|no
+    [ -f "$1" ] || { echo no; return; }
+    grep -qF '8<-- "docs/commands.md:body"' "$1" || { echo no; return; }   # 스니펫 인클루드 보유
+    grep -qF "${2}종" "$1" && { echo no; return; }                          # 카운트 재선언 = 셸 아님
+    grep -qF '|---|---|---|---|' "$1" && { echo no; return; }               # 카탈로그 표 재선언 = 셸 아님
+    echo yes
+}
+chk "B2: site/docs/commands.md 는 스니펫 셸(재복제 아님)" "$(is_snippet_shell "$SITE_CMD" "$N")" "yes"
 
-# 가드 음성 통제: 실제와 다른 수(N+1종)는 어느 캐노니컬 파일에도 없어야 한다(드리프트면 잡힘 입증).
+# (B3) 카탈로그 완전성 — 각 커맨드 이름이 캐노니컬 카탈로그에 /tide:<name> 으로 등장.
+#      개수만 맞고 이름이 빠지거나 바뀐 표류(개수 가드가 못 잡던 것)를 적발한다.
+#      이름 뒤 경계(영문·하이픈 아님)를 요구해 prefix 오탐을 막는다 — /tide:fleet 이
+#      /tide:fleet-cycle 에 substring으로 걸려 거짓 통과하지 않도록(fleet ≠ fleet-cycle).
+has_command() { # <file> <name> → yes|no
+    [ -f "$1" ] && grep -qE "/tide:$2([^a-z-]|$)" "$1" && echo yes || echo no
+}
+allnames_ok=yes
+for skill in "$ROOT"/skills/*/SKILL.md; do
+    name=$(basename "$(dirname "$skill")")
+    [ "$(has_command "$CANON_CMD" "$name")" = yes ] || allnames_ok=no
+done
+chk "B3: 모든 커맨드 이름이 docs/commands.md 카탈로그에 등장" "$allnames_ok" "yes"
+
+# 음성 통제 — 이름: 존재하지 않는 가짜 커맨드(/tide:bogus)는 카탈로그에 없어야 한다(이름 검사 구별력).
+chk "B3: 이름 통제 — /tide:bogus 카탈로그에 없음" "$(has_command "$CANON_CMD" "bogus")" "no"
+
+# 음성 통제 — 개수: 실제와 다른 수(N+1종)는 어느 카운트 선언 파일에도 없어야 한다(드리프트면 잡힘).
 WRONG=$((N + 1))
-chk "B: 드리프트 통제 — README에 ${WRONG}종 없음(실제와 다른 수)"      "$(declared_has_count "$README" "$WRONG")" "no"
-chk "B: 드리프트 통제 — conventions에 ${WRONG}종 없음"               "$(declared_has_count "$CONV" "$WRONG")" "no"
-chk "B: 드리프트 통제 — site/commands에 ${WRONG}종 없음"             "$(declared_has_count "$SITE_CMD" "$WRONG")" "no"
-chk "B: 드리프트 통제 — site/getting-started에 ${WRONG}종 없음"      "$(declared_has_count "$SITE_GS" "$WRONG")" "no"
+chk "B1: 드리프트 통제 — docs/commands.md에 ${WRONG}종 없음" "$(declared_has_count "$CANON_CMD" "$WRONG")" "no"
+chk "B1: 드리프트 통제 — README에 ${WRONG}종 없음"          "$(declared_has_count "$README" "$WRONG")" "no"
+chk "B1: 드리프트 통제 — conventions에 ${WRONG}종 없음"     "$(declared_has_count "$CONV" "$WRONG")" "no"
+chk "B1: 드리프트 통제 — site/getting-started에 ${WRONG}종 없음" "$(declared_has_count "$SITE_GS" "$WRONG")" "no"
 
 echo
 echo "# 결과: PASS=$pass FAIL=$fail (실제 커맨드 스킬 N=$N)"
 [ "$fail" -eq 0 ] || exit 1
-echo "# discover 감지 임계값(≥2→hint·<2→none·단일 레포→none·숨김 미카운트) + 커맨드 수 드리프트 가드(실제 ${N}종 == 캐노니컬 선언) 확인됨 (참조 구현 기준)"
+echo "# discover 감지 임계값(≥2→hint·<2→none·단일 레포→none·숨김 미카운트) + 단일 원본 동결(B1 카운트 정합·B2 사이트 셸·B3 카탈로그 완전성, 캐노니컬=docs/commands.md, 실제 ${N}종) 확인됨 (참조 구현 기준)"
