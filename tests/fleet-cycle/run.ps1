@@ -15,8 +15,10 @@
 $ErrorActionPreference = 'SilentlyContinue'
 
 $ROOT = Split-Path (Split-Path $PSScriptRoot)
+# source order: discover -> deps -> toposort (TopoSort calls ReadDeps, so deps must come first).
 . (Join-Path $ROOT 'tests\lib\discover.ps1')   # IsTideRepo + Discover (single source)
-. (Join-Path $ROOT 'tests\lib\toposort.ps1')   # TopoSort (single source; ReadDeps defined by this harness)
+. (Join-Path $ROOT 'tests\lib\deps.ps1')       # ReadDeps + StripBom + DepName (single source)
+. (Join-Path $ROOT 'tests\lib\toposort.ps1')   # TopoSort (single source; ReadDeps from tests\lib\deps.ps1)
 
 $sbx = Join-Path ([System.IO.Path]::GetTempPath()) "tide-fleet-cycle-live.$PID"
 if (Test-Path $sbx) { Remove-Item -Recurse -Force $sbx }
@@ -32,28 +34,9 @@ function GitInit($d) { New-Item -ItemType Directory -Force -Path $d | Out-Null; 
 
 # IsTideRepo + Discover moved to tests\lib\discover.ps1 (single source); dot-sourced at top.
 
-# --- .tide/deps parse reference (fleet reuse): one sibling name/line, skip #-comments/blanks, trim, BOM strip ---
-function StripBom($s) {
-    if ($null -ne $s -and $s.Length -gt 0 -and [int]$s[0] -eq 0xFEFF) { return $s.Substring(1) }
-    return $s
-}
-function DepLines($f) {
-    $lines = @(Get-Content $f)
-    if ($lines.Count -gt 0) { $lines[0] = StripBom $lines[0] }
-    return $lines
-}
-function DepName($line) { return ($line -replace '\s*[<>=].*$', '').Trim() }
-function ReadDeps($repoDir) {
-    $f = Join-Path $repoDir '.tide\deps'
-    if (-not (Test-Path $f)) { return @() }
-    $out = @()
-    foreach ($line in (DepLines $f)) {
-        $t = $line.Trim()
-        if ($t -eq '' -or $t.StartsWith('#')) { continue }
-        $out += (DepName $t)
-    }
-    return $out
-}
+# ReadDeps/StripBom/DepLines/DepName: tests\lib\deps.ps1 (single source; dot-sourced above).
+# Contract-comparison-only functions below (DepRequiredVersion / SemverGe / CheckContract) are out
+# of extraction scope and stay local; DepRequiredVersion reuses DepLines/DepName from deps.ps1.
 function DepRequiredVersion($repoDir, $depName) {
     $f = Join-Path $repoDir '.tide\deps'
     if (-not (Test-Path $f)) { return '' }
@@ -93,7 +76,7 @@ function CheckContract($parent, $repo, $dep) {
     return (SemverGe $cur $req)
 }
 
-# TopoSort moved to tests\lib\toposort.ps1 (single source; ReadDeps defined by this harness); dot-sourced at top.
+# TopoSort moved to tests\lib\toposort.ps1 (single source; ReadDeps from tests\lib\deps.ps1); dot-sourced at top.
 function IdxOf($orderStr, $name) {
     $arr = @($orderStr -split '\s+' | Where-Object { $_ -ne '' })
     for ($i = 0; $i -lt $arr.Count; $i++) { if ($arr[$i] -eq $name) { return $i } }

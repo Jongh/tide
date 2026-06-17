@@ -5,9 +5,9 @@
 # 오케스트레이션" 절의 의존성 순서 규약이며, 이 파일은 그 규약을 참조 셸 절차로 고정한다.
 #
 # 의존성: `toposort`는 내부에서 `discover`·`read_deps`를 호출한다. 따라서 하니스는 이 파일을
-# source하기 전에 `tests/lib/discover.sh`를 먼저 source해야 하고(discover 정의 제공), `read_deps`는
-# 호출 하니스가 정의한다. 부수효과 없음 — 함수 정의만 담는다.
-# 사용: . "$ROOT/tests/lib/discover.sh"; . "$ROOT/tests/lib/toposort.sh"
+# source하기 전에 `tests/lib/discover.sh`(discover 제공)와 `tests/lib/deps.sh`(read_deps 제공)를
+# 먼저 source해야 한다 — source 순서: discover → deps → toposort. 부수효과 없음 — 함수 정의만 담는다.
+# 사용: . "$ROOT/tests/lib/discover.sh"; . "$ROOT/tests/lib/deps.sh"; . "$ROOT/tests/lib/toposort.sh"
 
 # --- 의존성 인식 순서(참조 구현): 위상정렬(피의존 우선) + 순환 감지 폴백 ---
 # 발견 집합에 없는 이름은 무시(안전 측). 모든 노드를 소비 못하면 순환 → 센티넬 CYCLE.

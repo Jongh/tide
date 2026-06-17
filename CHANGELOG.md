@@ -8,6 +8,11 @@
      릴리즈 노트만 인클루드하기 위한 마커다. 위 제목·안내 줄은 사이트에 부적절해 제외된다.
      렌더에는 영향 없음. -->
 <!-- --8<-- [start:notes] -->
+### [v2.3.0]
+- **릴리즈 게시 모드 — GitHub 릴리즈/PR 택1(`gh` 옵트인)**: `gh` CLI가 있는 레포에서 `/tide:release vX.Y.Z [pr|release]`로 게시 방식을 고를 수 있다. `release` 모드는 현행 commit→tag→push **뒤** `gh release create`로 릴리즈 객체를 추가 생성(가산)하고, `pr` 모드는 기본 브랜치 직접 push 대신 **릴리즈 브랜치 + `gh pr create`**로 PR을 열고 태그·릴리즈는 머지 후로 미룬다. 모드는 **명시 인자 > `.tide/release-mode` 저장 선호도 > (검증 통과 시) 대화형 질문** 우선순위로 정하고, 첫 대화형 선택은 이후 재사용 여부를 물어 `.tide/release-mode`(커밋되는 레포 규약)에 기억한다. `gh` 부재 환경의 동작은 현행(push-only)과 **바이트 동일**한 옵트인 가산이다.
+- **게시 견고성 — 검증 게이트·원격 불가 처리**: 게시 전 `git`·`gh` 가용·서브커맨드(`gh release`/`gh pr`)·인증(`gh auth status`)·대상 원격 GitHub 등록(`gh repo view`)을 검증한다. 검증은 **버전 범프·CHANGELOG 편집 전**에 두어, 명시 모드가 실패(원격 미등록·비-GitHub·미인증)하면 작업 트리도 더럽히지 않고 중단·보고한다(조용한 강등 금지). **tide-guard는 확장하지 않는다** — 가드는 git 토큰만 차단하는 2.0 stable 계약이고 `gh`는 게이트하지 않아 tide 밖 정상 `gh` 사용을 보호하며, "게시는 release에서만"은 스킬 절차가 보존한다.
+- **테스트 참조 구현 단일 원본화 마무리(sn2)**: M23이 남긴 `read_deps`/`ReadDeps`(+`strip_bom`/`dep_name`)를 `tests/lib/deps.{sh,ps1}` 공유 라이브러리로 추출하고 fleet·fleet-cycle 하니스를 source로 전환(순서 discover→deps→toposort)했다. fleet과 fleet-cycle로 갈렸던 이름 추출 정규식 드리프트를 정본으로 화해했고, fleet-cycle이 정본을 거쳐 통과해 로직 동등성을 실증했다. 전 하니스 양 셸 baseline 동일 통과(19·41·23·29·10, FAIL 0)·드리프트 가드(B1/B2/B3)·커맨드 11종 불변 — 새 능력은 옵트인 가산, 2.0 stable 계약 불변.
+
 ### [v2.2.1]
 - **테스트 참조 구현 단일 원본화(정리·patch)**: `tests/{discover,fleet,fleet-cycle,fleet-verify}`에 4중(× 2셸)으로 복제돼 있던 발견·위상정렬 참조 구현(`is_tide_repo`·`discover`·`toposort`)을 `tests/lib/{discover,toposort}.{sh,ps1}` 공유 라이브러리 단일 원본으로 추출하고, 하니스가 이를 source하도록 전환했다. 규약 변경 시 한 곳만 고치면 되며, 동작은 전 하니스가 양 셸에서 전환 전과 동일한 PASS 수(19·41·23·29·10)로 통과해 보존됨을 확인했다(fleet-cycle이 정본 `toposort`로 통과해 두 구현의 로직 동등성도 실증). `read_deps`는 하니스 로컬 유지(함수는 호출 시점 해석).
 - **회고 문서 아카이브 분리**: 1060행으로 비대해진 `docs/reports/retro.md`를 최근(v2.x)만 남기고 v1.4.0 이하를 `docs/reports/retro-archive.md`로 분리했다(과거 보존·바이트 동일). `/tide:retro`는 종전대로 `retro.md`를 입력에서 제외하고 새 섹션을 최상단에 누적하므로 집계 동작이 불변이다(behavior-neutral).

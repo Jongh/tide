@@ -1,9 +1,12 @@
 ---
-description: "[tide] 프리플라이트 → 버전 범프 → CHANGELOG → commit → tag → push"
-argument-hint: "v0.1.0 (생략 시 리뷰보고서의 추천 버전 기준)"
+description: "[tide] 프리플라이트 → 버전 범프 → CHANGELOG → commit → tag → push (+gh 게시 옵트인)"
+argument-hint: "v0.1.0 [pr|release] (모드 생략 시 push-only / 저장된 선호도)"
 ---
-릴리즈를 진행해줘. 버전은 "$ARGUMENTS"로 지정할 수 있어 (예: /tide:release v0.1.0).
-생략하면 리뷰보고서의 추천 버전으로, 그것도 없으면 버전 파일의 현재 버전을 기준으로 판단해줘.
+릴리즈를 진행해줘. "$ARGUMENTS"로 버전과 (선택) 게시 모드를 지정할 수 있어
+(예: `/tide:release v0.1.0`, `/tide:release v0.1.0 pr`, `/tide:release v0.1.0 release`).
+버전을 생략하면 리뷰보고서의 추천 버전으로, 그것도 없으면 버전 파일의 현재 버전을 기준으로 판단해줘.
+인자에서 버전 토큰(`v…`)과 모드 토큰(`pr`/`release`)을 분리 파싱해줘 — 모드 토큰은 선택이고,
+없으면 아래 "게시 모드 해석"의 우선순위로 정한다.
 
 **대상 레포**: 시작 시 대상 레포 루트를 정한다 — 기본은 세션 레포(현행 단일 레포 동작 그대로),
 상위 폴더 단일 세션에서 특정 자식 레포를 지시받으면 그 자식 레포 루트. 버전 파일·`CHANGELOG.md`·
@@ -28,17 +31,39 @@ argument-hint: "v0.1.0 (생략 시 리뷰보고서의 추천 버전 기준)"
 
 프리플라이트 통과 후 .tide/phase 파일에 `release` 한 줄을 기록하고
 (.tide/ 디렉터리가 없으면 생성) 다음을 수행:
-1. 버전 파일 업데이트 (Cargo.toml / package.json / pyproject.toml /
+1. **게시 모드 해석·검증** — 상세 규약의 단일 원본은 `docs/conventions.md`의 "릴리즈 게시 (gh)"
+   절이다(여기서 재서술하지 말고 그 절을 따른다). **버전 파일·CHANGELOG를 건드리기 전에** 모드를
+   정하고 검증을 끝내, 명시 모드가 검증 실패해도 작업 트리가 더럽혀지지 않게 한다. 요지:
+   - **모드 우선순위**: 명시 인자(`pr`/`release`) > `.tide/release-mode` 저장값 > (검증 통과 시)
+     대화형 질문(`release`/`pr`/"이번엔 그냥 push" 중 택1). `gh` 부재/검증 실패면 push-only로
+     진행하고 모드 질문을 하지 않는다(대화형 후보였으면 불가 사유를 한 줄 알린다).
+   - **검증 게이트**: `git`·`gh` 가용·서브커맨드(`gh release`/`gh pr`)·인증(`gh auth status`)·대상
+     원격 GitHub 등록(`gh repo view`)을 확인한다. **모드를 명시(인자/저장값)했는데 검증(특히 원격
+     GitHub 등록)이 실패하면 — 버전 범프·CHANGELOG 편집 전에 중단하고 사유를 보고한다**(작업 트리
+     무변경·조용한 강등 금지). 이로써 명시 모드 실패가 commit/push는 물론 작업 트리도 더럽히지 않는다.
+   - **선호도 기억**: 인자·저장값 없이 첫 대화형 선택을 한 경우, 직후 "이후에도 같은 모드를 쓸지"를
+     물어 예이면 `.tide/release-mode`에 모드 한 줄을 기록한다(다음부터 질문 생략).
+2. 버전 파일 업데이트 (Cargo.toml / package.json / pyproject.toml /
    .claude-plugin/plugin.json 등 프로젝트에 맞게)
-2. CHANGELOG.md 최상단에 해당 버전 릴리즈 노트 추가
+3. CHANGELOG.md 최상단에 해당 버전 릴리즈 노트 추가
    (CHANGELOG.md가 릴리즈 노트의 단일 원본 — README.md의 CHANGELOG 섹션은 포인터만
    두므로 건드리지 않는다. `docs/conventions.md`의 "버전·CHANGELOG" 규약 참조)
-3. git add → git commit ("Release {버전}: {핵심 변경사항 한 줄 요약}")
-4. git tag {버전}
-5. git push {remote} {기본 브랜치}  — 대상 레포의 실제 remote·기본 브랜치 (기본 추정: origin/main, 다르면 그에 맞춤)
-6. git push {remote} {버전}
+4. **게시 분기** (1에서 정한 모드로):
+   - **push-only** (모드 없음 + `gh` 부재/검증 실패, 또는 "그냥 push" 선택) — 현행 흐름 그대로:
+     a. git add → git commit ("Release {버전}: {핵심 변경사항 한 줄 요약}")
+     b. git tag {버전}
+     c. git push {remote} {기본 브랜치}  — 대상 레포의 실제 remote·기본 브랜치 (기본 추정: origin/main, 다르면 그에 맞춤)
+     d. git push {remote} {버전}
+   - **`release` 모드** — 위 push-only(a~d)를 그대로 수행한 **뒤** `gh release create {버전}`으로
+     릴리즈 객체를 추가 생성(노트 = CHANGELOG 해당 버전 발췌, 제외 용어 규약 준수). 이미 push된
+     태그를 참조해 태그 중복 생성을 피한다.
+   - **`pr` 모드** — 기본 브랜치에 직접 push하지 않는다. 릴리즈 브랜치(예: `release/v{버전}`)에
+     git add → commit → 브랜치 push → `gh pr create`(제목 `Release v{버전}: …`, 본문 = CHANGELOG
+     발췌, 제외 용어 규약 준수). **태그·GitHub 릴리즈는 PR 머지 후로 미루고** PR URL을 보고한 뒤
+     사용자에게 핸드오프한다.
 
-완료 후 .tide/phase를 `idle`로 되돌리고 결과를 보고해줘.
+완료 후 .tide/phase를 `idle`로 되돌리고 결과를 보고해줘. `gh`가 가용한데 모드 미지정으로 push-only를
+한 경우, 보고 말미에 "`pr`/`release` 모드로 게시할 수 있다"는 안내를 한 줄 덧붙일 수 있다(자동 실행 금지).
 
 ## 운영 주의
 
@@ -57,3 +82,8 @@ argument-hint: "v0.1.0 (생략 시 리뷰보고서의 추천 버전 기준)"
 4. **버전은 버전 파일(`plugin.json`)만 범프한다.** `docs/project-context.md`는 버전 숫자를
    복제하지 않으므로 release가 갱신하지 않는다 — 드리프트 차단은 갱신 단계 추가가 아니라
    복제 제거로 해결된다.
+5. **게시 명령(`gh release create`/`gh pr create`)도 `.tide/phase`=`release` 동안에만 실행한다.**
+   "게시는 release에서만"이라는 불변은 tide-guard가 아니라 이 절차가 보존한다(가드는 git 토큰만
+   차단, `gh`는 게이트하지 않음). 릴리즈 노트·PR 본문이 여러 줄이면 실행 환경 멀티라인 문법
+   (here-doc/here-string)에 맞추고, CHANGELOG 발췌를 그대로 쓰므로 제외 용어 literal을 피한다(3번과
+   동일 규약). 검증 게이트는 commit/push **전에** 두어 명시 모드 실패 시 작업이 어중간하게 새지 않게 한다.

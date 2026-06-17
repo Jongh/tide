@@ -6,9 +6,10 @@
 # this file fixes that rule as an equivalent reference procedure.
 #
 # Dependency: TopoSort calls Discover and ReadDeps internally. The harness must therefore dot-source
-# tests\lib\discover.ps1 BEFORE this file (provides Discover); ReadDeps is defined by the calling
-# harness. ASCII-only source (zero non-ASCII bytes, no BOM). No side effects -- definitions only.
-# Usage: . (Join-Path $PSScriptRoot '..\lib\discover.ps1'); . (Join-Path $PSScriptRoot '..\lib\toposort.ps1')
+# tests\lib\discover.ps1 (provides Discover) and tests\lib\deps.ps1 (provides ReadDeps) BEFORE this
+# file -- source order: discover -> deps -> toposort. ASCII-only source (zero non-ASCII bytes, no
+# BOM). No side effects -- definitions only.
+# Usage: . (Join-Path $PSScriptRoot '..\lib\discover.ps1'); . (Join-Path $PSScriptRoot '..\lib\deps.ps1'); . (Join-Path $PSScriptRoot '..\lib\toposort.ps1')
 
 # --- dependency-aware order reference: topological sort (depended-upon first) + cycle detection ---
 # Names not in the discovered set are ignored (safe side). Unconsumed nodes -> cycle -> sentinel CYCLE.

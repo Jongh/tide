@@ -20,7 +20,7 @@ tide는 11종의 슬래시 커맨드를 제공합니다. 호출은 모두 `/tide
 | `/tide:impl [M번호]` | 마일스톤대로 구현 + 테스트 | 코드 + `docs/reports/M{N}-impl.md` | ✗ |
 | `/tide:review` | 비판적 리뷰 + 릴리즈 판정 | `docs/reports/M{N}-review.md` | ✗ |
 | `/tide:cycle [주제/M번호]` | `milestone→impl→review` 자동 체이닝 | 위 단계들의 산출물 + 릴리즈 안내 | ✗ |
-| `/tide:release vX.Y.Z` | 프리플라이트 → 버전 범프 → CHANGELOG → commit → tag → push | 릴리즈 커밋·태그 | ✓ |
+| `/tide:release vX.Y.Z [pr/release]` | 프리플라이트 → 버전 범프 → CHANGELOG → commit → tag → push. `gh` 있으면 GitHub 릴리즈/PR 게시 택1(옵트인) | 릴리즈 커밋·태그 (+선택 gh 릴리즈/PR) | ✓ |
 | `/tide:retro` | 누적 사이클 회고 (읽기 전용) | `docs/reports/retro.md` | ✗ |
 | `/tide:status` | 현재 상태 + 다음 권장 커맨드 (읽기 전용) | (없음 — 보고만) | ✗ |
 | `/tide:fleet [부모 경로]` | 상위 폴더의 여러 자식 tide 레포 교차 개요 (읽기 전용, 멀티 레포) | (없음 — 보고만) | ✗ |
@@ -81,11 +81,17 @@ tide는 11종의 슬래시 커맨드를 제공합니다. 호출은 모두 `/tide
 
 ## `/tide:release vX.Y.Z`
 
-- **역할**: tide에서 **git을 만지는 유일한 단계**입니다.
-- **인자**: `vX.Y.Z` — 릴리즈 버전(리뷰가 추천한 값).
+- **역할**: tide에서 **git을 만지는 유일한 단계**입니다. `gh` CLI가 있으면 push 위에 **GitHub
+  릴리즈**를 만들거나 **PR**을 여는 게시 모드를 옵트인으로 고를 수 있습니다.
+- **인자**: `vX.Y.Z` — 릴리즈 버전(리뷰가 추천한 값). (선택) 게시 모드 토큰 `pr`/`release`.
 - **전제조건(프리플라이트)**: ① review 판정 "가능" ② 테스트 통과 ③ 워킹트리 확인.
   통과해야 git 작업을 시작합니다.
 - **동작**: 버전 범프 → `CHANGELOG.md`·`README.md` 갱신 → commit → tag → push.
+- **게시 모드(`gh` 옵트인)**: 우선순위 = 명시 인자 > `.tide/release-mode` 저장값 > (검증 통과 시)
+  대화형 질문. `release` = push 후 `gh release create`(가산), `pr` = 릴리즈 브랜치 + `gh pr create`
+  (태그·릴리즈는 PR 머지 후로 미룸). 게시 전 `git`·`gh`·인증·원격 GitHub 등록을 검증하고, `gh`
+  부재/검증 실패면 현행 push-only로 **바이트 동일**. 단일 원본은 `docs/conventions.md`의 "릴리즈
+  게시 (gh)" 절. tide-guard는 `gh`로 확장하지 않습니다.
 - **커밋 메시지**: `Release {버전}: {핵심 변경사항 한 줄 요약}`
 
 ## `/tide:retro`

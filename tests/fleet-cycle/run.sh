@@ -15,8 +15,10 @@
 
 set -u
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# source 순서: discover → deps → toposort (toposort가 read_deps를 호출하므로 deps가 먼저).
 . "$ROOT/tests/lib/discover.sh"   # is_tide_repo + discover (단일 원본)
-. "$ROOT/tests/lib/toposort.sh"   # toposort (단일 원본; read_deps는 아래 하니스가 정의)
+. "$ROOT/tests/lib/deps.sh"       # read_deps + strip_bom + dep_name (단일 원본)
+. "$ROOT/tests/lib/toposort.sh"   # toposort (단일 원본; read_deps는 tests/lib/deps.sh가 정의)
 SBX="${TMPDIR:-/tmp}/tide-fleet-cycle-live.$$"
 rm -rf "$SBX"; mkdir -p "$SBX"
 trap 'rm -rf "$SBX"' EXIT
@@ -29,18 +31,9 @@ chk() { # <desc> <got> <want>
 
 # is_tide_repo + discover는 tests/lib/discover.sh로 이관(단일 원본). 위에서 source.
 
-# --- .tide/deps 파싱(참조 구현, fleet 재사용): 형제명 하나/줄, # 주석·빈 줄 무시, 트림, BOM 제거 ---
-strip_bom() { sed '1s/^\xEF\xBB\xBF//'; }
-read_deps() { # <repo-dir> → 의존 형제명 줄 출력
-    f="$1/.tide/deps"
-    [ -f "$f" ] || return 0
-    strip_bom < "$f" | while IFS= read -r line || [ -n "$line" ]; do
-        line=$(printf '%s' "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-        case "$line" in ''|'#'*) continue ;; esac
-        name=$(printf '%s' "$line" | sed 's/[[:space:]]*[<>=].*$//' | sed 's/[[:space:]]*$//')
-        echo "$name"
-    done
-}
+# read_deps/strip_bom/dep_name: tests/lib/deps.sh (단일 원본; 위에서 source). 계약 비교 전용
+# 함수(dep_required_version·semver_ge·check_contract)는 추출 범위 밖이라 아래 로컬에 남는다 —
+# dep_required_version은 deps.sh의 strip_bom을 재사용한다.
 dep_required_version() { # <repo-dir> <dep-name> → 요구 버전(>=만, 없으면 빈)
     f="$1/.tide/deps"
     [ -f "$f" ] || return 0
@@ -82,7 +75,7 @@ check_contract() { # <parent> <repo> <dep> → satisfied|violation|skip|none
     semver_ge "$cur" "$req"
 }
 
-# toposort는 tests/lib/toposort.sh로 이관(단일 원본; read_deps는 위 하니스가 정의). 상단에서 source.
+# toposort는 tests/lib/toposort.sh로 이관(단일 원본; read_deps는 tests/lib/deps.sh가 정의). 상단에서 source.
 idx_of() { # <order-string> <name> → 0-based 인덱스(없으면 -1)
     i=0
     for w in $1; do

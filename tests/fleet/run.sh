@@ -16,7 +16,9 @@ set -u
 
 # 레포 루트는 스크립트 위치에서 해석. 공유 발견/위상정렬 라이브러리를 source한다.
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+# source 순서: discover → deps → toposort (toposort가 read_deps를 호출하므로 deps가 먼저).
 . "$ROOT/tests/lib/discover.sh"
+. "$ROOT/tests/lib/deps.sh"
 . "$ROOT/tests/lib/toposort.sh"
 
 SBX="${TMPDIR:-/tmp}/tide-fleet-live.$$"
@@ -58,26 +60,10 @@ summarize() { # <parent> → "release=N review=N impl=N milestone=N fix=N"
     echo "release=$rel review=$rev impl=$imp milestone=$mil fix=$fix"
 }
 
-# --- .tide/deps 파싱(참조 구현): 한 줄에 형제 레포명 하나, # 주석·빈 줄 무시, 트림 ---
-# 선두 UTF-8 BOM(EF BB BF) 제거(M17). 의존 줄은 선택적 `>= 버전` 제약을 가질 수 있다(M17):
-#   <형제명>[ >= <버전>]. `>=`만 지원, 그 외 연산자는 제약 무시(이름만). read_deps는 이름만 방출
-#   (위상정렬용); 버전 제약은 dep_required_version으로 따로 조회한다.
-strip_bom() { # stdin → 선두 BOM 제거한 stdout
-    sed '1s/^\xEF\xBB\xBF//'
-}
-read_deps() { # <repo-dir> → 의존 형제명 줄 출력 (없으면 빈 출력)
-    f="$1/.tide/deps"
-    [ -f "$f" ] || return 0
-    strip_bom < "$f" | while IFS= read -r line || [ -n "$line" ]; do
-        # 앞뒤 공백 트림
-        line=$(printf '%s' "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-        case "$line" in ''|'#'*) continue ;; esac           # 빈 줄·주석 무시
-        # 이름 = 첫 공백 토큰(규약 포맷 `<name> <op> <ver>`), 무공백 형(`auth>=v`)은 연산자에서 절단.
-        # 어떤 연산자든(미지 `~>` 포함) 이름은 보존된다 → 토포 의존 엣지가 유지된다(규약 불변).
-        name=$(printf '%s' "$line" | awk '{print $1}' | sed -E 's/(>=|<=|==|=|>|<).*$//')
-        echo "$name"
-    done
-}
+# read_deps/strip_bom/dep_name: tests/lib/deps.sh (단일 원본; 위에서 source). 계약 비교 전용
+# 함수(dep_required_*·semver_*·eval_op·check_contract)는 추출 범위 밖이라 아래 로컬에 남는다 —
+# 이들은 deps.sh의 strip_bom을 재사용한다.
+
 # 특정 의존 대상의 요구 제약(연산자+버전) 추출. 없으면 빈 출력(제약 없음).
 # M20: 전체 연산자 지원 — `>=`·`>`·`=`(`==`)·`<=`·`<`. 출력 형식: "<op> <ver>" (한 줄).
 #   연산자 토큰을 길이 우선(>=, <=, ==, =, >, <)으로 인식한다.
@@ -155,7 +141,7 @@ check_contract() { # <parent> <repo> <dep>
     eval_op "$op" "$cur" "$req"
 }
 
-# toposort: tests/lib/toposort.sh (단일 원본; read_deps는 이 하니스가 정의)
+# toposort: tests/lib/toposort.sh (단일 원본; read_deps는 tests/lib/deps.sh가 정의 — deps가 먼저 source됨)
 
 # 순서 문자열에서 어떤 레포가 다른 레포보다 앞에 오는지(인덱스 비교)
 idx_of() { # <order-string> <name> → 0-based 인덱스(없으면 -1)

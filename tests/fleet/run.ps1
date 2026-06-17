@@ -14,7 +14,9 @@ $ErrorActionPreference = 'SilentlyContinue'
 
 # Resolve repo root from the script location; dot-source the shared discovery/topo libraries.
 $ROOT = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+# source order: discover -> deps -> toposort (TopoSort calls ReadDeps, so deps must come first).
 . (Join-Path $ROOT 'tests\lib\discover.ps1')
+. (Join-Path $ROOT 'tests\lib\deps.ps1')
 . (Join-Path $ROOT 'tests\lib\toposort.ps1')
 
 $OK  = [string]([char]0xAC00 + [char]0xB2A5)   # ga-neung U+AC00 U+B2A5 (release-able)
@@ -65,39 +67,10 @@ function Summarize($parent) {
     "release=$rel review=$rev impl=$imp milestone=$mil fix=$fix"
 }
 
-# --- .tide/deps parse reference: one sibling repo name per line, skip #-comments / blanks, trim ---
-# M17: strip a leading UTF-8 BOM (EF BB BF) before parsing; a dep line may carry an optional
-#   `>= <version>` constraint -> `<name>[ >= <version>]`. Only `>=` supported; other operators
-#   leave the constraint ignored (name only). ReadDeps emits names only (for topo sort); the
-#   version constraint is queried separately via DepRequiredVersion.
-function StripBom($s) {
-    if ($null -ne $s -and $s.Length -gt 0 -and [int]$s[0] -eq 0xFEFF) { return $s.Substring(1) }
-    return $s
-}
-# read raw lines with explicit BOM strip on the first line (independent of Get-Content's own handling)
-function DepLines($f) {
-    $lines = @(Get-Content $f)
-    if ($lines.Count -gt 0) { $lines[0] = StripBom $lines[0] }
-    return $lines
-}
-# bare repo name = first whitespace-delimited token (spec format `<name> <op> <ver>`);
-# a no-space form (`auth>=v`) is cut at the operator. ANY operator (incl. unknown `~>`) keeps the
-# name intact -> the topo dependency edge survives (spec invariant).
-function DepName($line) {
-    $first = ($line.Trim() -split '\s+')[0]
-    return ($first -replace '(>=|<=|==|=|>|<).*$', '')
-}
-function ReadDeps($repoDir) {
-    $f = Join-Path $repoDir '.tide\deps'
-    if (-not (Test-Path $f)) { return @() }
-    $out = @()
-    foreach ($line in (DepLines $f)) {
-        $t = $line.Trim()
-        if ($t -eq '' -or $t.StartsWith('#')) { continue }   # blank / comment
-        $out += (DepName $t)
-    }
-    return $out
-}
+# ReadDeps/StripBom/DepLines/DepName: tests\lib\deps.ps1 (single source; dot-sourced above).
+# Contract-comparison-only functions below (DepRequired* / Semver* / EvalOp / CheckContract) are
+# out of extraction scope and stay local; they reuse DepLines/DepName from deps.ps1.
+
 # required constraint (operator + version) for a given dep name; '' if no constraint.
 # M20: full operators -> `>=`, `>`, `=`(`==`), `<=`, `<`. Returns "<op> <ver>" (single string).
 #   op = 2nd whitespace token, ver = 3rd; an unknown/absent 2nd token -> '' (none, name dep only).
@@ -174,7 +147,7 @@ function CheckContract($parent, $repo, $dep) {
     return (EvalOp $op $cur $req)
 }
 
-# TopoSort: tests\lib\toposort.ps1 (single source; ReadDeps defined by this harness)
+# TopoSort: tests\lib\toposort.ps1 (single source; ReadDeps defined by tests\lib\deps.ps1, sourced first)
 
 # index of <name> in a space-joined order string (-1 if absent)
 function IdxOf($orderStr, $name) {
