@@ -16,7 +16,9 @@ set -u
 
 # 레포 루트는 스크립트 위치에서 해석. 공유 발견/위상정렬 라이브러리를 source한다.
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-# source 순서: discover → deps → toposort (toposort가 read_deps를 호출하므로 deps가 먼저).
+# source 순서: encoding → discover → deps → toposort
+# (read_deps가 strip_bom을, toposort가 read_deps를 호출하므로 encoding·deps가 먼저).
+. "$ROOT/tests/lib/encoding.sh"
 . "$ROOT/tests/lib/discover.sh"
 . "$ROOT/tests/lib/deps.sh"
 . "$ROOT/tests/lib/toposort.sh"
@@ -60,9 +62,9 @@ summarize() { # <parent> → "release=N review=N impl=N milestone=N fix=N"
     echo "release=$rel review=$rev impl=$imp milestone=$mil fix=$fix"
 }
 
-# read_deps/strip_bom/dep_name: tests/lib/deps.sh (단일 원본; 위에서 source). 계약 비교 전용
-# 함수(dep_required_*·semver_*·eval_op·check_contract)는 추출 범위 밖이라 아래 로컬에 남는다 —
-# 이들은 deps.sh의 strip_bom을 재사용한다.
+# read_deps/dep_name: tests/lib/deps.sh, strip_bom: tests/lib/encoding.sh (단일 원본; 위에서 source).
+# 계약 비교 전용 함수(dep_required_*·semver_*·eval_op·check_contract)는 추출 범위 밖이라 아래
+# 로컬에 남는다 — 이들은 encoding.sh의 strip_bom을 재사용한다.
 
 # 특정 의존 대상의 요구 제약(연산자+버전) 추출. 없으면 빈 출력(제약 없음).
 # M20: 전체 연산자 지원 — `>=`·`>`·`=`(`==`)·`<=`·`<`. 출력 형식: "<op> <ver>" (한 줄).

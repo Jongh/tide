@@ -434,7 +434,13 @@ release 1번 검사는 사용자가 버전 인자와 함께 강행 의사를 명
   때는 실제 단어 대신 "제외 용어"·"외부 저장소명" 같은 일반 표현을 쓴다.
 - **릴리즈 빌드 출력 검증**: release 프리플라이트에서 사이트를 빌드한 **산출물 기준**으로
   제외 용어 0건을 확인하는 절차를 한 줄 수행한다(소스가 아니라 빌드 출력을 스캔) — 누수
-  회귀를 다음 사이클이 아니라 **release 시점에** 잡는다.
+  회귀를 다음 사이클이 아니라 **release 시점에** 잡는다. 이 검증은 **3분담**으로 집행된다:
+  ① release 스킬 프리플라이트의 수기 스캔(사이트 있는 프로젝트 한정), ② CI의 `mkdocs build
+  --strict`(실제 렌더·nav/link·스니펫 `check_paths` — `deploy-pages.yml`), ③ 로컬 결정적
+  가드 `tests/site-includes`(mkdocs 없이 인클루드 타깃 존재·섹션 마커 균형·**마커 구획 본문의
+  제외 용어 0건**을 정적 검증 — 수기 스캔의 자기완결 프록시). ③은 mkdocs 풀빌드의 대체가
+  아니라 로컬 사각지대(렌더 없이는 못 잡던 인클루드/마커/용어 회귀)를 메우고, 실제 렌더 검증은
+  ②에 남긴다.
 
 ## 릴리즈 게시 (gh)
 
@@ -595,6 +601,15 @@ PR 상태별 분기:
 - 회고 아카이브 관례: `docs/reports/retro.md`는 최근 사이클만 두고 과거 섹션은 `retro-archive.md`로
   분리한다(열람·입력 비용 감소). `/tide:retro`는 종전대로 `retro.md`를 **입력에서 제외**하고 새 섹션을
   `retro.md` 최상단에 누적하므로, 분할은 집계에 영향이 없다(behavior-neutral·과거 보존).
+- 적용 예(M26, BOM 헬퍼 단일 원본화 + 사이트 인클루드 가드 배선): ① M23/M24가 시작한 테스트 참조 구현
+  단일 원본화를 마무리해 BOM 제거 헬퍼(`strip_bom`/`StripBom`)를 `tests/lib/encoding.{sh,ps1}` 단일
+  원본으로 추출했다 — `tests/lib` 공유 라이브러리는 `{encoding,discover,deps,toposort}`이 되고 source
+  순서는 `encoding→discover→deps→toposort`(deps의 `read_deps`가 `strip_bom`을 쓰므로 encoding 선행),
+  `tests/fleet-verify`의 로컬 복제가 사라져 정의가 셸당 1개로 수렴했다(참조 구현 이중성 군집의 마지막
+  코드성 복제면 종결). ② "릴리즈 빌드 출력 검증" 규약의 **로컬 집행 배선**을 같은 사이클에 더했다 —
+  새 자기완결 가드 `tests/site-includes`(`run.{sh,ps1}`)가 4개 사이트 스니펫 셸(`conventions`·
+  `orchestration`·`changelog`·`commands`)의 인클루드 타깃·섹션 마커·제외 용어를 mkdocs 없이 검증한다
+  (규약만 적어두고 집행을 다음 사이클로 미루지 않는다 원칙). 실제 `--strict` 렌더는 CI에 남긴다.
 
 ## 2.0 안정성
 

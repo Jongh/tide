@@ -15,9 +15,11 @@
 
 set -u
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-# source 순서: discover → deps → toposort (toposort가 read_deps를 호출하므로 deps가 먼저).
+# source 순서: encoding → discover → deps → toposort
+# (read_deps가 strip_bom을, toposort가 read_deps를 호출하므로 encoding·deps가 먼저).
+. "$ROOT/tests/lib/encoding.sh"   # strip_bom (단일 원본)
 . "$ROOT/tests/lib/discover.sh"   # is_tide_repo + discover (단일 원본)
-. "$ROOT/tests/lib/deps.sh"       # read_deps + strip_bom + dep_name (단일 원본)
+. "$ROOT/tests/lib/deps.sh"       # read_deps + dep_name (단일 원본; strip_bom은 encoding.sh)
 . "$ROOT/tests/lib/toposort.sh"   # toposort (단일 원본; read_deps는 tests/lib/deps.sh가 정의)
 SBX="${TMPDIR:-/tmp}/tide-fleet-cycle-live.$$"
 rm -rf "$SBX"; mkdir -p "$SBX"
@@ -31,9 +33,9 @@ chk() { # <desc> <got> <want>
 
 # is_tide_repo + discover는 tests/lib/discover.sh로 이관(단일 원본). 위에서 source.
 
-# read_deps/strip_bom/dep_name: tests/lib/deps.sh (단일 원본; 위에서 source). 계약 비교 전용
-# 함수(dep_required_version·semver_ge·check_contract)는 추출 범위 밖이라 아래 로컬에 남는다 —
-# dep_required_version은 deps.sh의 strip_bom을 재사용한다.
+# read_deps/dep_name: tests/lib/deps.sh, strip_bom: tests/lib/encoding.sh (단일 원본; 위에서 source).
+# 계약 비교 전용 함수(dep_required_version·semver_ge·check_contract)는 추출 범위 밖이라 아래
+# 로컬에 남는다 — dep_required_version은 encoding.sh의 strip_bom을 재사용한다.
 dep_required_version() { # <repo-dir> <dep-name> → 요구 버전(>=만, 없으면 빈)
     f="$1/.tide/deps"
     [ -f "$f" ] || return 0

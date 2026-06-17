@@ -17,6 +17,7 @@
 $ErrorActionPreference = 'SilentlyContinue'
 
 $ROOT = Split-Path (Split-Path $PSScriptRoot)
+. (Join-Path $ROOT 'tests\lib\encoding.ps1')   # StripBom (single source; used by ReadHook)
 . (Join-Path $ROOT 'tests\lib\discover.ps1')   # IsTideRepo + Discover (single source)
 
 $sbx = Join-Path ([System.IO.Path]::GetTempPath()) "tide-fleet-verify-live.$PID"
@@ -34,10 +35,7 @@ function GitInit($d) { New-Item -ItemType Directory -Force -Path $d | Out-Null; 
 # IsTideRepo + Discover moved to tests\lib\discover.ps1 (single source; .tide-fleet hidden-skip included); dot-sourced at top.
 
 # --- integration hook parse reference: read .tide-fleet/integration, strip leading BOM, skip #/blank ---
-function StripBom($s) {
-    if ($null -ne $s -and $s.Length -gt 0 -and [int]$s[0] -eq 0xFEFF) { return $s.Substring(1) }
-    return $s
-}
+# StripBom is single-sourced in tests\lib\encoding.ps1 (dot-sourced above); ReadHook uses it as-is.
 function ReadHook($parent) {
     $f = Join-Path $parent '.tide-fleet\integration'
     if (-not (Test-Path $f)) { return @() }

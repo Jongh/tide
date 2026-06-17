@@ -16,6 +16,7 @@
 
 set -u
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$ROOT/tests/lib/encoding.sh"   # strip_bom (단일 원본; read_hook가 사용)
 . "$ROOT/tests/lib/discover.sh"   # is_tide_repo + discover (단일 원본)
 SBX="${TMPDIR:-/tmp}/tide-fleet-verify-live.$$"
 rm -rf "$SBX"; mkdir -p "$SBX"
@@ -30,7 +31,7 @@ chk() { # <desc> <got> <want>
 # is_tide_repo + discover는 tests/lib/discover.sh로 이관(단일 원본; .tide-fleet 숨김 무시 포함). 위에서 source.
 
 # --- 통합 훅 파싱(참조 구현): `.tide-fleet/integration` 읽기, 선두 BOM 제거, # 주석·빈 줄 무시 ---
-strip_bom() { sed '1s/^\xEF\xBB\xBF//'; }
+# strip_bom은 tests/lib/encoding.sh로 단일 원본화(위에서 source). 여기서 그 정의를 그대로 쓴다.
 read_hook() { # <parent> → 유효 통합 명령 줄(들) 출력(없으면 빈)
     f="$1/.tide-fleet/integration"
     [ -f "$f" ] || return 0

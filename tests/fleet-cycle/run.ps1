@@ -15,9 +15,11 @@
 $ErrorActionPreference = 'SilentlyContinue'
 
 $ROOT = Split-Path (Split-Path $PSScriptRoot)
-# source order: discover -> deps -> toposort (TopoSort calls ReadDeps, so deps must come first).
+# source order: encoding -> discover -> deps -> toposort
+# (ReadDeps calls StripBom and TopoSort calls ReadDeps, so encoding/deps must come first).
+. (Join-Path $ROOT 'tests\lib\encoding.ps1')   # StripBom (single source)
 . (Join-Path $ROOT 'tests\lib\discover.ps1')   # IsTideRepo + Discover (single source)
-. (Join-Path $ROOT 'tests\lib\deps.ps1')       # ReadDeps + StripBom + DepName (single source)
+. (Join-Path $ROOT 'tests\lib\deps.ps1')       # ReadDeps + DepName (single source; StripBom from encoding.ps1)
 . (Join-Path $ROOT 'tests\lib\toposort.ps1')   # TopoSort (single source; ReadDeps from tests\lib\deps.ps1)
 
 $sbx = Join-Path ([System.IO.Path]::GetTempPath()) "tide-fleet-cycle-live.$PID"
@@ -34,9 +36,9 @@ function GitInit($d) { New-Item -ItemType Directory -Force -Path $d | Out-Null; 
 
 # IsTideRepo + Discover moved to tests\lib\discover.ps1 (single source); dot-sourced at top.
 
-# ReadDeps/StripBom/DepLines/DepName: tests\lib\deps.ps1 (single source; dot-sourced above).
-# Contract-comparison-only functions below (DepRequiredVersion / SemverGe / CheckContract) are out
-# of extraction scope and stay local; DepRequiredVersion reuses DepLines/DepName from deps.ps1.
+# ReadDeps/DepLines/DepName: tests\lib\deps.ps1, StripBom: tests\lib\encoding.ps1 (single source;
+# dot-sourced above). Contract-comparison-only functions below (DepRequiredVersion / SemverGe /
+# CheckContract) are out of extraction scope and stay local; DepRequiredVersion reuses DepLines/DepName.
 function DepRequiredVersion($repoDir, $depName) {
     $f = Join-Path $repoDir '.tide\deps'
     if (-not (Test-Path $f)) { return '' }
