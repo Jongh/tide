@@ -73,7 +73,8 @@
   `docs/conventions.md`(버전·CHANGELOG 절). 릴리즈 노트의 단일 원본은 `CHANGELOG.md`이며
   README의 CHANGELOG 섹션은 포인터만 둔다(이중 갱신 제거). **gh 게시 모드**(`gh` 옵트인 —
   GitHub 릴리즈/PR 택1·검증 게이트·`.tide/release-mode` 선호도·원격 불가 처리·tide-guard 비확장)의
-  단일 원본은 `docs/conventions.md` "릴리즈 게시 (gh)" 절이고, 절차는 `skills/release/SKILL.md`다
+  단일 원본은 `docs/conventions.md` "릴리즈 게시 (gh)" 절이고, 절차는 `skills/release/SKILL.md`다.
+  `pr` 모드는 PR 머지 후 같은 명령 재실행으로 태그·릴리즈를 자동 마무리한다(상태 인지·멱등)
 - **멀티 레포 / 대상 레포**(M13 토대): 각 커맨드는 시작 시 "대상 레포 루트"를 정해(기본=세션 레포,
   현행 동일) 산출물 앵커링·git/테스트 cwd를 그 루트 기준으로 두고, repo-root 인식 가드가
   같은 루트의 `.tide/phase`를 읽어 레포별 격리가 성립한다(가산). 단일 원본은

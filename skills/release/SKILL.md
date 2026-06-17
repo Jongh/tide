@@ -43,8 +43,15 @@ argument-hint: "v0.1.0 [pr|release] (모드 생략 시 push-only / 저장된 선
      무변경·조용한 강등 금지). 이로써 명시 모드 실패가 commit/push는 물론 작업 트리도 더럽히지 않는다.
    - **선호도 기억**: 인자·저장값 없이 첫 대화형 선택을 한 경우, 직후 "이후에도 같은 모드를 쓸지"를
      물어 예이면 `.tide/release-mode`에 모드 한 줄을 기록한다(다음부터 질문 생략).
+   - **`pr` 모드 상태 인지**: mode=`pr`이면 검증 후·**파일 편집 전에** 릴리즈 PR(`release/v{버전}` 또는
+     제목 `Release v{버전}`)의 상태를 `gh`로 조회해 분기한다 — **merged**→마무리(finalize) / **open**→대기 /
+     **closed(미머지)**→중단 / **없음**→생성. **마무리·대기·중단 경로는 버전 범프·CHANGELOG(2·3)를 건너뛴다**
+     (머지로 이미 반영됨 — 재편집 금지). 버전은 인자(`/tide:release v{버전} pr`)가 기본 — 인자가 없으면
+     열린/머지된 릴리즈 PR이 **유일할 때만** 그 버전으로 추론하고, 후보가 모호하면 버전 명시를 요청하고
+     중단한다(임의 선택 금지). 상세는 conventions "릴리즈 게시 (gh)"의 `pr` 모드 절.
 2. 버전 파일 업데이트 (Cargo.toml / package.json / pyproject.toml /
-   .claude-plugin/plugin.json 등 프로젝트에 맞게)
+   .claude-plugin/plugin.json 등 프로젝트에 맞게) — **단, `pr` 모드가 마무리/대기/중단으로 분기된
+   경우 2·3(버전 범프·CHANGELOG)을 건너뛴다**(1의 `pr` 상태 인지 참조).
 3. CHANGELOG.md 최상단에 해당 버전 릴리즈 노트 추가
    (CHANGELOG.md가 릴리즈 노트의 단일 원본 — README.md의 CHANGELOG 섹션은 포인터만
    두므로 건드리지 않는다. `docs/conventions.md`의 "버전·CHANGELOG" 규약 참조)
@@ -57,10 +64,19 @@ argument-hint: "v0.1.0 [pr|release] (모드 생략 시 push-only / 저장된 선
    - **`release` 모드** — 위 push-only(a~d)를 그대로 수행한 **뒤** `gh release create {버전}`으로
      릴리즈 객체를 추가 생성(노트 = CHANGELOG 해당 버전 발췌, 제외 용어 규약 준수). 이미 push된
      태그를 참조해 태그 중복 생성을 피한다.
-   - **`pr` 모드** — 기본 브랜치에 직접 push하지 않는다. 릴리즈 브랜치(예: `release/v{버전}`)에
-     git add → commit → 브랜치 push → `gh pr create`(제목 `Release v{버전}: …`, 본문 = CHANGELOG
-     발췌, 제외 용어 규약 준수). **태그·GitHub 릴리즈는 PR 머지 후로 미루고** PR URL을 보고한 뒤
-     사용자에게 핸드오프한다.
+   - **`pr` 모드 (상태 인지)** — 기본 브랜치에 직접 push하지 않는다. 1에서 조회한 PR 상태로 분기한다
+     (직접 push 흐름과 갈라지는 유일한 모드):
+     - **없음 → 생성**: 릴리즈 브랜치(예: `release/v{버전}`)에 git add → commit → 브랜치 push →
+       `gh pr create`(제목 `Release v{버전}: …`, 본문 = CHANGELOG 발췌, 제외 용어 규약 준수). **태그·릴리즈는
+       PR 머지 후로 미루고** PR URL과 "머지 후 같은 명령을 다시 실행하면 마무리"를 안내한다.
+     - **open → 대기**: 부수효과 없이(태그·릴리즈·push 없음) PR URL·"머지 후 재실행" 안내만 한다.
+     - **closed(미머지) → 중단**: 머지 없이 닫혔음을 보고하고 중단(임의 재생성·태그 금지).
+     - **merged → 마무리(finalize)**: 기본 브랜치를 머지 결과로 최신화(`git fetch`→checkout/`pull`) →
+       **버전 sanity**(머지된 버전 파일이 `v{버전}`과 일치하는지, 불일치면 태그 없이 중단) → 태그 `v{버전}`을
+       머지 tip에 달고 `git push {remote} v{버전}` → `gh release create {버전}`(노트 = CHANGELOG 발췌, 제외
+       용어 규약 준수). **버전 범프·CHANGELOG는 건너뛴다.** 태그와 릴리즈는 **각각 독립으로** 선확인
+       (`git tag`·원격 / `gh release view`)해 **이미 있는 것은 건너뛰고 없는 것만 생성**한다(부분 실패도
+       복구 — 한쪽만 있으면 나머지만 만든다). **미머지엔 태그 금지** — merged 확인 후에만 태그를 단다.
 
 완료 후 .tide/phase를 `idle`로 되돌리고 결과를 보고해줘. `gh`가 가용한데 모드 미지정으로 push-only를
 한 경우, 보고 말미에 "`pr`/`release` 모드로 게시할 수 있다"는 안내를 한 줄 덧붙일 수 있다(자동 실행 금지).
@@ -87,3 +103,5 @@ argument-hint: "v0.1.0 [pr|release] (모드 생략 시 push-only / 저장된 선
    차단, `gh`는 게이트하지 않음). 릴리즈 노트·PR 본문이 여러 줄이면 실행 환경 멀티라인 문법
    (here-doc/here-string)에 맞추고, CHANGELOG 발췌를 그대로 쓰므로 제외 용어 literal을 피한다(3번과
    동일 규약). 검증 게이트는 commit/push **전에** 두어 명시 모드 실패 시 작업이 어중간하게 새지 않게 한다.
+   `pr` 모드 마무리(finalize)의 태그·`gh release create`도 phase=`release`에서만 실행하고, **`gh`로 머지를
+   확인(merged)한 뒤에만 태그를 단다**(미머지 태그 금지). 태그·릴리즈는 각각 독립 선확인해 없는 것만 생성한다(멱등·부분 실패 복구).
