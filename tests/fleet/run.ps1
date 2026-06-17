@@ -14,7 +14,9 @@ $ErrorActionPreference = 'SilentlyContinue'
 
 # Resolve repo root from the script location; dot-source the shared discovery/topo libraries.
 $ROOT = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-# source order: discover -> deps -> toposort (TopoSort calls ReadDeps, so deps must come first).
+# source order: encoding -> discover -> deps -> toposort
+# (ReadDeps calls StripBom and TopoSort calls ReadDeps, so encoding/deps must come first).
+. (Join-Path $ROOT 'tests\lib\encoding.ps1')
 . (Join-Path $ROOT 'tests\lib\discover.ps1')
 . (Join-Path $ROOT 'tests\lib\deps.ps1')
 . (Join-Path $ROOT 'tests\lib\toposort.ps1')
@@ -67,9 +69,9 @@ function Summarize($parent) {
     "release=$rel review=$rev impl=$imp milestone=$mil fix=$fix"
 }
 
-# ReadDeps/StripBom/DepLines/DepName: tests\lib\deps.ps1 (single source; dot-sourced above).
-# Contract-comparison-only functions below (DepRequired* / Semver* / EvalOp / CheckContract) are
-# out of extraction scope and stay local; they reuse DepLines/DepName from deps.ps1.
+# ReadDeps/DepLines/DepName: tests\lib\deps.ps1, StripBom: tests\lib\encoding.ps1 (single source;
+# dot-sourced above). Contract-comparison-only functions below (DepRequired* / Semver* / EvalOp /
+# CheckContract) are out of extraction scope and stay local; they reuse DepLines/DepName from deps.ps1.
 
 # required constraint (operator + version) for a given dep name; '' if no constraint.
 # M20: full operators -> `>=`, `>`, `=`(`==`), `<=`, `<`. Returns "<op> <ver>" (single string).

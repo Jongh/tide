@@ -21,7 +21,7 @@
 | `docs/reports/` | 완료보고서 `M{N}-impl.md`·리뷰보고서 `M{N}-review.md`·회고 `retro.md`(최근) + `retro-archive.md`(과거 회고 분리·보존) |
 | `docs/conventions.md` | 단계별 규약 단일 원본 |
 | `docs/commands.md` | 커맨드 카탈로그 단일 원본(11종 역할·인자·산출물·금지). 사이트 `commands.md`가 `pymdownx.snippets`로 본문(`[start:body]`) 인클루드 — `tests/discover` 가드가 카운트·셸·이름 완전성을 집행 |
-| `tests/` | 라이브 실증 하니스 (`multi-repo/` 등 — `run.sh`·`run.ps1`, 자동 러너 없는 도그푸딩 검증 수단). 발견·위상정렬·deps 파싱 참조 구현은 `tests/lib/{discover,deps,toposort}.{sh,ps1}` 공유 단일 원본을 하니스가 source(트리 내 자기완결; source 순서 discover→deps→toposort) |
+| `tests/` | 라이브 실증 하니스 (`multi-repo/`·`site-includes/` 등 — `run.sh`·`run.ps1`, 자동 러너 없는 도그푸딩 검증 수단). 발견·위상정렬·deps 파싱·BOM 제거 참조 구현은 `tests/lib/{encoding,discover,deps,toposort}.{sh,ps1}` 공유 단일 원본을 하니스가 source(트리 내 자기완결; source 순서 encoding→discover→deps→toposort) |
 | `site/` | MkDocs 사이트 (`mkdocs.yml`·`docs/` — 문서 사이트 빌드 입력). `conventions`·`orchestration`·`changelog`·`commands` 4종은 저장소 원본을 `pymdownx.snippets`로 인클루드하는 **스니펫 셸**(수기 복제 아님) |
 | `.tide/` | `phase`(로컬 상태 — `.gitignore` 대상, 커밋 안 함) + `deps`(의존성 선언 — 커밋함) + `release-mode`(게시 모드 선호도 `pr`/`release` — `deps`와 동급으로 커밋함). gitignore 범위는 `.tide/`가 아니라 `.tide/phase`만 |
 | `.tide-fleet/` | 부모 레벨 통합 훅(`integration`) — fleet-verify가 읽는 cross-repo 검증 명령(옵트인). 숨김 디렉터리라 fleet 발견에서 제외 |
@@ -35,7 +35,8 @@
   하니스** — `tests/multi-repo`(repo-root 인식·앵커링·cwd 규율)와 오케스트레이션 참조 구현
   하니스 `tests/fleet`(발견·5분류·위상정렬·전체 연산자 계약 비교·다중 자리 마일스톤 M10+)·
   `tests/fleet-cycle`(release 제외·downstream-skip)·`tests/fleet-verify`(verification-only·git-verb
-  가드라일)가 모두 존재한다(양 셸 `run.sh`·`run.ps1`). 가드 스크립트 수정 시 `.sh`·`.ps1` 두 사본을
+  가드라일)·`tests/site-includes`(사이트 스니펫 인클루드 타깃·섹션 마커·제외 용어 정적 검증 — mkdocs
+  불요)가 모두 존재한다(양 셸 `run.sh`·`run.ps1`). 가드 스크립트 수정 시 `.sh`·`.ps1` 두 사본을
   함께 갱신
 - **개발 사이클**: tide 자신을 도그푸딩 — `/tide:milestone → impl → review → release`
 
@@ -119,9 +120,13 @@ M20(에픽 마감)에서 회고 백로그의 이월·견고화 항목을 **각�
 | 워크트리 격리 병합 경로 | M9-impl#3 | **수용** — 기본은 공유 트리(비겹침), 워크트리는 impl 스킬의 선택적 고급 경로로 이미 문서화. 별도 구현 불요 |
 | README masthead 외부 귀속 | M12 | **수용** — 사이트만 제외, 저장소 원본 보존(원 의도). 변경 없음 |
 | 브라우저 런타임 렌더·병렬 폴백 종단·retro 자기입력 비용 | M11~M12·M6 | **환경-이월/수용** — 세션·배포 수동 검증 영역. 저위험으로 회고에서 닫음(필요 시 별도) |
+| `strip_bom`/`StripBom` 단일 원본화 | M24 sn3 / M25 sn3 | **fix(M26)** — `tests/lib/encoding.{sh,ps1}` 단일 원본으로 추출, `tests/fleet-verify` 로컬 복제 제거(정의 셸당 1개). 참조 구현 이중성 군집의 마지막 코드성 복제면 종결 |
+| mkdocs 빌드 출력 검증(로컬 사각지대) | M22 사소1~M25 다음단계 | **fix(부분, M26)** — `tests/site-includes` 자기완결 가드로 인클루드·마커·제외 용어를 mkdocs 없이 결정적 검증(로컬 사각지대 종결). 실제 `--strict` 렌더는 CI 잔존(렌더 잔여만 환경-이월로 남김) |
 
 이로써 오케스트레이션 에픽의 잔여 후속은 fix/수용/환경-이월로 전부 종결됐고, **로드맵 항목 미반영은
-0**이다 — 백로그가 닫혔다.
+0**이다 — 백로그가 닫혔다. M26은 그 뒤 남아 있던 **코드성 잔여 두 건**(`strip_bom` 단일 원본화·mkdocs
+로컬 사각지대)을 fix로 마저 닫았다 — 남는 미반영은 의도적 수용(`tide-guard`의 raw-`$input` grep 거칠음 —
+M13 사소3→M18 사소6)과 라이브 도그푸딩 영역(gh 게시·`pr` finalize 라이브 실증)뿐이다.
 
 ## 메타
 

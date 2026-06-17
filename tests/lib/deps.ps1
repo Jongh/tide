@@ -1,27 +1,27 @@
 # tide .tide/deps parse reference implementation -- single source (Windows PowerShell 5.1)
 #
-# ReadDeps (emits dependency names for topo sort) and its direct helpers StripBom / DepName are the
-# single definition of the deps-parse rule shared by the fleet / fleet-cycle harnesses. The rule's
+# ReadDeps (emits dependency names for topo sort) and its direct helper DepName are the single
+# definition of the deps-parse rule shared by the fleet / fleet-cycle harnesses. The rule's
 # single source is the "contract comparison" / "multi-repo orchestration" sections of
 # docs/conventions.md (one sibling repo name per line / skip #-comments and blanks / trim / strip a
 # leading UTF-8 BOM / name = first whitespace token up to the operator); this file fixes that rule
-# as an equivalent reference procedure.
+# as an equivalent reference procedure. The leading-BOM helper StripBom was promoted to the general
+# encoding helper in tests\lib\encoding.ps1 -- this file uses that earlier-sourced StripBom (see below).
 #
-# Dependency: TopoSort calls ReadDeps internally. The harness must dot-source this file BEFORE
-# tests\lib\toposort.ps1 (provides ReadDeps). Source order: discover -> deps -> toposort.
+# Dependency: ReadDeps calls StripBom, so the harness must dot-source tests\lib\encoding.ps1 FIRST.
+# TopoSort also calls ReadDeps internally, so it must dot-source this file BEFORE tests\lib\toposort.ps1
+# (provides ReadDeps). Source order: encoding -> discover -> deps -> toposort.
 # ASCII-only source (zero non-ASCII bytes, no BOM). No side effects -- function definitions only.
-# Usage: . (Join-Path $ROOT 'tests\lib\discover.ps1'); . (Join-Path $ROOT 'tests\lib\deps.ps1'); . (Join-Path $ROOT 'tests\lib\toposort.ps1')
+# Usage: . (Join-Path $ROOT 'tests\lib\encoding.ps1'); . (Join-Path $ROOT 'tests\lib\discover.ps1'); . (Join-Path $ROOT 'tests\lib\deps.ps1'); . (Join-Path $ROOT 'tests\lib\toposort.ps1')
 #
-# Extraction scope: only ReadDeps (+ StripBom / DepName) needed for topo sort is unified here.
-# Contract-comparison-only functions (DepRequired* / Semver* / EvalOp / CheckContract) are OUT OF
-# scope and stay local to each harness. (M17 BOM strip + M20 full-operator name preservation are the
-# adopted canonical: DepName takes the first whitespace token, then cuts at the operator.)
+# Extraction scope: only ReadDeps (+ DepName) needed for topo sort is unified here. The leading-BOM
+# strip (StripBom) lives in encoding.ps1; contract-comparison-only functions (DepRequired* / Semver* /
+# EvalOp / CheckContract) are OUT OF scope and stay local to each harness. (M17 BOM strip + M20
+# full-operator name preservation are the adopted canonical: DepName takes the first whitespace token,
+# then cuts at the operator.)
 
-# M17: strip a leading UTF-8 BOM (U+FEFF) from the first line before parsing.
-function StripBom($s) {
-    if ($null -ne $s -and $s.Length -gt 0 -and [int]$s[0] -eq 0xFEFF) { return $s.Substring(1) }
-    return $s
-}
+# StripBom (leading UTF-8 BOM strip) moved to tests\lib\encoding.ps1 (general encoding helper).
+# The harness dot-sources encoding first, so DepLines uses that StripBom as-is.
 # read raw lines with explicit BOM strip on the first line (independent of Get-Content's handling)
 function DepLines($f) {
     $lines = @(Get-Content $f)
