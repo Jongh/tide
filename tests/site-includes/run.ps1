@@ -20,9 +20,12 @@
 # attribution kept OUT of the snippet body. We derive it from the masthead intro region that
 # lives OUTSIDE the body markers (README.md / docs/conventions.md line-3 "<TERM>... methodology"
 # pattern) -- pulling the rule from the convention's intent, self-updating, no duplicated list.
+# A positive-control then re-confirms each derived term LITERALLY occurs in that masthead
+# region -- otherwise a mis-extracted token (absent from the body) would pass the term scan
+# vacuously (green for the wrong reason); this proves the scanner handles a REAL string.
 #
-# ASCII-only source (BOM present, no byte > 127): the Korean "methodology" phrase used to
-# locate the term is built from code points, so this file carries no hardcoded excluded term.
+# ASCII-only source, no BOM, no byte > 127: the Korean "methodology" phrase used to locate
+# the term is built from code points, so this file carries no hardcoded excluded term.
 #
 # Usage: & tests\site-includes\run.ps1   (exit 0 if all pass, exit 1 if any fail)
 
@@ -60,14 +63,37 @@ function ExtractTerm($file) {
     if ($m.Success) { return $m.Groups[1].Value } else { return $null }
 }
 
+# The masthead intro is line 3 of each source (the line we extract the term from). We keep
+# that exact source region so a positive-control can re-confirm the derived term LITERALLY
+# occurs in it (not a fabricated / mis-extracted token).
+function MastheadRegion($file) {
+    $raw = ReadUtf8 $file
+    if ($null -eq $raw) { return '' }
+    $lines = $raw -split "`n"
+    if ($lines.Count -ge 3) { return $lines[2] } else { return '' }
+}
+
 $TERMS = @()
+$MASTHEAD = ''   # accumulated masthead intro text across the scanned sources
 foreach ($src in @((Join-Path $ROOT 'README.md'), (Join-Path $ROOT 'docs\conventions.md'))) {
     $t = ExtractTerm $src
-    if ($t -and ($TERMS -notcontains $t)) { $TERMS += $t }
+    if (-not $t) { continue }
+    $MASTHEAD = $MASTHEAD + "`n" + (MastheadRegion $src)
+    if ($TERMS -notcontains $t) { $TERMS += $t }
 }
 
 # Sanity: at least one excluded term derived, else the term scan would be vacuous.
 Chk "term: derived >=1 excluded term from masthead intro" $(if ($TERMS.Count -ge 1) { 'ok' } else { 'no' }) 'ok'
+
+# Positive-control: each derived term must LITERALLY occur in the masthead region it was
+# extracted from. If a derived term is absent there, extraction fabricated / mis-extracted a
+# token -- which would never appear in the body, making the term scan pass VACUOUSLY (green
+# for the wrong reason). This proves the scanner handles a REAL string. Handles >1 token.
+$ctrlMissing = 0
+foreach ($term in $TERMS) {
+    if ($MASTHEAD.IndexOf($term) -lt 0) { $ctrlMissing++ }
+}
+Chk "term: each derived term literally present in masthead region" $ctrlMissing 0
 
 # --- count full pymdownx snippet markers "--8<-- [start|end:<section>]" in a target ----
 # Match the FULL marker (with the "--8<-- " prefix inside an HTML comment), not just the
@@ -149,5 +175,5 @@ Chk "site: discovered >=1 include directive" $(if ($includesTotal -ge 1) { 'ok' 
 
 Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) (shells=$shells includes=$includesTotal terms=[$($TERMS -join ',')])"
 if ($script:fail -ne 0) { exit 1 }
-Write-Host "# site-include resolution (target exists + balanced [start]/[end] marker pair + excluded-term 0 in body) confirmed -- NOT a mkdocs --strict substitute (render/nav/link = CI)"
+Write-Host "# site-include resolution (target exists + balanced [start]/[end] marker pair + excluded-term 0 in body + derived terms real in masthead) confirmed -- NOT a mkdocs --strict substitute (render/nav/link = CI)"
 exit 0

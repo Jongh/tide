@@ -35,9 +35,9 @@
   하니스** — `tests/multi-repo`(repo-root 인식·앵커링·cwd 규율)와 오케스트레이션 참조 구현
   하니스 `tests/fleet`(발견·5분류·위상정렬·전체 연산자 계약 비교·다중 자리 마일스톤 M10+)·
   `tests/fleet-cycle`(release 제외·downstream-skip)·`tests/fleet-verify`(verification-only·git-verb
-  가드라일)·`tests/site-includes`(사이트 스니펫 인클루드 타깃·섹션 마커·제외 용어 정적 검증 — mkdocs
-  불요)가 모두 존재한다(양 셸 `run.sh`·`run.ps1`). 가드 스크립트 수정 시 `.sh`·`.ps1` 두 사본을
-  함께 갱신
+  가드라일)·`tests/site-includes`(사이트 스니펫 인클루드 타깃·섹션 마커·제외 용어 정적 검증 + 용어
+  추출 positive-control — mkdocs 불요)가 모두 존재한다(양 셸 `run.sh`·`run.ps1`). `tests/multi-repo`는
+  선두 BOM 입력 내성 회귀를 포함(양 셸 12/12). 가드 스크립트 수정 시 `.sh`·`.ps1` 두 사본을 함께 갱신
 - **개발 사이클**: tide 자신을 도그푸딩 — `/tide:milestone → impl → review → release`
 
 ## 배포 위생 (패키지에 포함되는 파일)
@@ -59,7 +59,8 @@
 - **사이클**: kickoff → milestone → impl → review → release. `status`는 읽기 전용 현재 위치 보고
 - **부수효과 분리**: impl·review는 git 작업 금지(코드·보고서만), git commit/tag/push는 release에서만
 - **tide-guard**: `.tide/phase`가 `release`가 아니면 git commit/tag/push를 기계적으로 차단(exit 2).
-  상태 파일이 없으면 차단하지 않음
+  상태 파일이 없으면 차단하지 않음. 입력 선두 BOM에 내성(strip 후 파싱)·sed `cwd` 추출 키 앵커링으로
+  견고화돼 있으나 차단/통과 판정·메시지·exit 2 계약은 **불변**(단일 원본 = conventions "tide-guard hook")
 - **상태 파일 `.tide/phase`**: 현재 단계명 한 줄(`milestone`/`impl`/`review`/`release`/`idle`).
   각 스킬이 시작 시 기록하고 종료 시 `idle`로 되돌림
 - **템플릿 단일 원본**: 마일스톤·보고서 형식은 각 스킬의 `${CLAUDE_SKILL_DIR}/template.md`가 원본
@@ -75,7 +76,9 @@
   README의 CHANGELOG 섹션은 포인터만 둔다(이중 갱신 제거). **gh 게시 모드**(`gh` 옵트인 —
   GitHub 릴리즈/PR 택1·검증 게이트·`.tide/release-mode` 선호도·원격 불가 처리·tide-guard 비확장)의
   단일 원본은 `docs/conventions.md` "릴리즈 게시 (gh)" 절이고, 절차는 `skills/release/SKILL.md`다.
-  `pr` 모드는 PR 머지 후 같은 명령 재실행으로 태그·릴리즈를 자동 마무리한다(상태 인지·멱등)
+  `pr` 모드는 PR 머지 후 같은 명령 재실행으로 태그·릴리즈를 자동 마무리한다(상태 인지·멱등). 마무리
+  (finalize)는 다 쓴 릴리즈 브랜치(`release/v{버전}` 로컬·원격) 정리까지 포함한다(멱등·비차단·현재
+  브랜치 안전 — 단일 원본 = conventions "`pr` 모드" 절)
 - **멀티 레포 / 대상 레포**(M13 토대): 각 커맨드는 시작 시 "대상 레포 루트"를 정해(기본=세션 레포,
   현행 동일) 산출물 앵커링·git/테스트 cwd를 그 루트 기준으로 두고, repo-root 인식 가드가
   같은 루트의 `.tide/phase`를 읽어 레포별 격리가 성립한다(가산). 단일 원본은
@@ -122,11 +125,16 @@ M20(에픽 마감)에서 회고 백로그의 이월·견고화 항목을 **각�
 | 브라우저 런타임 렌더·병렬 폴백 종단·retro 자기입력 비용 | M11~M12·M6 | **환경-이월/수용** — 세션·배포 수동 검증 영역. 저위험으로 회고에서 닫음(필요 시 별도) |
 | `strip_bom`/`StripBom` 단일 원본화 | M24 sn3 / M25 sn3 | **fix(M26)** — `tests/lib/encoding.{sh,ps1}` 단일 원본으로 추출, `tests/fleet-verify` 로컬 복제 제거(정의 셸당 1개). 참조 구현 이중성 군집의 마지막 코드성 복제면 종결 |
 | mkdocs 빌드 출력 검증(로컬 사각지대) | M22 사소1~M25 다음단계 | **fix(부분, M26)** — `tests/site-includes` 자기완결 가드로 인클루드·마커·제외 용어를 mkdocs 없이 결정적 검증(로컬 사각지대 종결). 실제 `--strict` 렌더는 CI 잔존(렌더 잔여만 환경-이월로 남김) |
+| `site-includes` 용어 추출 오추출-공허 green | M26 sn1 | **fix(M27)** — 추출한 제외 용어가 마스트헤드 추출 영역에 literal로 실재하는지 positive-control 단언 추가(양 셸 +1). "틀린 이유의 green" 차단 |
+| `multi-repo` fixture-BOM 취약성 | M26 sn2 | **fix(M27)** — ps1 fixture를 no-BOM UTF-8(`WriteAllText`)로 쓰고, 가드가 입력 선두 BOM에 내성(strip)을 갖게 함. 선두 BOM 입력 회귀 단언 추가(양 셸 +2씩, 12/12) |
+| tide-guard raw-`$input` grep 거칠음 | M13 사소3→M18 사소6 | **fix(M27)** — sed `cwd` 추출을 JSON 구조 경계(`{`·`,`·공백)로 앵커링해 부분일치 오인 감소. 차단/통과 판정·메시지·exit 2 계약은 불변 |
 
 이로써 오케스트레이션 에픽의 잔여 후속은 fix/수용/환경-이월로 전부 종결됐고, **로드맵 항목 미반영은
 0**이다 — 백로그가 닫혔다. M26은 그 뒤 남아 있던 **코드성 잔여 두 건**(`strip_bom` 단일 원본화·mkdocs
-로컬 사각지대)을 fix로 마저 닫았다 — 남는 미반영은 의도적 수용(`tide-guard`의 raw-`$input` grep 거칠음 —
-M13 사소3→M18 사소6)과 라이브 도그푸딩 영역(gh 게시·`pr` finalize 라이브 실증)뿐이다.
+로컬 사각지대)을 fix로 마저 닫았다. **M27**은 M26 리뷰의 비차단 후속(sn1 `site-includes` positive-control·
+sn2 `multi-repo` fixture-BOM 내성)과 오래 수용돼 온 `tide-guard` raw-`$input` grep 거칠음(M13 사소3→M18
+사소6)을 **모두 fix로 닫고**, `pr` 모드 finalize에 릴리즈 브랜치 정리를 더했다 — 이로써 **코드로 손볼 잔여
+후속은 0**이며, 남는 미반영은 **라이브 도그푸딩 영역(gh 게시·`pr` finalize 라이브 실증)뿐**이다.
 
 ## 메타
 

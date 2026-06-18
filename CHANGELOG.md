@@ -8,6 +8,12 @@
      릴리즈 노트만 인클루드하기 위한 마커다. 위 제목·안내 줄은 사이트에 부적절해 제외된다.
      렌더에는 영향 없음. -->
 <!-- --8<-- [start:notes] -->
+### [v2.5.0]
+- **`pr` 모드 finalize 릴리즈 브랜치 정리(가산)**: `pr` 게시 모드의 머지 후 마무리(finalize)가 태그·`gh release create`에 더해 **다 쓴 릴리즈 브랜치(`release/vX.Y.Z` 로컬·원격)까지 스스로 거둔다**. 정리는 ②~④(최신화·버전 sanity·태그/릴리즈) 성공 후 태그/릴리즈 생성과 **독립 멱등**으로 수행되고, **현재 브랜치 안전**(기본 브랜치 체크아웃 선행)·로컬 `git branch -d` 우선(squash/rebase 머지로 거부되면 **gh 머지 확인 전제 하에서만** `-D`, 미머지 강제삭제 금지)·원격 `--delete`(이미 없으면 무오류)·**실패 비차단**(정리 실패가 릴리즈를 무르지 않음·경고 보고)이다. 규약 단일 원본은 conventions "`pr` 모드" 절, 스킬은 포인터로 따른다 — 사이클마다 죽은 릴리즈 브랜치가 쌓이지 않는다.
+- **tide-guard 입력 견고화(견고화·판정 불변)**: 가드가 hook 입력(stdin JSON)을 파싱하기 전에 **선두 UTF-8 BOM을 제거**한다 — 일부 환경(PS 5.1 `Set-Content -Encoding utf8`·일부 편집기)이 stdin 선두에 BOM을 붙이면 `jq`/`ConvertFrom-Json`이 throw해 `cwd` 추출이 어긋날 수 있던 여지를 닫는다(양 사본 `.sh`·`.ps1`). jq 부재 시 raw 입력 `cwd` 추출 sed 폴백은 키를 JSON 구조 경계로 앵커링해 부분일치 오인을 줄였다. **차단/통과 판정·메시지·exit 2 계약은 불변**(동일 입력 동일 판정) — 실 hook 입력은 BOM 없는 UTF-8이라 production 동작은 애초 불변, 이 strip은 방어적 견고화다.
+- **M26 비차단 후속 종결(정리)**: sn1 — `tests/site-includes`에 추출 제외 용어가 마스트헤드 추출 영역에 literal로 실재하는지 positive-control 단언 추가("틀린 이유의 green" 차단, 양 셸 +1). sn2 — `tests/multi-repo` fixture를 no-BOM UTF-8로 쓰고 선두 BOM 입력 회귀 단언 추가(양 셸 +2씩 12/12). 오래 수용돼 온 tide-guard raw-`$input` grep 거칠음(M13 사소3→M18 사소6)도 함께 fix. 이로써 **코드로 손볼 잔여 후속이 0**으로 닫혔다(남는 미반영은 라이브 도그푸딩뿐).
+- **minor 가산·불변**: 주 변경은 `pr` finalize의 사용자 대면 가산 동작(브랜치 정리)이라 minor(M24 sn2 finalize 자동화=v2.4.0 minor 선례와 동형). 새 커맨드·토큰 0, `release` 모드·push-only·`gh` 부재 경로 불변. 2.0 stable 계약(11종 커맨드·오케스트레이션 규약·`.tide/phase`/tide-guard 차단·통과 판정·보고서/마일스톤 형식)·드리프트 가드(B1/B2/B3, fleet 계열 19·41·23·29 동일 + multi-repo 12·site-includes 28)·인코딩/줄바꿈 규율 전부 불변. M26 sn1·sn2 + raw-`$input` 거칠음을 종결했다.
+
 ### [v2.4.1]
 - **참조 구현 BOM 헬퍼 단일 원본화(정리)**: `tests/fleet-verify` 하니스에 로컬 복제로 남아 있던 BOM 제거 헬퍼(`strip_bom`/`StripBom`)를 단일 책임 `tests/lib/encoding.{sh,ps1}`로 추출해 정의를 셸당 1개로 수렴시켰다(source 순서 `encoding→discover→deps→toposort`). v2.2.1~v2.3.0이 추출한 `discover`/`toposort`/`read_deps`에 이어 참조 구현 이중성 군집의 **마지막 코드성 복제면**을 닫았다. 헬퍼 본문 바이트 동일·동작 보존.
 - **사이트 스니펫 인클루드 자기완결 검증 하니스 신설**: `tests/site-includes/run.{sh,ps1}`가 **mkdocs 없이** 사이트 스니펫 셸(`conventions`·`orchestration`·`changelog`·`commands`)의 인클루드 타깃 존재·섹션 마커 균형(`[start]`/`[end]` 각 1쌍)·제외 용어 0건(마커 구획 본문)을 정적 검증한다 — release 프리플라이트 수기 스캔의 결정적 로컬 프록시로, 그동안 연속 환경-이월돼 온 빌드 출력 검증의 **로컬 사각지대**를 닫았다. 실제 `--strict` 렌더·nav/link는 CI(`deploy-pages.yml`)의 몫으로 유지(자기완결 가드 ≠ 빌드 대체).
