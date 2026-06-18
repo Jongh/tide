@@ -109,7 +109,26 @@ chk "A(impl) commit 차단 [BOM 입력→cwd, CPD 아님]" "$SBX" "$A" "$BLOCK" 
 printf 'release\n' > "$A/.tide/phase"
 chk "A(release) commit 통과 [BOM 입력→cwd, CPD 아님]" "$SBX" "$A" "$BLOCK" 0 bom
 
+# 시나리오 10: 읽기/쓰기 구분 (M28) — 비-release에서 git *읽기*는 통과, *쓰기*만 차단.
+# 같은 impl phase에서 읽기 통과 + 쓰기 차단을 함께 단언해 "가드가 살아 있으면서 읽기만 통과"임을
+# 고정한다(음성 통제). verb는 서브커맨드 위치에서만 본다(옵션 값·경로·복합 이름 부분일치 무시).
+printf 'impl\n' > "$A/.tide/phase"
+# 읽기(통과, exit 0)
+chk "A(impl) git tag -l 통과 (태그 목록=읽기)"          "$SBX" "$A" "git tag -l"                   0
+chk "A(impl) git tag -l 패턴 통과 (목록 옵션→위치=패턴)" "$SBX" "$A" "git tag -l 'v2.*'"            0
+chk "A(impl) git tag --contains 통과 (태그 조회)"        "$SBX" "$A" "git tag --contains HEAD"      0
+chk "A(impl) git log --grep=commit 통과 (옵션 값)"       "$SBX" "$A" "git log --grep=commit"        0
+chk "A(impl) git show HEAD:path 통과 (경로 부분일치)"    "$SBX" "$A" "git show HEAD:src/tag.rs"     0
+chk "A(impl) git cat-file commit 통과 (비-서브커맨드)"   "$SBX" "$A" "git cat-file commit HEAD"     0
+chk "A(impl) git commit-graph 통과 (복합 서브커맨드)"    "$SBX" "$A" "git commit-graph verify"      0
+chk "A(impl) git tag 리다이렉트 통과 (목록>파일=읽기)"   "$SBX" "$A" "git tag > /tmp/t.txt"         0
+# 쓰기(차단, exit 2)
+chk "A(impl) git tag 생성 차단 (위치 인자=생성)"         "$SBX" "$A" "git tag v2.6.0"               2
+chk "A(impl) git tag -d 삭제 차단"                       "$SBX" "$A" "git tag -d v1"                2
+chk "A(impl) git push --tags 차단"                       "$SBX" "$A" "git push --tags"              2
+chk "A(impl) git -C .. commit 차단 (전역 옵션 접두)"     "$SBX" "$A" "git -C ../other commit -m x"  2
+
 echo
 echo "# 결과: PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ] || exit 1
-echo "# 모든 시나리오 통과 — repo-root 인식·격리·폴백 확인됨"
+echo "# 모든 시나리오 통과 — repo-root 인식·격리·폴백·읽기/쓰기 구분 확인됨"

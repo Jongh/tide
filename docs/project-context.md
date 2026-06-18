@@ -58,9 +58,13 @@
 
 - **사이클**: kickoff → milestone → impl → review → release. `status`는 읽기 전용 현재 위치 보고
 - **부수효과 분리**: impl·review는 git 작업 금지(코드·보고서만), git commit/tag/push는 release에서만
-- **tide-guard**: `.tide/phase`가 `release`가 아니면 git commit/tag/push를 기계적으로 차단(exit 2).
-  상태 파일이 없으면 차단하지 않음. 입력 선두 BOM에 내성(strip 후 파싱)·sed `cwd` 추출 키 앵커링으로
-  견고화돼 있으나 차단/통과 판정·메시지·exit 2 계약은 **불변**(단일 원본 = conventions "tide-guard hook")
+- **tide-guard**: `.tide/phase`가 `release`가 아니면 git **쓰기**(commit·태그 생성/삭제·push)를 기계적으로
+  차단(exit 2)하고 git **읽기**(커밋 읽기·태그 목록·메시지 검색·이력 파일 읽기)는 통과시킨다(M28). verb는
+  git **서브커맨드 위치**에서만 판정한다 — 옵션 값(`--grep=commit`)·경로(`HEAD:src/tag.rs`)·복합 서브커맨드
+  이름(`commit-graph`·`cat-file commit`)의 부분일치는 무시. `tag`는 읽기 옵션만/인자 없음이면 목록(읽기),
+  쓰기 옵션이나 목록 옵션 없는 위치 인자면 생성/삭제(쓰기). 상태 파일이 없으면 차단하지 않음. 입력 선두
+  BOM 내성(strip 후 파싱)·sed `cwd` 추출 키 앵커링으로 견고화. 단일 원본 = conventions "tide-guard hook",
+  집행 = `tests/multi-repo`(읽기/쓰기 구분 23/23 양 셸)
 - **상태 파일 `.tide/phase`**: 현재 단계명 한 줄(`milestone`/`impl`/`review`/`release`/`idle`).
   각 스킬이 시작 시 기록하고 종료 시 `idle`로 되돌림
 - **템플릿 단일 원본**: 마일스톤·보고서 형식은 각 스킬의 `${CLAUDE_SKILL_DIR}/template.md`가 원본
@@ -128,13 +132,18 @@ M20(에픽 마감)에서 회고 백로그의 이월·견고화 항목을 **각�
 | `site-includes` 용어 추출 오추출-공허 green | M26 sn1 | **fix(M27)** — 추출한 제외 용어가 마스트헤드 추출 영역에 literal로 실재하는지 positive-control 단언 추가(양 셸 +1). "틀린 이유의 green" 차단 |
 | `multi-repo` fixture-BOM 취약성 | M26 sn2 | **fix(M27)** — ps1 fixture를 no-BOM UTF-8(`WriteAllText`)로 쓰고, 가드가 입력 선두 BOM에 내성(strip)을 갖게 함. 선두 BOM 입력 회귀 단언 추가(양 셸 +2씩, 12/12) |
 | tide-guard raw-`$input` grep 거칠음 | M13 사소3→M18 사소6 | **fix(M27)** — sed `cwd` 추출을 JSON 구조 경계(`{`·`,`·공백)로 앵커링해 부분일치 오인 감소. 차단/통과 판정·메시지·exit 2 계약은 불변 |
+| tide-guard 읽기 오차단(태그 목록·`--grep`·이력 경로·`cat-file`) | 사용자 요구(2026-06-18) | **fix(M28)** — verb를 git 서브커맨드 위치에서만 판정 + `tag` 읽기/쓰기 구분. 비-release에서도 git 읽기(커밋 읽기·태그 목록·메시지 검색·이력 파일)는 통과, 쓰기(commit·태그 생성/삭제·push)만 차단. 차단되던 쓰기 집합 불변(보호 보존). `tests/multi-repo` 23/23 양 셸 집행 |
 
 이로써 오케스트레이션 에픽의 잔여 후속은 fix/수용/환경-이월로 전부 종결됐고, **로드맵 항목 미반영은
 0**이다 — 백로그가 닫혔다. M26은 그 뒤 남아 있던 **코드성 잔여 두 건**(`strip_bom` 단일 원본화·mkdocs
 로컬 사각지대)을 fix로 마저 닫았다. **M27**은 M26 리뷰의 비차단 후속(sn1 `site-includes` positive-control·
 sn2 `multi-repo` fixture-BOM 내성)과 오래 수용돼 온 `tide-guard` raw-`$input` grep 거칠음(M13 사소3→M18
 사소6)을 **모두 fix로 닫고**, `pr` 모드 finalize에 릴리즈 브랜치 정리를 더했다 — 이로써 **코드로 손볼 잔여
-후속은 0**이며, 남는 미반영은 **라이브 도그푸딩 영역(gh 게시·`pr` finalize 라이브 실증)뿐**이다.
+후속은 0**이며, 남는 미반영은 **라이브 도그푸딩 영역(gh 게시·`pr` finalize 라이브 실증)뿐**이다. **M28**은
+백로그가 아닌 **사용자 신호**(release 외 상황의 git 읽기 작업이 필요)로 tide-guard의 git 읽기 오차단(태그
+목록·`--grep`·이력 경로·`cat-file`)을 닫았다 — verb를 서브커맨드 위치에서 판정하고 `tag` 읽기/쓰기를 구분해
+비-release에서도 git 읽기가 통과한다(차단되던 쓰기는 불변, 보호 보존). 남는 미반영은 여전히 라이브 도그푸딩
+영역뿐이다.
 
 ## 메타
 
