@@ -124,6 +124,26 @@ try {
     'release' | Set-Content $Aphase -Encoding utf8
     Check "A(release) allows commit [BOM input -> cwd, not CPD]" $sbx $A $BLOCK 0 $true
 
+    # 10: read/write discrimination (M28) -- non-release blocks git *writes* only; *reads* pass.
+    # Same impl phase asserts reads-allow AND writes-block together, pinning "guard is alive yet
+    # reads pass" (negative control). The verb is judged at the git *subcommand* position only
+    # (substring matches in option values / paths / compound subcommand names are ignored).
+    'impl' | Set-Content $Aphase -Encoding utf8
+    # reads (allow, exit 0)
+    Check "A(impl) git tag -l allowed (tag list=read)" $sbx $A 'git tag -l' 0
+    Check "A(impl) git tag -l pattern allowed (list opt->positional=pattern)" $sbx $A "git tag -l 'v2.*'" 0
+    Check "A(impl) git tag --contains allowed (tag query)" $sbx $A 'git tag --contains HEAD' 0
+    Check "A(impl) git log --grep=commit allowed (option value)" $sbx $A 'git log --grep=commit' 0
+    Check "A(impl) git show HEAD:path allowed (path substring)" $sbx $A 'git show HEAD:src/tag.rs' 0
+    Check "A(impl) git cat-file commit allowed (not subcommand)" $sbx $A 'git cat-file commit HEAD' 0
+    Check "A(impl) git commit-graph allowed (compound subcommand)" $sbx $A 'git commit-graph verify' 0
+    Check "A(impl) git tag redirect allowed (list>file=read)" $sbx $A 'git tag > /tmp/t.txt' 0
+    # writes (block, exit 2)
+    Check "A(impl) git tag create blocked (positional=create)" $sbx $A 'git tag v2.6.0' 2
+    Check "A(impl) git tag -d delete blocked" $sbx $A 'git tag -d v1' 2
+    Check "A(impl) git push --tags blocked" $sbx $A 'git push --tags' 2
+    Check "A(impl) git -C .. commit blocked (global-opt prefix)" $sbx $A 'git -C ../other commit -m x' 2
+
     Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail)"
 }
 finally {

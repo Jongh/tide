@@ -8,6 +8,11 @@
      릴리즈 노트만 인클루드하기 위한 마커다. 위 제목·안내 줄은 사이트에 부적절해 제외된다.
      렌더에는 영향 없음. -->
 <!-- --8<-- [start:notes] -->
+### [v2.6.0]
+- **tide-guard 읽기/쓰기 구분(가산·판정 정련)**: 비-release phase에서 가드가 git **쓰기**(`commit`·태그 *생성/삭제*·`push`)만 차단하고 **읽기**(커밋 읽기·**태그 목록**·메시지 검색 `--grep`·이력 파일 읽기 `HEAD:path`)는 통과시킨다. verb를 git **서브커맨드 위치**에서만 보므로 옵션 값(`--grep=commit`)·경로(`HEAD:src/tag.rs`)·복합 서브커맨드 이름(`commit-graph`·`cat-file commit`)의 부분일치 오차단이 사라졌다. `git tag`는 읽기 옵션만/인자 없음이면 목록(읽기), 쓰기 옵션이나 목록 옵션 없는 위치 인자면 생성/삭제(쓰기)로 가른다 — 맥락 파악용 git 읽기가 release 밖에서도 막히지 않는다.
+- **보호 불변·범위 명시**: 차단되던 *직접* git 쓰기 집합은 한 건도 줄지 않는다(보호 보존) — 전역 옵션 접두(`git -C dir commit`·`-c k=v push`)·환경변수 접두·`--force-with-lease` 등 모든 직접 변형이 그대로 차단된다. 가드는 **직접 git 호출을 보는 백스톱**이며 `sh -c '…'`·`eval` 같은 감싼/우회 실행·plumbing(`commit-tree` 등)은 비대상임을 conventions에 단일 원본으로 명시했다(샌드박스 아님 — "impl·review는 git 금지"의 실제 보장은 단계 규율). 양 셸 사본(`.sh`·`.ps1`) 동일 판정.
+- **minor 가산·불변**: 가드의 *통과 판정*을 사용자 관찰 가능하게 완화(읽기 통과)하나 호환 파괴 아님 — 통과하던 것이 새로 막히지 않고 직접 쓰기 차단은 보존이라 minor. `tests/multi-repo`에 읽기/쓰기 구분 회귀 12건 추가(양 셸 24/24), 나머지 하니스 baseline 동일(discover 19·fleet 41·fleet-cycle 23·fleet-verify 29·site-includes 28). 게이팅(BOM·cwd·격리·폴백)·인코딩 규율·2.0 stable 계약(11종 커맨드·오케스트레이션 규약·보고서/마일스톤 형식) 불변, 새 커맨드·토큰 0.
+
 ### [v2.5.0]
 - **`pr` 모드 finalize 릴리즈 브랜치 정리(가산)**: `pr` 게시 모드의 머지 후 마무리(finalize)가 태그·`gh release create`에 더해 **다 쓴 릴리즈 브랜치(`release/vX.Y.Z` 로컬·원격)까지 스스로 거둔다**. 정리는 ②~④(최신화·버전 sanity·태그/릴리즈) 성공 후 태그/릴리즈 생성과 **독립 멱등**으로 수행되고, **현재 브랜치 안전**(기본 브랜치 체크아웃 선행)·로컬 `git branch -d` 우선(squash/rebase 머지로 거부되면 **gh 머지 확인 전제 하에서만** `-D`, 미머지 강제삭제 금지)·원격 `--delete`(이미 없으면 무오류)·**실패 비차단**(정리 실패가 릴리즈를 무르지 않음·경고 보고)이다. 규약 단일 원본은 conventions "`pr` 모드" 절, 스킬은 포인터로 따른다 — 사이클마다 죽은 릴리즈 브랜치가 쌓이지 않는다.
 - **tide-guard 입력 견고화(견고화·판정 불변)**: 가드가 hook 입력(stdin JSON)을 파싱하기 전에 **선두 UTF-8 BOM을 제거**한다 — 일부 환경(PS 5.1 `Set-Content -Encoding utf8`·일부 편집기)이 stdin 선두에 BOM을 붙이면 `jq`/`ConvertFrom-Json`이 throw해 `cwd` 추출이 어긋날 수 있던 여지를 닫는다(양 사본 `.sh`·`.ps1`). jq 부재 시 raw 입력 `cwd` 추출 sed 폴백은 키를 JSON 구조 경계로 앵커링해 부분일치 오인을 줄였다. **차단/통과 판정·메시지·exit 2 계약은 불변**(동일 입력 동일 판정) — 실 hook 입력은 BOM 없는 UTF-8이라 production 동작은 애초 불변, 이 strip은 방어적 견고화다.

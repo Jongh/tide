@@ -59,18 +59,36 @@ tide는 porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴�
 - PreToolUse(Bash|PowerShell 매처) hook. **플러그인이 직접 제공한다** —
   `hooks/hooks.json`이 `${CLAUDE_PLUGIN_ROOT}/hooks/tide-guard.sh`를 등록하므로
   플러그인 설치만으로 활성화되고, 프로젝트별 설치 절차는 없다.
-- 동작: `.tide/phase`가 `release`가 **아닌** 동안 `git commit` / `git tag` / `git push`
-  패턴의 셸 명령을 차단한다(exit 2 + 한국어 안내 메시지: "'{phase}' 단계에서는 git
-  commit/tag/push가 차단됩니다. git 작업은 /tide:release 단계에서만 허용됩니다.").
+- 동작: `.tide/phase`가 `release`가 **아닌** 동안 git **쓰기** 명령만 차단한다(exit 2) —
+  서브커맨드가 `commit`·`push`이거나 `tag`의 *생성/삭제* 형태일 때. git **읽기는 phase와 무관하게
+  통과**한다(맥락 파악용): 커밋 읽기(`git log`·`show`·`diff` 등)·**태그 목록/조회**(`git tag`·`-l`·
+  `--list`·`-n`·`--contains`·`--points-at`·`--sort`·`--column`·`--format`·`-v` 등 읽기 옵션만)·
+  메시지 검색(`--grep=…`)·이력 파일 읽기(`HEAD:<path>`)는 막지 않는다. 안내 메시지(한국어): "'{phase}'
+  단계에서는 git 쓰기(commit·태그 생성/삭제·push)가 차단됩니다 — 읽기는 허용됩니다. git 쓰기는
+  /tide:release 단계에서만 가능합니다."
+- **서브커맨드 위치 판정**: verb(`commit`·`tag`·`push`)는 git **서브커맨드**일 때만 본다 — `git` 뒤
+  전역 옵션(`-C <dir>`·`-c <kv>`·`--git-dir`·`--work-tree`·`--namespace`·`--super-prefix`·`--exec-path`
+  등 인자 소비형은 그 인자까지)을 건너뛴 첫 비-옵션 토큰. verb 글자가 옵션 값(`--grep=commit`)·경로
+  (`HEAD:src/tag.rs`)·복합 서브커맨드 이름(`commit-graph`·`cat-file commit`)에 들어가도 서브커맨드가
+  아니면 차단하지 않는다(부분 문자열 매칭 아님). `tag`의 읽기/쓰기 구분: 읽기 옵션만 있거나 인자가
+  없으면 **목록(읽기)**, 쓰기 옵션(`-a`·`-s`·`-u`·`-m`·`-F`·`-e`·`-f`·`-d`·`--delete`·`--create-reflog`)이
+  있거나 *목록 옵션 없이* 위치 인자(태그명)가 오면 **생성/삭제(쓰기)**. 차단되던 *쓰기* 집합은 줄지
+  않고(보호 불변) *읽기 오차단*만 풀린다. 차단/통과 케이스는 `tests/multi-repo`가 집행한다.
+- **범위(백스톱이지 샌드박스 아님)**: 가드는 **직접 git 호출**(서브커맨드 위치의 `commit`·`tag`·`push`)을
+  본다. `sh -c 'git push'`·`eval`·따옴표로 감싼 실행 등 **간접·우회 실행**은 파싱하지 않으므로 잡지 않는다
+  (이를 잡으려면 셸 전체를 파싱해야 하고, 그러면 `echo 'git push'` 같은 무해한 문자열까지 오차단하던 옛
+  부분일치로 회귀한다). 가드의 역할은 *우발적 직접 git 쓰기*를 막는 기계적 백스톱이며, "impl·review는 git
+  금지"의 **실제 보장은 단계 규율**이다(M18·M19와 동일 — 규율이 1차, 가드는 백스톱). 같은 이유로 plumbing
+  쓰기(`commit-tree` 등 ref를 옮기지 않는 저수준 명령)도 비대상이다.
 - **phase 읽기 위치**: 가드는 **명령이 실행되는 레포 루트의 `.tide/phase`를 읽는다**(단일
   레포에선 `CLAUDE_PROJECT_DIR`와 동일). 레포를 못 찾으면 `CLAUDE_PROJECT_DIR` 폴백,
   그래도 없으면 무차단. 이는 단일 레포 동작을 바꾸지 않는 **하위 호환 일반화**이며(아래
   "2.0 안정성"·"멀티 레포 / 대상 레포" 절 참조), 차단 규칙·메시지·exit 2는 불변이다.
 - 상태 파일이 없으면 아무것도 차단하지 않는다 — tide를 쓰지 않는 프로젝트나
   사용자의 수동 git 작업(idle 상태가 아니라 파일 자체가 없는 경우)에 영향을 주지 않는다.
-- **`idle`에서도 차단된다** — tide 도입 후에는 Claude를 통한 git commit/tag/push가 항상
-  `/tide:release`로만 일어나는 것이 의도된 동작이다. tide 사이클 밖에서 Claude에게
-  git 작업을 시키려면 `.tide/phase` 파일을 삭제해 가드를 해제한다.
+- **`idle`에서도 (쓰기는) 차단된다** — tide 도입 후에는 Claude를 통한 git **쓰기**(commit·태그
+  생성/삭제·push)가 항상 `/tide:release`로만 일어나는 것이 의도된 동작이다(읽기는 `idle`에서도 통과).
+  tide 사이클 밖에서 Claude에게 git 쓰기를 시키려면 `.tide/phase` 파일을 삭제해 가드를 해제한다.
 - 스크립트 원본은 `hooks/tide-guard.sh` **한 곳**이다 (`tide-guard.ps1`은 sh를 쓸 수
   없는 환경을 위한 보조 사본 — 로직·메시지 수정 시 함께 갱신). Windows에서는 Git for
   Windows의 sh로 실행된다.
