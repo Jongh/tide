@@ -4,6 +4,12 @@
 
 $inputJson = [Console]::In.ReadToEnd()
 
+# 입력 견고화 — 선두 UTF-8 BOM 제거. PS 5.1 ConvertFrom-Json은 선두 BOM에서 throw하므로,
+# 일부 환경(`Set-Content -Encoding utf8` 등)이 stdin 선두에 BOM을 붙여도 견디도록 strip한다.
+# UTF-8로 디코드된 BOM(U+FEFF)과 오디코드된 3바이트(U+00EF U+00BB U+00BF) 둘 다 방어. hook은
+# 자기완결이어야 하므로(외부 source 금지) 여기서 최소 strip을 직접 둔다. 판정은 불변(견고화만).
+if ($inputJson) { $inputJson = $inputJson -replace '^(\uFEFF|\u00EF\u00BB\u00BF)', '' }
+
 $cmd = $inputJson
 $cwd = $null
 try {

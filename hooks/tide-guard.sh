@@ -5,6 +5,11 @@
 
 input=$(cat)
 
+# 입력 견고화 — 선두 UTF-8 BOM(EF BB BF) 제거. 일부 환경(PS 5.1 `Set-Content -Encoding utf8`,
+# 일부 편집기)이 stdin 선두에 BOM을 붙이면 jq 파싱이 어긋날 수 있다. 판정은 불변(견고화만).
+bom=$(printf '\357\273\277')
+input=${input#"$bom"}
+
 # 명령이 실제 실행되는 작업 디렉터리(cwd)의 git 레포 루트에서 .tide/phase를 읽는다.
 # 1) 훅 입력 JSON의 cwd 필드 → 2) git -C "$cwd" rev-parse --show-toplevel →
 # 3) 못 구하면 기존 동작으로 폴백(${CLAUDE_PROJECT_DIR:-.}). 폴백해도 phase 없으면 무차단.
@@ -12,7 +17,8 @@ cwd=""
 if command -v jq >/dev/null 2>&1; then
     cwd=$(printf '%s' "$input" | jq -r '.cwd // empty')
 else
-    cwd=$(printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    # 키를 JSON 구조 경계({·,·공백)로 앵커링해 "..._cwd" 같은 부분일치 오인을 줄인다(판정 불변).
+    cwd=$(printf '%s' "$input" | sed -n 's/.*[{,[:space:]]"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
     # sed 폴백은 JSON 이스케이프를 직접 푼다 (jq는 자동 처리).
     if [ -n "$cwd" ]; then
         cwd=$(printf '%s' "$cwd" | sed -e 's/\\\\/\\/g' -e 's/\\\//\//g')

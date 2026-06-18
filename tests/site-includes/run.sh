@@ -21,6 +21,9 @@
 # attribution kept OUT of the snippet body. We derive it from the masthead intro region that
 # lives OUTSIDE the body markers (README.md / docs/conventions.md line-3 "<TERM>... methodology"
 # pattern) -- pulling the rule from the convention's intent, self-updating, no duplicated list.
+# A positive-control then re-confirms each derived term LITERALLY occurs in that masthead
+# region -- otherwise a mis-extracted token (absent from the body) would pass the term scan
+# vacuously (green for the wrong reason); this proves the scanner handles a REAL string.
 #
 # Usage: sh tests/site-includes/run.sh   (exit 0 if all pass, exit 1 if any fail)
 
@@ -49,17 +52,40 @@ extract_term() { # <file> -> term word (or empty)
     sed -n "s/.*[ \\t([]\\([A-Za-z][A-Za-z0-9_-]*\\)${ko_methodology}.*/\\1/p; s/^\\([A-Za-z][A-Za-z0-9_-]*\\)${ko_methodology}.*/\\1/p" "$1" | head -1
 }
 
-# Collect excluded terms (dedup) from the two masthead sources.
+# The masthead intro is line 3 of each source (the line we extract the term from).
+# We keep that exact source region so a positive-control can re-confirm the derived
+# term LITERALLY occurs in it (not a fabricated / mis-extracted token).
+masthead_region() { # <file> -> the masthead intro line (line 3), or empty
+    [ -f "$1" ] || return
+    sed -n '3p' "$1"
+}
+
+# Collect excluded terms (dedup) from the two masthead sources, remembering for each
+# derived term the masthead source region it was extracted from (for the positive-control).
 TERMS=""
+MASTHEAD=""   # accumulated masthead intro text across the scanned sources
 for src in "$ROOT/README.md" "$ROOT/docs/conventions.md"; do
     t=$(extract_term "$src")
     [ -n "$t" ] || continue
+    MASTHEAD="$MASTHEAD
+$(masthead_region "$src")"
     case " $TERMS " in *" $t "*) : ;; *) TERMS="$TERMS $t" ;; esac
 done
 TERMS=$(echo "$TERMS" | sed 's/^ *//; s/ *$//')
 
 # Sanity: we must have derived at least one excluded term, else the term scan is vacuous.
 chk "term: derived >=1 excluded term from masthead intro" "$([ -n "$TERMS" ] && echo ok || echo no)" "ok"
+
+# Positive-control: each derived term must LITERALLY occur in the masthead region it was
+# extracted from. If a derived term is absent there, extraction fabricated / mis-extracted a
+# token -- which would never appear in the body, making the term scan pass VACUOUSLY (green
+# for the wrong reason). This proves the scanner handles a REAL string. Handles >1 token.
+ctrl_missing=0
+for term in $TERMS; do
+    n=$(printf '%s\n' "$MASTHEAD" | grep -cF "$term")
+    [ "$n" -ge 1 ] || ctrl_missing=$((ctrl_missing + 1))
+done
+chk "term: each derived term literally present in masthead region" "$ctrl_missing" "0"
 
 # --- enumerate snippet shells and their include directives --------------------
 # An include line looks like:  --8<-- "<target>:<section>"
@@ -142,4 +168,4 @@ chk "site: discovered >=1 include directive" "$([ "$includes_total" -ge 1 ] && e
 echo
 echo "# result: PASS=$pass FAIL=$fail (shells=$shells includes=$includes_total terms=[$TERMS])"
 [ "$fail" -eq 0 ] || exit 1
-echo "# site-include resolution (target exists + balanced [start]/[end] marker pair + excluded-term 0 in body) confirmed -- NOT a mkdocs --strict substitute (render/nav/link = CI)"
+echo "# site-include resolution (target exists + balanced [start]/[end] marker pair + excluded-term 0 in body + derived terms real in masthead) confirmed -- NOT a mkdocs --strict substitute (render/nav/link = CI)"

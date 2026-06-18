@@ -48,11 +48,16 @@ pass=0; fail=0
 # chk <설명> <CLAUDE_PROJECT_DIR> <cwd> <command> <기대exit>
 #   cwd 빈 문자열이면 입력 JSON에 cwd 필드를 넣지 않는다(폴백 경로 검증).
 chk() {
-    _desc="$1"; _cpd="$2"; _cwd="$3"; _cmd="$4"; _want="$5"
+    _desc="$1"; _cpd="$2"; _cwd="$3"; _cmd="$4"; _want="$5"; _bom="${6:-}"
     if [ -n "$_cwd" ]; then
         printf '{"cwd":"%s","tool_input":{"command":"%s"}}' "$_cwd" "$_cmd" > "$SBX/in.json"
     else
         printf '{"tool_input":{"command":"%s"}}' "$_cmd" > "$SBX/in.json"
+    fi
+    # 6번째 인자가 있으면 픽스처 선두에 UTF-8 BOM을 붙여 가드의 BOM 내성을 회귀 검증한다.
+    if [ -n "$_bom" ]; then
+        { printf '\357\273\277'; cat "$SBX/in.json"; } > "$SBX/in.bom.json"
+        mv "$SBX/in.bom.json" "$SBX/in.json"
     fi
     CLAUDE_PROJECT_DIR="$_cpd" sh "$GUARD" < "$SBX/in.json" >/dev/null 2>&1
     _got=$?
@@ -94,6 +99,15 @@ printf 'release\n' > "$A/.tide/phase"
 chk "단일 레포 회귀: A(release) 루트 cwd commit 통과" "$A" "$A" "$BLOCK" 0
 printf 'impl\n' > "$A/.tide/phase"
 chk "단일 레포 회귀: A(impl) 루트 cwd commit 차단" "$A" "$A" "$BLOCK" 2
+
+# 시나리오 9: 선두 BOM 입력 내성 — no-BOM과 동일 판정 (sn2 / T03 가드 BOM strip)
+# 판별 셋업: cwd=A(phase 설정)가 판정을 끌고, CPD=$SBX엔 phase 없음 → 선두 BOM이 cwd 추출을
+# 깨면 폴백($SBX, phase 없음)으로 판정이 뒤집힌다. jq 경로는 BOM에서 throw하므로 특히 판별적이고
+# (현재 환경은 sed 폴백이라 BOM-내성), 가드가 선두 BOM을 strip하므로 양 경로 모두 동일 판정.
+printf 'impl\n' > "$A/.tide/phase"
+chk "A(impl) commit 차단 [BOM 입력→cwd, CPD 아님]" "$SBX" "$A" "$BLOCK" 2 bom
+printf 'release\n' > "$A/.tide/phase"
+chk "A(release) commit 통과 [BOM 입력→cwd, CPD 아님]" "$SBX" "$A" "$BLOCK" 0 bom
 
 echo
 echo "# 결과: PASS=$pass FAIL=$fail"
