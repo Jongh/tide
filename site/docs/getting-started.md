@@ -9,7 +9,7 @@
 /plugin install tide@tide
 ```
 
-커맨드 11종과 tide-guard hook이 **함께** 활성화됩니다. 프로젝트별 hook 설치 절차는
+커맨드 12종과 tide-guard hook이 **함께** 활성화됩니다. 프로젝트별 hook 설치 절차는
 없습니다 — 가드는 플러그인이 `${CLAUDE_PLUGIN_ROOT}` 경로의 hook으로 직접 제공합니다.
 
 !!! note "Windows 참고"
@@ -66,5 +66,9 @@ cp -r skills/* ~/.claude/skills/
   사용합니다.
 - **`/tide:retro`** — 사이클이 여러 번 쌓인 뒤, 누적된 마일스톤·보고서를 가로질러 반복
   문제·수용된 트레이드오프·미반영 후속을 회고 문서로 집계합니다 (읽기 전용).
+- **`/tide:debug`** — 빌드 후 테스트에서 **에러를 발견했을 때** 쓰는 사이클 밖 진입점입니다.
+  마일스톤 없이 `/tide:debug "증상"`으로 세션을 열어 발견-수정을 누적하고, `/tide:debug done`으로
+  닫으면 `docs/reports/debug-{N}.md` 보고서 하나가 남습니다. 그 판정이 리뷰 판정을 대신하므로
+  곧바로 `/tide:release`로 이어집니다 (git 작업은 여전히 없음).
 
 각 커맨드의 인자와 산출물은 **[커맨드 레퍼런스](commands.md)** 를 참고하세요.

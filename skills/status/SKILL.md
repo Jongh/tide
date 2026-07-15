@@ -5,8 +5,9 @@ tide 사이클의 현재 상태를 읽기 전용으로 보고해줘.
 
 **대상 레포**: 시작 시 대상 레포 루트를 정한다 — 기본은 세션 레포(현행 단일 레포 동작 그대로),
 상위 폴더 단일 세션에서 특정 자식 레포를 지시받으면 그 자식 레포 루트. 아래 확인 항목의 모든
-경로(마일스톤·보고서·버전 파일·`.tide/phase`)는 **대상 레포 루트 기준**으로 조회한다(읽기 전용 —
-파일·phase 변경 없음). 상세는 `docs/conventions.md`의 "멀티 레포 / 대상 레포" 절.
+경로(마일스톤·보고서·버전 파일·`.tide/phase`·`.tide/debug-session`)는 **대상 레포 루트 기준**으로
+조회한다(읽기 전용 — 파일·phase·세션 변경 없음). 상세는 `docs/conventions.md`의
+"멀티 레포 / 대상 레포" 절.
 
 > 상위 폴더 아래 **여러 자식 레포를 한 번에** 보려면 `/tide:fleet`(읽기 전용 멀티 레포 개요)를 쓴다.
 
@@ -16,18 +17,40 @@ tide 사이클의 현재 상태를 읽기 전용으로 보고해줘.
 3. docs/reports/M{N}-review.md 존재 여부 — 있으면 릴리즈 판정(가능/불가)과 추천 버전
 4. 버전 파일(Cargo.toml / package.json / pyproject.toml / .claude-plugin/plugin.json 등)의 현재 버전
 5. .tide/phase의 현재 값 (파일 없으면 "없음")
+6. docs/reports/debug-*.md 중 최대 번호 — 존재 여부와, 있으면 릴리즈 판정(가능/불가)과 추천 버전
+   (debug 보고서는 리뷰보고서와 **동일한 판정 형식**을 쓰므로 3번과 같은 방식으로 읽는다)
+7. .tide/debug-session 존재 여부 — 있으면 **열린 debug 세션**이고 그 안의 한 줄이 활성 보고서 번호 N
+   (파일 없으면 "없음" = 열린 세션 없음)
+
+`.tide/debug-session`은 **읽기만 한다** — 존재해도 지우거나 고치지 않는다. 방치된 세션을 status가
+청소하면 읽기 전용 계약이 깨진다(세션 종료는 `/tide:debug done`의 일). 잔재 phase도 마찬가지로
+보고만 하고 되돌리지 않는다. 규약의 단일 원본은 `docs/conventions.md`의 "debug 세션" 절.
 
 보고 형식: 위 항목을 간단한 표나 목록으로 보여주고, 마지막 줄에 다음 권장 커맨드를
 구체 인자까지 포함해 한 줄로 제시해줘 (예: `다음: /tide:release v0.2.0`).
 
-다음 커맨드 판단 규칙:
+다음 커맨드 판단 규칙 — **아래 debug 규칙을 먼저 적용하고**, 해당하지 않을 때만 그 아래
+기존 사이클 규칙으로 판단한다 (열린 debug 세션이 가장 시급한 상태이고, 미완결 보고서에는 판정
+섹션이 없어 release 근거가 없으므로 사이클 상태보다 우선한다):
+- `.tide/debug-session` 존재 → `다음: /tide:debug done` — 열린 debug 세션 N번이 미종결임을 함께
+  알린다(`done` 전까지는 보고서에 판정이 없어 `/tide:release`가 중단된다)
+- 열린 세션 없음 + `.tide/phase`가 `debug` → **잔재 phase**임을 보고한다 — 세션이 이미 `done`으로
+  닫혔다면 phase만 남은 잔재이고, 이어서 고칠 것이 남았으면 `/tide:debug`로 이어간다. **status는
+  고치지 않는다**(읽기 전용 — 잔재 정리는 사용자 판단 사항). 다음 커맨드는 잔재 사실을 알린 뒤
+  나머지 규칙으로 이어서 판단한다.
+- 열린 세션 없음 + **미릴리즈인 debug 보고서**의 판정이 전부 "가능" → `다음: /tide:release v{추천 버전}`
+  (미릴리즈 판정은 마지막 릴리즈 태그의 트리에 그 보고서가 포함됐는지로 — `git tag`·`git ls-tree`
+  읽기. 기준의 단일 원본은 `docs/conventions.md`의 "debug 세션 → 릴리즈 경로")
+
+기존 사이클 규칙 (위 debug 규칙에 해당하지 않을 때):
 - 마일스톤 문서 없음 → /tide:kickoff(골격 미비 시) 또는 /tide:milestone
 - impl 보고서 없음 → /tide:impl
 - review 보고서 없음 → /tide:review
 - 판정 "가능" → /tide:release v{추천 버전}
 - 판정 "불가" → 보완 후 /tide:impl M{N} 재실행 또는 /tide:milestone 으로 후속 계획
 
-다음은 절대 수행하지 마: 파일 생성·수정 / git 작업 (.tide/phase도 변경하지 않는 읽기 전용 커맨드)
+다음은 절대 수행하지 마: 파일 생성·수정 / 파일 삭제(`.tide/debug-session` 포함) / git 작업
+(.tide/phase도 변경하지 않는 읽기 전용 커맨드)
 
 ## 멀티 레포 맥락 감지 힌트 (advisory)
 

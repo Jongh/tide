@@ -144,6 +144,21 @@ try {
     Check "A(impl) git push --tags blocked" $sbx $A 'git push --tags' 2
     Check "A(impl) git -C .. commit blocked (global-opt prefix)" $sbx $A 'git -C ../other commit -m x' 2
 
+    # 11: phase=debug guard regression (M29 decision 2) -- debug is phase!=release, so the
+    # EXISTING rules apply with the guard left unmodified: writes block, reads pass.
+    # As in scenario 10, reads-allow AND writes-block are asserted together in the same phase
+    # (negative control -- without it a debug branch that killed the guard outright would still
+    # leave the read cases green).
+    'debug' | Set-Content $Aphase -Encoding utf8
+    # reads (allow, exit 0)
+    Check "A(debug) git log allowed (history read)" $sbx $A 'git log' 0
+    Check "A(debug) git tag -l allowed (tag list=read)" $sbx $A 'git tag -l' 0
+    Check "A(debug) git show HEAD:path allowed (history file read)" $sbx $A 'git show HEAD:README.md' 0
+    # writes (block, exit 2)
+    Check "A(debug) git commit blocked (guard unmodified)" $sbx $A $BLOCK 2
+    Check "A(debug) git push blocked (guard unmodified)" $sbx $A 'git push' 2
+    Check "A(debug) git tag -a blocked (annotated tag create=write)" $sbx $A 'git tag -a v1 -m x' 2
+
     Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail)"
 }
 finally {
@@ -151,5 +166,5 @@ finally {
 }
 
 if ($script:fail -ne 0) { exit 1 }
-Write-Host "# all scenarios passed -- repo-root aware / isolation / fallback confirmed (ps1)"
+Write-Host "# all scenarios passed -- repo-root aware / isolation / fallback / phase=debug confirmed (ps1)"
 exit 0
