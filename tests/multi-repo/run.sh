@@ -128,7 +128,21 @@ chk "A(impl) git tag -d 삭제 차단"                       "$SBX" "$A" "git ta
 chk "A(impl) git push --tags 차단"                       "$SBX" "$A" "git push --tags"              2
 chk "A(impl) git -C .. commit 차단 (전역 옵션 접두)"     "$SBX" "$A" "git -C ../other commit -m x"  2
 
+# 시나리오 11: phase=debug 가드 회귀 (M29 결정 2) — debug는 phase≠release이므로 가드 코드를
+# 수정하지 않아도 기존 규칙이 그대로 적용된다: 쓰기는 차단, 읽기는 통과.
+# 시나리오 10과 동일 취지로 읽기 통과 + 쓰기 차단을 같은 phase에서 함께 단언한다(음성 통제 —
+# 통제가 없으면 가드에 debug 분기가 생겨 통째로 죽어도 읽기 케이스만 green이 된다).
+printf 'debug\n' > "$A/.tide/phase"
+# 읽기(통과, exit 0)
+chk "A(debug) git log 통과 (이력 읽기)"                  "$SBX" "$A" "git log"                     0
+chk "A(debug) git tag -l 통과 (태그 목록=읽기)"          "$SBX" "$A" "git tag -l"                  0
+chk "A(debug) git show HEAD:path 통과 (이력 파일 읽기)"  "$SBX" "$A" "git show HEAD:README.md"     0
+# 쓰기(차단, exit 2)
+chk "A(debug) git commit 차단 (가드 무수정)"             "$SBX" "$A" "$BLOCK"                      2
+chk "A(debug) git push 차단 (가드 무수정)"               "$SBX" "$A" "git push"                    2
+chk "A(debug) git tag -a 차단 (주석 태그 생성=쓰기)"     "$SBX" "$A" "git tag -a v1 -m x"          2
+
 echo
 echo "# 결과: PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ] || exit 1
-echo "# 모든 시나리오 통과 — repo-root 인식·격리·폴백·읽기/쓰기 구분 확인됨"
+echo "# 모든 시나리오 통과 — repo-root 인식·격리·폴백·읽기/쓰기 구분·phase=debug 확인됨"

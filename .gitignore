@@ -1,5 +1,6 @@
-# tide 상태 파일 (로컬 전용 — .tide/phase만 무시, .tide/deps는 커밋)
+# tide 상태 파일 (로컬 전용 — .tide/phase·.tide/debug-session만 무시, .tide/deps는 커밋)
 .tide/phase
+.tide/debug-session
 
 # MkDocs 빌드 출력 (docs 사이트)
 site/_build/

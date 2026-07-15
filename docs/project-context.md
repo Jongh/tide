@@ -15,15 +15,15 @@
 | 경로 | 역할 |
 |---|---|
 | `.claude-plugin/` | `plugin.json`·`marketplace.json` — 플러그인/마켓플레이스 매니페스트 (버전 원본) |
-| `skills/` | 스킬 11종 — `{kickoff,milestone,impl,review,release,status,cycle,retro,fleet,fleet-cycle,fleet-verify}/SKILL.md`. milestone·impl·review·retro는 `template.md` 동봉 (fleet은 읽기 전용 멀티 레포 개요, fleet-cycle은 교차 사이클 자동화, fleet-verify는 통합 검증) |
+| `skills/` | 스킬 12종 — `{kickoff,milestone,impl,review,release,status,cycle,retro,debug,fleet,fleet-cycle,fleet-verify}/SKILL.md`. milestone·impl·review·retro·debug는 `template.md` 동봉 (debug는 사이클 밖 발견 우선 진입점, fleet은 읽기 전용 멀티 레포 개요, fleet-cycle은 교차 사이클 자동화, fleet-verify는 통합 검증) |
 | `hooks/` | `hooks.json`(PreToolUse 등록) + `tide-guard.sh`(원본 로직)·`tide-guard.ps1`(보조 사본) |
 | `docs/milestones/` | 마일스톤 문서 `M{N}.md` |
-| `docs/reports/` | 완료보고서 `M{N}-impl.md`·리뷰보고서 `M{N}-review.md`·회고 `retro.md`(최근) + `retro-archive.md`(과거 회고 분리·보존) |
+| `docs/reports/` | 완료보고서 `M{N}-impl.md`·리뷰보고서 `M{N}-review.md`·debug 보고서 `debug-{N}.md`(발견 우선 세션 산출물 — 번호는 마일스톤과 무관한 독립 수열)·회고 `retro.md`(최근) + `retro-archive.md`(과거 회고 분리·보존) |
 | `docs/conventions.md` | 단계별 규약 단일 원본 |
-| `docs/commands.md` | 커맨드 카탈로그 단일 원본(11종 역할·인자·산출물·금지). 사이트 `commands.md`가 `pymdownx.snippets`로 본문(`[start:body]`) 인클루드 — `tests/discover` 가드가 카운트·셸·이름 완전성을 집행 |
+| `docs/commands.md` | 커맨드 카탈로그 단일 원본(12종 역할·인자·산출물·금지). 사이트 `commands.md`가 `pymdownx.snippets`로 본문(`[start:body]`) 인클루드 — `tests/discover` 가드가 카운트·셸·이름 완전성을 집행 |
 | `tests/` | 라이브 실증 하니스 (`multi-repo/`·`site-includes/` 등 — `run.sh`·`run.ps1`, 자동 러너 없는 도그푸딩 검증 수단). 발견·위상정렬·deps 파싱·BOM 제거 참조 구현은 `tests/lib/{encoding,discover,deps,toposort}.{sh,ps1}` 공유 단일 원본을 하니스가 source(트리 내 자기완결; source 순서 encoding→discover→deps→toposort) |
 | `site/` | MkDocs 사이트 (`mkdocs.yml`·`docs/` — 문서 사이트 빌드 입력). `conventions`·`orchestration`·`changelog`·`commands` 4종은 저장소 원본을 `pymdownx.snippets`로 인클루드하는 **스니펫 셸**(수기 복제 아님) |
-| `.tide/` | `phase`(로컬 상태 — `.gitignore` 대상, 커밋 안 함) + `deps`(의존성 선언 — 커밋함) + `release-mode`(게시 모드 선호도 `pr`/`release` — `deps`와 동급으로 커밋함). gitignore 범위는 `.tide/`가 아니라 `.tide/phase`만 |
+| `.tide/` | `phase`(로컬 상태 — `.gitignore` 대상, 커밋 안 함) + `debug-session`(열린 debug 세션의 활성 보고서 번호 한 줄 — 로컬 상태, `.gitignore` 대상) + `deps`(의존성 선언 — 커밋함) + `release-mode`(게시 모드 선호도 `pr`/`release` — `deps`와 동급으로 커밋함). gitignore 범위는 `.tide/`가 아니라 `.tide/phase`·`.tide/debug-session` 두 파일만 |
 | `.tide-fleet/` | 부모 레벨 통합 훅(`integration`) — fleet-verify가 읽는 cross-repo 검증 명령(옵트인). 숨김 디렉터리라 fleet 발견에서 제외 |
 
 ## 진입점 · 빌드/테스트
@@ -37,7 +37,8 @@
   `tests/fleet-cycle`(release 제외·downstream-skip)·`tests/fleet-verify`(verification-only·git-verb
   가드라일)·`tests/site-includes`(사이트 스니펫 인클루드 타깃·섹션 마커·제외 용어 정적 검증 + 용어
   추출 positive-control — mkdocs 불요)가 모두 존재한다(양 셸 `run.sh`·`run.ps1`). `tests/multi-repo`는
-  선두 BOM 입력 내성 회귀를 포함(양 셸 12/12). 가드 스크립트 수정 시 `.sh`·`.ps1` 두 사본을 함께 갱신
+  선두 BOM 입력 내성 회귀와 읽기/쓰기 구분·`phase=debug` 가드 회귀를 포함(양 셸 30/30). 가드 스크립트
+  수정 시 `.sh`·`.ps1` 두 사본을 함께 갱신
 - **개발 사이클**: tide 자신을 도그푸딩 — `/tide:milestone → impl → review → release`
 
 ## 배포 위생 (패키지에 포함되는 파일)
@@ -56,17 +57,30 @@
 
 ## 핵심 도메인 개념
 
-- **사이클**: kickoff → milestone → impl → review → release. `status`는 읽기 전용 현재 위치 보고
+- **사이클**: kickoff → milestone → impl → review → release. `status`는 읽기 전용 현재 위치 보고.
+  `debug`는 **사이클 밖 행위 커맨드**다(계획 우선 사이클과 달리 발견 우선 — 출구는 release로 같다)
 - **부수효과 분리**: impl·review는 git 작업 금지(코드·보고서만), git commit/tag/push는 release에서만
 - **tide-guard**: `.tide/phase`가 `release`가 아니면 git **쓰기**(commit·태그 생성/삭제·push)를 기계적으로
   차단(exit 2)하고 git **읽기**(커밋 읽기·태그 목록·메시지 검색·이력 파일 읽기)는 통과시킨다(M28). verb는
   git **서브커맨드 위치**에서만 판정한다 — 옵션 값(`--grep=commit`)·경로(`HEAD:src/tag.rs`)·복합 서브커맨드
   이름(`commit-graph`·`cat-file commit`)의 부분일치는 무시. `tag`는 읽기 옵션만/인자 없음이면 목록(읽기),
   쓰기 옵션이나 목록 옵션 없는 위치 인자면 생성/삭제(쓰기). 상태 파일이 없으면 차단하지 않음. 입력 선두
-  BOM 내성(strip 후 파싱)·sed `cwd` 추출 키 앵커링으로 견고화. 단일 원본 = conventions "tide-guard hook",
-  집행 = `tests/multi-repo`(읽기/쓰기 구분 23/23 양 셸)
-- **상태 파일 `.tide/phase`**: 현재 단계명 한 줄(`milestone`/`impl`/`review`/`release`/`idle`).
-  각 스킬이 시작 시 기록하고 종료 시 `idle`로 되돌림
+  BOM 내성(strip 후 파싱)·sed `cwd` 추출 키 앵커링으로 견고화. `debug`에서도 **가드 무수정으로**
+  쓰기가 차단된다 — phase≠release라 기존 규칙이 그대로 적용되고 새 phase 값이 분기를 더하지 않는다(M29).
+  단일 원본 = conventions "tide-guard hook", 집행 = `tests/multi-repo`(읽기/쓰기 구분·`phase=debug` 회귀
+  포함 30/30 양 셸)
+- **상태 파일 `.tide/phase`**: 현재 단계명 한 줄(`milestone`/`impl`/`review`/`release`/`debug`/`idle`).
+  각 스킬이 시작 시 기록하고 종료 시 `idle`로 되돌림. debug 세션 번호는 phase가 아니라 별도 파일
+  `.tide/debug-session`에 둔다 — phase는 종전 계약대로 단계명 한 줄만 담는다(계약 불변)
+- **debug 세션**(v2.7.0 가산): 빌드 후 사용자 테스트에서 나오는 에러처럼 태스크·`deps`·완료 기준을
+  미리 알 수 없는 **발견 우선 작업의 진입점**이다(`/tide:debug [증상]` … `/tide:debug done`). 다른
+  단계가 문서 → 행동이라면 debug는 **역방향 문서화**(행동 → 문서) — 발견-수정을 항목이 끝날 때마다
+  `docs/reports/debug-{N}.md`에 append하고 닫을 때 개요·판정을 채운다. git 쓰기는 **가드 무수정으로
+  차단**된다(phase≠release라 기존 규칙 그대로 — 새 phase 값에 가드 분기를 더하지 않은 것이 설계의
+  핵심). 보고서 **판정이 release 프리플라이트에서 review 보고서 자리를 대신**하며 형식이 리뷰보고서와
+  동일해 파서를 이중화하지 않는다. 수명은 **세션형**(`.tide/debug-session` 존재 = 세션 열림, `done`이
+  삭제)이라 한 세션의 여러 수정이 한 보고서·한 patch 릴리즈로 묶인다. 단일 원본은
+  `docs/conventions.md`의 "debug 세션" 절
 - **템플릿 단일 원본**: 마일스톤·보고서 형식은 각 스킬의 `${CLAUDE_SKILL_DIR}/template.md`가 원본
 - **태스크 표기**: `M{N}-T01` … , 선행 의존은 `(deps: M{N}-T01, …)`
 - **병렬 디스패치**: impl 단계(`/tide:impl`·`/tide:cycle` 공통)는 deps 위상에서 같은
@@ -105,9 +119,12 @@
 - **2.0 안정성·메타 규칙**(v2.0.0~ 재기준): **커맨드 11종**(기존 8종 + `/tide:fleet`·
   `/tide:fleet-cycle`·`/tide:fleet-verify`) 호출명·역할과 **오케스트레이션 규약**(부수효과 분리
   불변·`.tide/deps`·계약 비교·`.tide-fleet/integration`)이 2.0부터 안정(stable)으로 동결되고,
-  `.tide/phase`/tide-guard 계약·보고서·마일스톤 형식은 1.0 그대로 유지(불변)된다. 2.0은 동작
+  `.tide/phase`/tide-guard 계약·보고서·마일스톤 형식은 1.0 그대로 유지(불변)된다. 현재 커맨드는
+  **총 12종이며 그중 11종이 2.0 stable**이다 — `/tide:debug`는 **v2.7.0 가산**이라 동결 집합에
+  들지 않는다(다음 major에서 stable 승격 후보). 2.0 동결 집합은 11종 그대로이며, 이는 fleet 3종이
+  v1.x에서 가산된 뒤 2.0에서 동결된 **선례와 동형**이다. 2.0은 동작
   파괴 없는 **계약 재기준**(v1.0.0의 "안정 선언" major와 동형)이며, 하위 호환을 깨는 변경은 다음
-  major(3.0)에서만 한다(v1.x 가산 이력은 보존 표기). 또한 규약·단일 원본을 새로 더하면 그것을
+  major(3.0)에서만 한다(v1.x·v2.x 가산 이력은 보존 표기). 또한 규약·단일 원본을 새로 더하면 그것을
   강제·반영할 실행 수단(스킬 프리플라이트·hook·CI 트리거·빌드)도 같은 사이클에 함께 손본다 —
   단일 원본은 `docs/conventions.md`의 "2.0 안정성"·"규약↔실행/인프라 동기화" 절
 
@@ -133,6 +150,7 @@ M20(에픽 마감)에서 회고 백로그의 이월·견고화 항목을 **각�
 | `multi-repo` fixture-BOM 취약성 | M26 sn2 | **fix(M27)** — ps1 fixture를 no-BOM UTF-8(`WriteAllText`)로 쓰고, 가드가 입력 선두 BOM에 내성(strip)을 갖게 함. 선두 BOM 입력 회귀 단언 추가(양 셸 +2씩, 12/12) |
 | tide-guard raw-`$input` grep 거칠음 | M13 사소3→M18 사소6 | **fix(M27)** — sed `cwd` 추출을 JSON 구조 경계(`{`·`,`·공백)로 앵커링해 부분일치 오인 감소. 차단/통과 판정·메시지·exit 2 계약은 불변 |
 | tide-guard 읽기 오차단(태그 목록·`--grep`·이력 경로·`cat-file`) | 사용자 요구(2026-06-18) | **fix(M28)** — verb를 git 서브커맨드 위치에서만 판정 + `tag` 읽기/쓰기 구분. 비-release에서도 git 읽기(커밋 읽기·태그 목록·메시지 검색·이력 파일)는 통과, 쓰기(commit·태그 생성/삭제·push)만 차단. 차단되던 쓰기 집합 불변(보호 보존). `tests/multi-repo` 23/23 양 셸 집행 |
+| 마일스톤 의례 불일치(발견 우선 작업) | 사용자 요구(2026-07-15) | **fix(M29)** — 사이클 밖 발견 우선 진입점 `/tide:debug`(v2.7.0 가산) 신설. 세션형 수명(`.tide/debug-session`)·역방향 보고서(`docs/reports/debug-{N}.md`)·리뷰와 동일 형식의 판정으로 release 프리플라이트 수용. 가드는 **무수정**(phase≠release라 기존 규칙이 쓰기 차단) — `tests/multi-repo` 30/30 양 셸 집행. 기존 11종·phase·가드 계약 불변 |
 
 이로써 오케스트레이션 에픽의 잔여 후속은 fix/수용/환경-이월로 전부 종결됐고, **로드맵 항목 미반영은
 0**이다 — 백로그가 닫혔다. M26은 그 뒤 남아 있던 **코드성 잔여 두 건**(`strip_bom` 단일 원본화·mkdocs
@@ -142,8 +160,11 @@ sn2 `multi-repo` fixture-BOM 내성)과 오래 수용돼 온 `tide-guard` raw-`$
 후속은 0**이며, 남는 미반영은 **라이브 도그푸딩 영역(gh 게시·`pr` finalize 라이브 실증)뿐**이다. **M28**은
 백로그가 아닌 **사용자 신호**(release 외 상황의 git 읽기 작업이 필요)로 tide-guard의 git 읽기 오차단(태그
 목록·`--grep`·이력 경로·`cat-file`)을 닫았다 — verb를 서브커맨드 위치에서 판정하고 `tag` 읽기/쓰기를 구분해
-비-release에서도 git 읽기가 통과한다(차단되던 쓰기는 불변, 보호 보존). 남는 미반영은 여전히 라이브 도그푸딩
-영역뿐이다.
+비-release에서도 git 읽기가 통과한다(차단되던 쓰기는 불변, 보호 보존). **M29** 역시 백로그가 아닌 **사용자
+신호**(빌드 후 테스트에서 발견한 에러에 계획 우선 사이클을 적용하기 어렵다)로 마일스톤 의례 불일치를 닫았다 —
+사이클 밖 발견 우선 진입점 `/tide:debug`를 가산해 역방향 보고서·세션형 수명으로 추적을 지키되, 부수효과 분리는
+**가드를 한 줄도 고치지 않고**(phase≠release라 기존 규칙 그대로) 보존했다. 남는 미반영은 여전히 라이브 도그푸딩
+영역뿐이다(gh 게시·`pr` finalize·debug 세션 왕복 라이브 실증).
 
 ## 메타
 

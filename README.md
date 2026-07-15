@@ -13,6 +13,8 @@ porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴리즈)�
               └──────────── /tide:cycle ────────────┘  (release 직전 정지)
 
               /tide:status — 언제든 현재 위치와 다음 커맨드 확인 (읽기 전용)
+              /tide:debug  — 발견한 에러를 세션으로 묶어 수정 → 보고서 (사이클 밖, 발견 우선)
+                             /tide:debug "증상" 으로 열고 /tide:debug done 으로 닫음 → /tide:release
               /tide:fleet        — 상위 폴더의 여러 자식 레포 교차 개요 (읽기 전용, 멀티 레포)
               /tide:fleet-cycle  — 그 순서대로 milestone→review 자동 실행 (멀티 레포, release 제외)
               /tide:fleet-verify — 통합 훅으로 레포 간 통합 검증 (멀티 레포, verification-only)
@@ -50,6 +52,7 @@ porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴리즈)�
 | `/tide:release` | 프리플라이트 → 버전 범프 → CHANGELOG → commit → tag → push | 릴리즈 커밋·태그 |
 | `/tide:retro` | 누적 사이클 회고 — 반복 문제·수용 트레이드오프·미반영 후속 집계 (읽기 전용) | `docs/reports/retro.md` (회고 문서) |
 | `/tide:status` | 사이클 현재 상태 + 다음 권장 커맨드 (읽기 전용) | (없음 — 보고만) |
+| `/tide:debug [증상 / done]` | 발견한 에러를 세션으로 묶어 수정·누적 + 릴리즈 판정 (사이클 밖, 발견 우선 — `done`으로 세션 종료) | `docs/reports/debug-{N}.md` (debug 보고서) |
 | `/tide:fleet [부모 경로]` | 상위 폴더의 여러 자식 tide 레포 교차 개요 + 조정 계획 (읽기 전용, 멀티 레포) | (없음 — 보고만) |
 | `/tide:fleet-cycle [부모 경로]` | 발견된 자식 레포의 `milestone→review`를 의존성 순서로 교차 자동 실행 + 순서 release 핸드오프 (멀티 레포, release 제외) | 각 레포 산출물 + 순서 핸드오프 |
 | `/tide:fleet-verify [부모 경로]` | 부모 레벨 통합 훅(`.tide-fleet/integration`)으로 레포 간 통합 검증 + pass/fail 보고 (멀티 레포, verification-only) | (없음 — 보고만) |
@@ -63,7 +66,7 @@ porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴리즈)�
 /plugin install tide@tide
 ```
 
-커맨드 11종과 tide-guard hook이 **함께** 활성화됩니다. 프로젝트별 hook 설치 절차는
+커맨드 12종과 tide-guard hook이 **함께** 활성화됩니다. 프로젝트별 hook 설치 절차는
 없습니다 — 가드는 플러그인이 `${CLAUDE_PLUGIN_ROOT}` 경로의 hook으로 직접 제공합니다.
 
 > Windows 참고: hook은 `sh`로 실행되므로 Git for Windows가 필요합니다
@@ -95,7 +98,7 @@ cp -r skills/* ~/.claude/skills/
 
 ```
 .claude-plugin/   plugin.json·marketplace.json (플러그인/마켓플레이스 매니페스트)
-skills/           스킬 11종 — {단계}/SKILL.md (+ milestone·impl·review·retro는 template.md 동봉)
+skills/           스킬 12종 — {단계}/SKILL.md (+ milestone·impl·review·retro·debug는 template.md 동봉)
 hooks/            hooks.json + tide-guard.sh·.ps1 (git 작업 가드)
 docs/             규약·마일스톤·보고서·프로젝트 컨텍스트 (이 저장소 자체의 tide 사이클 기록)
 ```
@@ -103,7 +106,7 @@ docs/             규약·마일스톤·보고서·프로젝트 컨텍스트 (�
 ## 명명 규약
 
 - 호출: `/tide:{단계}` — 플러그인 네임스페이스가 내장 스킬·다른 플러그인과의 충돌을 방지
-- `/tide:` 까지 입력하면 탭 자동완성으로 커맨드 11종이 함께 표시됩니다
+- `/tide:` 까지 입력하면 탭 자동완성으로 커맨드 12종이 함께 표시됩니다
 
 ## 규약
 
@@ -117,7 +120,7 @@ tide는 **v2.0.0부터 다음을 안정(stable) 계약으로 재기준(re-baseli
 동결 선언**하는 **계약 재기준**입니다(v1.0.0이 "안정 선언" major였던 것과 동형). 단일 레포·
 미선언·기존 동작은 전부 불변입니다.
 
-- **커맨드 11종의 호출명·역할**: `/tide:kickoff`·`/tide:milestone`·`/tide:impl`·`/tide:review`·`/tide:cycle`·`/tide:release`·`/tide:retro`·`/tide:status`·`/tide:fleet`·`/tide:fleet-cycle`·`/tide:fleet-verify` (위 커맨드 표 참조).
+- **커맨드 11종의 호출명·역할**: `/tide:kickoff`·`/tide:milestone`·`/tide:impl`·`/tide:review`·`/tide:cycle`·`/tide:release`·`/tide:retro`·`/tide:status`·`/tide:fleet`·`/tide:fleet-cycle`·`/tide:fleet-verify` (위 커맨드 표 참조). 현재 커맨드는 **총 12종**이며 그중 **11종이 2.0 stable**입니다 — `/tide:debug`는 **v2.7.0 가산**으로 2.0 동결 집합에는 들지 않습니다(다음 major에서 stable 승격 후보).
 - **오케스트레이션 규약**: 부수효과 분리 불변(fleet은 advisory·fleet-cycle은 release 제외·fleet-verify는 verification-only), 의존성 선언·계약 비교(`.tide/deps`)·통합 훅(`.tide-fleet/integration`) 포맷 — `docs/conventions.md`가 단일 원본.
 - **단계별 규약**: 사이클 순서, 부수효과 분리(impl·review는 git 작업 금지·release만 git 조작), 전제조건·프리플라이트 — `docs/conventions.md`가 단일 원본.
 - **`.tide/phase`·tide-guard 계약**: 상태 파일 `.tide/phase`의 의미(단계명 한 줄)와 tide-guard hook의 차단 규칙(release 단계가 아니면 git commit/tag/push 차단, 상태 파일 부재 시 무차단) — 1.0 그대로 유지(불변).
@@ -130,6 +133,13 @@ tide는 **v2.0.0부터 다음을 안정(stable) 계약으로 재기준(re-baseli
 > 교차 사이클 자동화 `/tide:fleet-cycle`은 **v1.5.0부터**, 통합 검증 `/tide:fleet-verify`는
 > **v1.6.0부터** 가산됐습니다. 상세는 [docs/conventions.md](docs/conventions.md)의
 > "멀티 레포 오케스트레이션" 절, 실전 사용법은 [docs/orchestration.md](docs/orchestration.md).
+
+> **v2.x 가산 이력(보존)** — 2.0 stable 동결 집합(11종) 위에 더해진 커맨드입니다:
+> 발견 우선 작업의 진입점 `/tide:debug`가 **v2.7.0부터** 가산됐습니다 — 세션형으로 열고 닫으며
+> 산출물 `docs/reports/debug-{N}.md`의 판정이 `/tide:release` 프리플라이트의 근거가 됩니다.
+> **기존 11종·`.tide/phase`·tide-guard 계약을 깨지 않는 순수 가산**입니다(phase에 `debug` 값이
+> 더해질 뿐 의미는 그대로이고 가드는 무수정 — phase≠release라 기존 규칙이 그대로 git 쓰기를
+> 차단합니다). 상세는 [docs/conventions.md](docs/conventions.md)의 "debug 세션" 절.
 
 > **gitignore 마이그레이션(기존 프로젝트)**: `.tide/deps`(의존성 선언)를 채택하는 기존
 > 프로젝트는 `.gitignore`를 `.tide/`에서 **`.tide/phase`로 좁히세요** — phase는 로컬 상태라
