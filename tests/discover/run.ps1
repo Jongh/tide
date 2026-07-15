@@ -8,8 +8,14 @@
 # It also closes M20-review #6 (site command-count drift, 8 <-> 11) with a guard that FAILS when the
 # actual count of skills/*/SKILL.md diverges from the "N <jong>" declared by canonical docs/site pages.
 #
-# ASCII-only source (BOM-independent). The Korean counter token <jong> (U+C885) is built from a code
-# point so the source carries no byte > 127. git mutating verbs live only in setup (init only).
+# Part C (M30) enforces one more drift of the same class -- several files declaring ONE fact, where
+# fixing only one lets them silently diverge (isomorphic to Part B's command count). Targets: the debug
+# item STATUS SET (conventions + debug SKILL + debug template) and the change-summary BASELINE
+# (milestone + impl + debug templates).
+#
+# ASCII-only source (BOM-independent). Korean tokens (the counter <jong> U+C885, the status values, the
+# baseline) are built from code points so the source carries no byte > 127. git mutating verbs live only
+# in setup (init only).
 #
 # Usage: & tests\discover\run.ps1   (exit 0 if all pass, exit 1 if any fail)
 
@@ -17,6 +23,20 @@ $ErrorActionPreference = 'SilentlyContinue'
 
 # Korean counter suffix "<jong>" (U+C885) -- e.g. the "11<jong>" command-count declaration.
 $JONG = [string][char]0xC885
+
+# Same rule for multi-syllable tokens: build them from code points so this source stays ASCII-only.
+# NOTE: do not name this helper 'Cp' -- that is a built-in alias for Copy-Item, and aliases outrank
+# functions in PowerShell command resolution, so the token would silently become empty.
+function Uni { param([int[]]$Points) return (-join ($Points | ForEach-Object { [string][char]$_ })) }
+
+# debug item status values -- the four-value set of conventions "debug session" (romanized in comments).
+$ST_FIXED   = Uni 0xC218,0xC815,0xD568                        # su-jeong-ham       = fixed
+$ST_OPEN    = Uni 0xBBF8,0xD574,0xACB0                        # mi-hae-gyeol       = unresolved
+$ST_CAUSE   = Uni 0xC6D0,0xC778,0xB9CC,0x0020,0xADDC,0xBA85   # won-in-man gyu-myeong = cause identified only
+$ST_CONFIRM = Uni 0xD655,0xC778,0xD568                        # hwak-in-ham        = confirmed
+$ST_BOGUS   = Uni 0xBCF4,0xB958,0xD568                        # bo-ryu-ham         = "on hold" -- NOT a real
+                                                              #   status (negative control, like N+1<jong>)
+$BASELINE   = Uni 0xAE30,0xC900,0xC120                        # gi-jun-seon        = baseline
 
 # Resolve repo root from the script location (like tests/fleet).
 $ROOT = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -158,6 +178,46 @@ try {
     Chk "B1: drift control -- conventions has no $WRONG$JONG"          (DeclaredHasCount $CONV $WRONG)      'no'
     Chk "B1: drift control -- site/getting-started has no $WRONG$JONG" (DeclaredHasCount $SITE_GS $WRONG)   'no'
 
+    # === Part C -- declaration-consistency drift guard ======================
+    # (M30) Part B enforces drift across documents declaring the same fact (command count); these two are
+    # exactly the same class -- several files declare one fact and fixing only one lets them diverge.
+    # (C1) the debug item status set (four values) appears in conventions + debug SKILL + debug template;
+    # (C2) the change-summary baseline appears in the milestone/impl/debug templates.
+    # Single source: docs/conventions.md "debug session" (item status) + "change-summary baseline". The
+    # guard binds the DECLARATION's presence (not prose quality), pinning divergence as a regression.
+
+    $DBG_SKILL = Join-Path $ROOT 'skills\debug\SKILL.md'
+    $DBG_TPL   = Join-Path $ROOT 'skills\debug\template.md'
+    $MS_TPL    = Join-Path $ROOT 'skills\milestone\template.md'
+    $IMPL_TPL  = Join-Path $ROOT 'skills\impl\template.md'
+
+    function HasToken($file, $token) {
+        $raw = ReadUtf8 $file
+        if ($null -eq $raw) { return 'no' }
+        if ($raw.Contains($token)) { return 'yes' } else { return 'no' }
+    }
+    function InAllThree($token, $f1, $f2, $f3) {
+        foreach ($f in @($f1, $f2, $f3)) { if ((HasToken $f $token) -ne 'yes') { return 'no' } }
+        return 'yes'
+    }
+
+    # (C1) status-set consistency -- all four values in all three files; fixing only one -> FAIL.
+    foreach ($st in @($ST_FIXED, $ST_OPEN, $ST_CAUSE, $ST_CONFIRM)) {
+        Chk "C1: status '$st' in all three files" (InAllThree $st $CONV $DBG_SKILL $DBG_TPL) 'yes'
+    }
+
+    # status negative control: a non-existent status ($ST_BOGUS) must appear in NONE of the three files,
+    # proving the guard discriminates -- same intent as B1's N+1<jong> absence control.
+    Chk "C1: status control -- conventions has no '$ST_BOGUS'"    (HasToken $CONV $ST_BOGUS)      'no'
+    Chk "C1: status control -- debug SKILL has no '$ST_BOGUS'"    (HasToken $DBG_SKILL $ST_BOGUS) 'no'
+    Chk "C1: status control -- debug template has no '$ST_BOGUS'" (HasToken $DBG_TPL $ST_BOGUS)   'no'
+
+    # (C2) baseline-declaration consistency -- the three templates sharing the add/modify/delete table all
+    #      state the baseline. Fixing one template alone splits the table's meaning per file (the drift).
+    Chk "C2: skills/milestone/template.md declares '$BASELINE'" (HasToken $MS_TPL $BASELINE)   'yes'
+    Chk "C2: skills/impl/template.md declares '$BASELINE'"      (HasToken $IMPL_TPL $BASELINE) 'yes'
+    Chk "C2: skills/debug/template.md declares '$BASELINE'"     (HasToken $DBG_TPL $BASELINE)  'yes'
+
     Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) (actual command skills N=$N)"
 }
 finally {
@@ -165,5 +225,5 @@ finally {
 }
 
 if ($script:fail -ne 0) { exit 1 }
-Write-Host "# discover detection threshold (>=2->hint / <2->none / single-repo->none / hidden-not-counted) + single-source freeze (B1 count / B2 site shell / B3 catalog completeness, canonical=docs/commands.md) confirmed"
+Write-Host "# discover detection threshold (>=2->hint / <2->none / single-repo->none / hidden-not-counted) + single-source freeze (B1 count / B2 site shell / B3 catalog completeness, canonical=docs/commands.md) + declaration consistency (C1 four statuses x three files + absence control / C2 baseline x three templates) confirmed"
 exit 0
