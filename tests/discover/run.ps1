@@ -218,6 +218,31 @@ try {
     Chk "C2: skills/impl/template.md declares '$BASELINE'"      (HasToken $IMPL_TPL $BASELINE) 'yes'
     Chk "C2: skills/debug/template.md declares '$BASELINE'"     (HasToken $DBG_TPL $BASELINE)  'yes'
 
+    # === Part D -- cross-branch collaboration safety (M31) declaration consistency ==========
+    # (M31) Same class as Part B/C -- bind the conventions single source and the skill that wires it.
+    # The two checks (release coverage / milestone number pre-warning) are prompt discipline, so runtime
+    # firing is not harness-enforceable, but the conventions<->skill DECLARATION consistency is. Enforced
+    # via ASCII mechanism tokens (git read commands), keeping this source ASCII-only.
+    # (D1) release coverage check: 'git diff --name-only' in BOTH conventions and release SKILL;
+    # (D2) milestone number pre-warning: 'git log --all' in BOTH conventions and milestone SKILL.
+
+    $REL_SKILL = Join-Path $ROOT 'skills\release\SKILL.md'
+    $MS_SKILL  = Join-Path $ROOT 'skills\milestone\SKILL.md'
+    $COV_TOK  = 'git diff --name-only'
+    $WARN_TOK = 'git log --all'
+
+    Chk "D1: conventions declares coverage check ($COV_TOK)"      (HasToken $CONV $COV_TOK)      'yes'
+    Chk "D1: release SKILL wires coverage check"                  (HasToken $REL_SKILL $COV_TOK) 'yes'
+    Chk "D2: conventions declares number pre-warning ($WARN_TOK)" (HasToken $CONV $WARN_TOK)     'yes'
+    Chk "D2: milestone SKILL wires number pre-warning"            (HasToken $MS_SKILL $WARN_TOK) 'yes'
+
+    # cross control: each mechanism must be ABSENT from the opposite skill (token discriminates).
+    Chk "D: control -- milestone SKILL has no coverage token"  (HasToken $MS_SKILL $COV_TOK)  'no'
+    Chk "D: control -- release SKILL has no number-warn token" (HasToken $REL_SKILL $WARN_TOK) 'no'
+
+    # negative control: a bogus mechanism token must NOT appear in conventions (guard discriminates).
+    Chk "D: control -- conventions has no bogus token" (HasToken $CONV 'git diff --bogus-only') 'no'
+
     Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) (actual command skills N=$N)"
 }
 finally {
@@ -225,5 +250,5 @@ finally {
 }
 
 if ($script:fail -ne 0) { exit 1 }
-Write-Host "# discover detection threshold (>=2->hint / <2->none / single-repo->none / hidden-not-counted) + single-source freeze (B1 count / B2 site shell / B3 catalog completeness, canonical=docs/commands.md) + declaration consistency (C1 four statuses x three files + absence control / C2 baseline x three templates) confirmed"
+Write-Host "# discover detection threshold (>=2->hint / <2->none / single-repo->none / hidden-not-counted) + single-source freeze (B1 count / B2 site shell / B3 catalog completeness, canonical=docs/commands.md) + declaration consistency (C1 four statuses x three files + absence control / C2 baseline x three templates / D cross-branch coverage+number-warn conventions<->skill) confirmed"
 exit 0
