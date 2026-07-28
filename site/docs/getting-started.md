@@ -50,8 +50,9 @@ cp -r skills/* ~/.claude/skills/
 3. **`/tide:impl`** — 마일스톤대로 구현하고 테스트를 돌린 뒤 완료보고서
    `docs/reports/M{N}-impl.md`를 남깁니다. **git 작업은 하지 않습니다.**
 
-4. **`/tide:review`** — 방금 구현을 비판적으로 리뷰하고 릴리즈 판정(가능/불가)과 추천
-   버전을 담은 `docs/reports/M{N}-review.md`를 남깁니다. 역시 **git 작업 없음.**
+4. **`/tide:review`** — 방금 구현을 비판적으로 리뷰하고, 판정 직전 자기 결론을 반박하는
+   **반증 시도(refutation)** 패스를 한 번 거친 뒤 릴리즈 판정(가능/불가)과 추천 버전을 담은
+   `docs/reports/M{N}-review.md`를 남깁니다. 역시 **git 작업 없음.**
 
 5. **`/tide:release vX.Y.Z`** — 프리플라이트(판정 "가능" + 테스트 통과 + 워킹트리 확인)를
    통과하면 버전 범프 → CHANGELOG/README 갱신 → commit → tag → push까지 합니다. tide

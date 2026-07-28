@@ -47,7 +47,7 @@ porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴리즈)�
 | `/tide:kickoff` | 워크플로우 골격 생성 (+ 진행 중 프로젝트면 구조 문서화) | `docs/milestones/`·`docs/reports/`·`CHANGELOG.md`·`docs/conventions.md`·`docs/project-context.md` |
 | `/tide:milestone` | 다음 마일스톤 문서 생성 | `docs/milestones/M{N}.md` |
 | `/tide:impl [M번호]` | 마일스톤대로 구현 + 테스트 (생략 시 최신, 번호 지정 시 재실행) | 코드 + `docs/reports/M{N}-impl.md` (완료보고서) |
-| `/tide:review` | 비판적 리뷰 + 릴리즈 판정 | `docs/reports/M{N}-review.md` (리뷰보고서) |
+| `/tide:review` | 비판적 리뷰 + 반증 시도(refutation) 후 릴리즈 판정 | `docs/reports/M{N}-review.md` (리뷰보고서 — 판정 계측 줄 포함) |
 | `/tide:cycle [주제/M번호]` | `milestone→impl→review` 자동 체이닝 (deps 기반 실제 병렬[서브에이전트]/순차, release 직전 정지) | 위 단계들의 산출물 + 릴리즈 안내 |
 | `/tide:release` | 프리플라이트 → 버전 범프 → CHANGELOG → commit → tag → push | 릴리즈 커밋·태그 |
 | `/tide:retro` | 누적 사이클 회고 — 반복 문제·수용 트레이드오프·미반영 후속 집계 (읽기 전용) | `docs/reports/retro.md` (회고 문서) |

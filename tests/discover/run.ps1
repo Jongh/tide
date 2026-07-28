@@ -118,6 +118,7 @@ try {
     $CANON_CMD = Join-Path $ROOT 'docs\commands.md'        # new canonical command catalog (single source)
     $SITE_CMD  = Join-Path $ROOT 'site\docs\commands.md'   # site shell (snippet include)
     $SITE_GS   = Join-Path $ROOT 'site\docs\getting-started.md'
+    $ORCH      = Join-Path $ROOT 'docs\orchestration.md'      # included into the site body; carries a count declaration
 
     # PS 5.1 Get-Content mis-decodes UTF-8-without-BOM; read with explicit UTF-8 so the Korean counter
     # token (U+C885) and other multibyte content match byte-correctly.
@@ -137,6 +138,7 @@ try {
     Chk "B1: README.md declares N$JONG"                    (DeclaredHasCount $README $N)    'yes'
     Chk "B1: docs/conventions.md declares N$JONG"          (DeclaredHasCount $CONV $N)      'yes'
     Chk "B1: site/docs/getting-started.md declares N$JONG" (DeclaredHasCount $SITE_GS $N)   'yes'
+    Chk "B1: docs/orchestration.md declares N$JONG"        (DeclaredHasCount $ORCH $N)      'yes'
 
     # (B2) the site catalog page is a snippet shell -- has the include AND re-declares neither the count
     #      nor the catalog table. Re-duplication (catalog regression) -> FAIL, enforcing single-sourcing.
@@ -177,6 +179,7 @@ try {
     Chk "B1: drift control -- README has no $WRONG$JONG"               (DeclaredHasCount $README $WRONG)    'no'
     Chk "B1: drift control -- conventions has no $WRONG$JONG"          (DeclaredHasCount $CONV $WRONG)      'no'
     Chk "B1: drift control -- site/getting-started has no $WRONG$JONG" (DeclaredHasCount $SITE_GS $WRONG)   'no'
+    Chk "B1: drift control -- orchestration has no $WRONG$JONG"        (DeclaredHasCount $ORCH $WRONG)      'no'
 
     # === Part C -- declaration-consistency drift guard ======================
     # (M30) Part B enforces drift across documents declaring the same fact (command count); these two are
@@ -243,6 +246,68 @@ try {
     # negative control: a bogus mechanism token must NOT appear in conventions (guard discriminates).
     Chk "D: control -- conventions has no bogus token" (HasToken $CONV 'git diff --bogus-only') 'no'
 
+    # === Part E -- review verification discipline (M32) declaration consistency =============
+    # (M32) Same class as Part C/D -- bind the conventions single source to the skill AND template that
+    # wire it. Whether the refutation pass is actually dispatched at runtime is prompt discipline and not
+    # harness-enforceable, but the conventions <-> skill <-> template DECLARATION consistency is (same
+    # split as Part C/D). The tokens are the ASCII spellings decided in conventions "review verification
+    # discipline", so this ps1 copy anchors them directly -- no code-point assembly needed (ASCII-only).
+    # (E1) refutation pass: 'refutation' in BOTH conventions and review SKILL;
+    # (E2) verdict metrics: 'in-review' in conventions + review SKILL + review template;
+    # (E3) rework round: 'rework' in conventions + review template + impl template.
+
+    $REV_SKILL  = Join-Path $ROOT 'skills\review\SKILL.md'
+    $REV_TPL    = Join-Path $ROOT 'skills\review\template.md'
+    $REFUT_TOK    = 'refutation'
+    $MEAS_TOK     = 'in-review'
+    $REWORK_TOK   = 'rework'
+    $REVERIFY_TOK = 're-verify'
+
+    function InBoth($token, $f1, $f2) {
+        foreach ($f in @($f1, $f2)) { if ((HasToken $f $token) -ne 'yes') { return 'no' } }
+        return 'yes'
+    }
+
+    # (E1) the refutation mechanism is declared in BOTH the convention and the review skill.
+    Chk "E1: refutation ($REFUT_TOK) conventions <-> review SKILL" (InBoth $REFUT_TOK $CONV $REV_SKILL) 'yes'
+
+    # (E2) the metrics token is declared in all three (the metrics line needs a slot in the template too).
+    Chk "E2: verdict metrics ($MEAS_TOK) in all three files" (InAllThree $MEAS_TOK $CONV $REV_SKILL $REV_TPL) 'yes'
+
+    # (E3) review metrics line and impl overview carry the same rework value -> three-way declaration bind.
+    Chk "E3: rework round ($REWORK_TOK) in all three files" (InAllThree $REWORK_TOK $CONV $REV_TPL $IMPL_TPL) 'yes'
+
+    # (E4) metrics-line FORMAT consistency -- token presence anywhere in the file is not enough. During the
+    # M32 implementation the three files actually diverged into two spellings of the same fixed line (with
+    # and without the '(rework)' ASCII gloss) while E1-E3 all passed, and a human caught it. Bind the ASCII
+    # SKELETON of the fixed line ('in-review' and '(rework)' on the SAME single line) to catch that drift --
+    # no Korean body text is anchored, so this ps1 copy stays ASCII-only.
+    function SameLine($file, $tokA, $tokB) {   # yes if some ONE line holds both tokens
+        $raw = ReadUtf8 $file
+        if ($null -eq $raw) { return 'no' }
+        foreach ($line in ($raw -split "`r?`n")) {
+            if ($line.Contains($tokA) -and $line.Contains($tokB)) { return 'yes' }
+        }
+        return 'no'
+    }
+    foreach ($pair in @(@('conventions', $CONV), @('review SKILL', $REV_SKILL), @('review template', $REV_TPL))) {
+        Chk "E4: metrics-line skeleton ($MEAS_TOK...($REWORK_TOK)) in $($pair[0])" (SameLine $pair[1] $MEAS_TOK "($REWORK_TOK)") 'yes'
+    }
+
+    # (E5) re-verify rule declaration consistency -- 'in-review' alone cannot anchor this rule: that token
+    # also lives in the metrics line (dual use), so DELETING the whole re-verify clause still passes E2
+    # (proven on a scratch copy by the M32 review's refutation pass). Bind the dedicated ASCII gloss instead.
+    Chk "E5: re-verify ($REVERIFY_TOK) in all three files" (InAllThree $REVERIFY_TOK $CONV $REV_SKILL $REV_TPL) 'yes'
+
+    # cross control: refutation is a review asset -> must be ABSENT from the impl template (discriminates).
+    Chk "E: control -- impl template has no refutation token" (HasToken $IMPL_TPL $REFUT_TOK) 'no'
+
+    # cross control: the metrics line is a review asset -> the impl template carries only the rework value.
+    Chk "E: control -- impl template has no metrics-line skeleton" (SameLine $IMPL_TPL $MEAS_TOK "($REWORK_TOK)") 'no'
+
+    # negative control: a bogus token must NOT appear in conventions (same intent as B1's N+1 absence).
+    Chk "E: control -- conventions has no bogus refutation token" (HasToken $CONV "$REFUT_TOK-bogus") 'no'
+
     Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) (actual command skills N=$N)"
 }
 finally {
@@ -250,5 +315,5 @@ finally {
 }
 
 if ($script:fail -ne 0) { exit 1 }
-Write-Host "# discover detection threshold (>=2->hint / <2->none / single-repo->none / hidden-not-counted) + single-source freeze (B1 count / B2 site shell / B3 catalog completeness, canonical=docs/commands.md) + declaration consistency (C1 four statuses x three files + absence control / C2 baseline x three templates / D cross-branch coverage+number-warn conventions<->skill) confirmed"
+Write-Host "# discover detection threshold (>=2->hint / <2->none / single-repo->none / hidden-not-counted) + single-source freeze (B1 count / B2 site shell / B3 catalog completeness, canonical=docs/commands.md) + declaration consistency (C1 four statuses x three files + absence control / C2 baseline x three templates / D cross-branch coverage+number-warn conventions<->skill / E review verification discipline refutation+metrics+rework conventions<->skill<->template plus metrics-line skeleton format plus re-verify declaration plus cross and negative controls) confirmed"
 exit 0
