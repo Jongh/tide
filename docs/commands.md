@@ -20,7 +20,7 @@ tide는 12종의 슬래시 커맨드를 제공합니다. 호출은 모두 `/tide
 | `/tide:kickoff` | 워크플로우 골격 생성 (+ 진행 중 프로젝트면 구조 문서화) | `docs/` 골격·`CHANGELOG.md`·`conventions.md`·`project-context.md` | ✗ |
 | `/tide:milestone` | 다음 마일스톤 문서 생성 | `docs/milestones/M{N}.md` | ✗ |
 | `/tide:impl [M번호]` | 마일스톤대로 구현 + 테스트 | 코드 + `docs/reports/M{N}-impl.md` | ✗ |
-| `/tide:review` | 비판적 리뷰 + 릴리즈 판정 | `docs/reports/M{N}-review.md` | ✗ |
+| `/tide:review` | 비판적 리뷰 + 반증 시도(refutation) 후 릴리즈 판정 | `docs/reports/M{N}-review.md` (판정 계측 줄 포함) | ✗ |
 | `/tide:cycle [주제/M번호]` | `milestone→impl→review` 자동 체이닝 | 위 단계들의 산출물 + 릴리즈 안내 | ✗ |
 | `/tide:release vX.Y.Z [pr/release]` | 프리플라이트 → 버전 범프 → CHANGELOG → commit → tag → push. `gh` 있으면 GitHub 릴리즈/PR 게시 택1(옵트인) | 릴리즈 커밋·태그 (+선택 gh 릴리즈/PR) | ✓ |
 | `/tide:retro` | 누적 사이클 회고 (읽기 전용) | `docs/reports/retro.md` | ✗ |
@@ -68,8 +68,15 @@ tide는 12종의 슬래시 커맨드를 제공합니다. 호출은 모두 `/tide
 - **인자**: 없음(최신 impl 보고서 대상)
 - **전제조건**: `docs/reports/M{N}-impl.md`가 존재해야 합니다(없으면 `/tide:impl` 안내 후
   중단).
+- **반증 시도(refutation)·재검증**: 판정 **직전** 자기 판정 후보를 반박하는 독립 패스를 한 번
+  거칩니다(Agent 서브에이전트에 판정 후보·근거만 넘겨 원자료를 직접 읽게 하고, 불가하면 메인이
+  수행한 뒤 **폴백 사실을 보고서에 기록**). 리뷰 중 고친 것이 1건이라도 있으면 **검증을 재실행**한
+  결과를 적은 뒤에 판정합니다(불가하면 미검증 잔여 리스크로 명시). 단일 원본은
+  `docs/conventions.md`의 "리뷰 검증 규율" 절.
 - **산출물**: `docs/reports/M{N}-review.md` (비판점[차단/권장/사소]·수정 내용·검증·릴리즈
-  판정+추천 버전·다음 단계)
+  판정+추천 버전·다음 단계). `## 릴리즈 판정` 섹션에는 `계측: in-review 수정 … · 반증 시도 … ·
+  재작업 라운드(rework) …` 한 줄이 필수로 남습니다 — 판정 표기·추천 버전의 형식·위치는 불변이라
+  프리플라이트·`/tide:status`·fleet 계열의 판정 읽기는 그대로입니다.
 - **금지**: git commit·tag·push
 
 ## `/tide:cycle [주제/M번호]`

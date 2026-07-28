@@ -42,7 +42,9 @@ docs/project-context.md가 있으면 먼저 읽어 기존 구조·스택을 파�
    실행한 뒤 `docs/reports/M{N}-impl.md`를 작성 (`skills/impl/template.md` 구조).
 3. **review**: `.tide/phase`=`review`. 전제조건 — `docs/reports/M{N}-impl.md` 존재.
    비판적 리뷰 후 `docs/reports/M{N}-review.md`를 작성하고 릴리즈 판정·추천 버전을 낸다
-   (`skills/review/template.md` 구조).
+   (`skills/review/template.md` 구조). 이 단계는 `/tide:review` 규칙을 그대로 따르므로
+   **반증 시도(refutation)·in-review 수정 후 재검증·판정 계측이 자동 상속된다** — 체이닝이라고
+   생략되지 않는다 (규약은 `docs/conventions.md`의 "리뷰 검증 규율" 절).
 
 > 이 구간에는 git 작업이 없어야 한다 (commit/tag/push는 review까지 어느 단계도 하지
 > 않음). tide-guard가 `release`가 아닌 phase에서 git을 차단하는 동작과 충돌하지 않는다.
@@ -85,7 +87,13 @@ phase=impl이라 git 차단)이 적용된다.
 - review 판정이 **"가능"** → 사이클을 정상 종료하고, `.tide/phase`를 `idle`로 되돌린 뒤
   추천 버전으로 **`/tide:release vX.Y.Z`를 다음 단계로 안내** (release는 직접 실행하지 않음).
 - review 판정이 **"불가"** → `idle`로 되돌리고 보완 태스크 또는 `/tide:milestone` 후속
-  계획을 안내.
+  계획을 안내. 이때 리뷰 계측 줄의 **재작업 라운드(rework)** 값을 함께 읽어, 라운드가
+  **2를 초과하면** 보완 재실행 대신 **마일스톤 재분해(`/tide:milestone`) 권고**를 함께
+  안내한다 (advisory·비차단 — 규약은 `docs/conventions.md`의 "리뷰 검증 규율" 절).
+
+cycle은 release를 제외하듯 **재작업도 자동 반복하지 않는다** — 자동 체이닝은 impl↔review를
+스스로 왕복하지 않으며(위 "중단 처리" 규칙 그대로), 보완 재실행이든 재분해든 다음 호출을
+시작할지는 **사용자 몫**이다.
 
 마지막에 각 단계의 산출물(생성/갱신된 마일스톤·보고서)과 최종 판정을 요약해 보고해줘.
 
