@@ -15,6 +15,11 @@ tide는 12종의 슬래시 커맨드를 제공합니다. 호출은 모두 `/tide
 
 ## 한눈에 보기
 
+<!-- role-anchors: review=refutation release=gh fleet-verify=verification-only -->
+<!-- 역할 앵커 맵(기계 판독용) — 규약은 docs/conventions.md "문서 자기서술 정합"의 역할 앵커 전파 절.
+     각 앵커는 아래 표의 해당 커맨드 행에 실재해야 하고, 그 커맨드를 소개하는 소비자 문서
+     (README.md · site/docs/getting-started.md)에도 전파돼야 한다. 집행 = tests/discover Part F. -->
+
 | 커맨드 | 역할 | 산출물 | git |
 |---|---|---|---|
 | `/tide:kickoff` | 워크플로우 골격 생성 (+ 진행 중 프로젝트면 구조 문서화) | `docs/` 골격·`CHANGELOG.md`·`conventions.md`·`project-context.md` | ✗ |
