@@ -18,6 +18,10 @@
 # 'role-anchors:' map -> canonical table row presence + consumer propagation). Single source:
 # conventions "document self-description consistency".
 #
+# Part G (M34) enforces the REFERENCES BETWEEN documents -- it extracts the citations in the living docs
+# and checks each one against the conventions ## / ### anchors (plus empty-extraction, duplicate-name and
+# wrapped-citation controls). Single source: the "cross-reference integrity" clause of the same section.
+#
 # ASCII-only source (BOM-independent). Korean tokens (the counter <jong> U+C885, the status values, the
 # baseline) are built from code points so the source carries no byte > 127. git mutating verbs live only
 # in setup (init only).
@@ -387,6 +391,97 @@ try {
     # negative control -- a bogus anchor must NOT appear in the canonical catalog (same intent as B1 N+1).
     Chk "F3: control -- canonical has no bogus anchor" (HasAnchor $CANON_CMD 'bogusanchor') 'no'
 
+    # === Part G -- cross-reference integrity (M34) ==========================
+    # (M34) Part F enforces what a document says ABOUT ITSELF; Part G enforces the REFERENCES BETWEEN
+    # documents -- the layer that had no guard at all (two citations really did point at names that do
+    # not exist as headings, and nothing caught it). Single source: conventions "cross-reference
+    # integrity".
+    # (G1) EXTRACT citations (quoted spans on lines that mention the conventions file name) from the
+    #      living docs and assert every one exists in the conventions heading set (## / ###, whitespace
+    #      removed for comparison).
+    # (G2) controls: zero extracted citations or anchors -> FAIL (empty-pass guard); a bogus name must be
+    #      absent; heading names must be unique after normalization.
+    # Data-driven, so no Korean literal enters this source (ASCII-only rule preserved) -- same shape as F2.
+
+    # living docs -- docs/milestones/* and docs/reports/* are historical records and NOT targets
+    # (the docs/*.md glob does not descend into subdirectories, so they drop out naturally).
+    # NOTE: skip dot-directories explicitly. A POSIX glob ('skills/*/*.md') never matches them, but
+    # Get-ChildItem -Directory DOES list '.foo' on Windows (a leading dot is not the Hidden attribute),
+    # so without this filter the two shells would scan different file sets and could disagree.
+    function LivingDocs() {
+        $out = @()
+        foreach ($d in (Get-ChildItem (Join-Path $ROOT 'skills') -Directory -ErrorAction SilentlyContinue | Where-Object { -not $_.Name.StartsWith('.') })) {
+            $out += @(Get-ChildItem $d.FullName -Filter '*.md' -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+        }
+        $out += @(Get-ChildItem (Join-Path $ROOT 'docs') -Filter '*.md' -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+        $out += @($README)
+        $out += @(Get-ChildItem (Join-Path $ROOT 'site\docs') -Filter '*.md' -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+        foreach ($d in (Get-ChildItem (Join-Path $ROOT 'tests') -Directory -ErrorAction SilentlyContinue | Where-Object { -not $_.Name.StartsWith('.') })) {
+            $r = Join-Path $d.FullName 'README.md'
+            if (Test-Path $r) { $out += @($r) }
+        }
+        return @($out | Where-Object { Test-Path $_ })
+    }
+
+    # anchor set -- ## / ### headings only, spaces removed (so "A - B" and "A-B" compare equal).
+    function AnchorSet() {
+        $raw = ReadUtf8 $CONV
+        if ($null -eq $raw) { return @() }
+        $out = @()
+        foreach ($line in ($raw -split "`r?`n")) {
+            if ($line -match '^#{2,3} ') { $out += (($line -replace '^#+ ', '') -replace ' ', '') }
+        }
+        return $out
+    }
+
+    # citation candidate lines -- lines naming the conventions file. Snippet-include directive lines
+    # ('8<--') are not citations.
+    function CitationLines() {
+        $out = @()
+        foreach ($f in (LivingDocs)) {
+            $raw = ReadUtf8 $f
+            if ($null -eq $raw) { continue }
+            foreach ($line in ($raw -split "`r?`n")) {
+                if (-not $line.Contains('conventions.md')) { continue }
+                if ($line.Contains('8<--')) { continue }
+                $out += $line
+            }
+        }
+        return $out
+    }
+
+    # ordinal (case-sensitive) sets so both shells judge identically -- PowerShell's -contains and
+    # hashtable keys are case-INsensitive by default, which would diverge from grep -x.
+    $gAnchors = @(AnchorSet)
+    $gLines   = @(CitationLines)
+    $gCites   = @()
+    foreach ($line in $gLines) {
+        foreach ($m in [regex]::Matches($line, '"([^"]*)"')) {
+            $q = $m.Groups[1].Value
+            if ($q -match '[{}]') { continue }        # skeleton placeholder, not a citation
+            $q = ($q -replace ' ', '')
+            if ($q.Length -eq 0) { continue }         # blank span -- the shell drops it as an empty line
+            $gCites += $q
+        }
+    }
+    # unterminated quote on a candidate line = the citation wrapped to the next line and would be
+    # silently skipped by line-wise extraction (see G3).
+    $gOdd = 0
+    foreach ($line in $gLines) { if ((([regex]::Matches($line, '"')).Count % 2) -eq 1) { $gOdd++ } }
+
+    $aset = New-Object 'System.Collections.Generic.HashSet[string]'
+    $dset = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($a in $gAnchors) { if (-not $aset.Add($a)) { [void]$dset.Add($a) } }
+    $gMiss = 0
+    foreach ($c in $gCites) { if (-not $aset.Contains($c)) { $gMiss++ } }
+
+    Chk "G1: every live citation resolves to a real anchor" ([string]$gMiss) '0'
+    Chk "G2: citation extraction positive control (>0)" $(if ($gCites.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "G2: anchor extraction positive control (>0)"   $(if ($gAnchors.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "G2: control -- bogus anchor name (bogus-section) absent" $(if ($aset.Contains('bogus-section')) { 'yes' } else { 'no' }) 'no'
+    Chk "G2: anchor names unique after normalization" ([string]$dset.Count) '0'
+    Chk "G3: citation lines have balanced quotes (no wrapped citation)" ([string]$gOdd) '0'
+
     function DeclaredCases() {
         $raw = ReadUtf8 $DISC_README
         if ($null -eq $raw) { return '' }
@@ -420,5 +515,5 @@ finally {
 }
 
 if ($script:fail -ne 0) { exit 1 }
-Write-Host "# discover detection threshold (>=2->hint / <2->none / single-repo->none / hidden-not-counted) + single-source freeze (B1 count / B2 site shell / B3 catalog completeness, canonical=docs/commands.md) + declaration consistency (C1 four statuses x three files + absence control / C2 baseline x three templates / D cross-branch coverage+number-warn conventions<->skill / E review verification discipline refutation+metrics+rework conventions<->skill<->template plus metrics-line skeleton format plus re-verify declaration plus cross and negative controls / F document self-description = role-anchor extraction, canonical-row presence, consumer propagation plus case-count self-consistency) confirmed"
+Write-Host "# discover detection threshold (>=2->hint / <2->none / single-repo->none / hidden-not-counted) + single-source freeze (B1 count / B2 site shell / B3 catalog completeness, canonical=docs/commands.md) + declaration consistency (C1 four statuses x three files + absence control / C2 baseline x three templates / D cross-branch coverage+number-warn conventions<->skill / E review verification discipline refutation+metrics+rework conventions<->skill<->template plus metrics-line skeleton format plus re-verify declaration plus cross and negative controls / F document self-description = role-anchor extraction, canonical-row presence, consumer propagation plus case-count self-consistency / G cross-reference integrity = citation extraction vs real anchors plus empty-extraction, name-uniqueness and wrapped-citation controls) confirmed"
 exit 0

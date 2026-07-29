@@ -18,6 +18,10 @@
 # `cases: N` 선언 vs 실제 케이스 수)와 커맨드 **역할 앵커**(캐노니컬 `role-anchors:` 맵 → 캐노니컬
 # 표 행 실재 + 소비자 문서 전파). 단일 원본은 conventions "문서 자기서술 정합" 절.
 #
+# Part G(M34)는 문서 **사이를 잇는 참조**를 집행한다 — 살아 있는 문서의 인용을 추출해 규약의
+# `##`·`###` 앵커에 실재하는지 대조한다(+ 추출 0건·이름 중복·줄바꿈 인용 통제). 단일 원본은 같은
+# 절의 "상호참조 무결성" 소절.
+#
 # 주의: git 차단 동사는 이 스크립트 내부 setup에만 둔다(여기선 init만 — commit 불필요).
 # 러너 호출 명령줄엔 차단 패턴이 없어야 활성 tide-guard가 막지 않는다.
 #
@@ -343,6 +347,70 @@ chk "F3: 앵커 맵의 이름이 전부 실제 커맨드 스킬" "$names_real" "
 # 음성 통제 — 존재하지 않는 가짜 앵커는 캐노니컬에 없어야 한다(B1 N+1종 부재와 동형).
 chk "F3: 통제 — 캐노니컬에 가짜 앵커 없음" "$(has_anchor "$CANON_CMD" "bogusanchor")" "no"
 
+# === Part G — 상호참조 무결성(M34) ======================================
+# (M34) Part F가 문서의 **자기서술**을 집행한다면, Part G는 문서 **사이를 잇는 참조**를 집행한다 —
+# 지금까지 무방비였던 층이다(실제로 `릴리즈 빌드 출력 검증`·`debug 세션 → 릴리즈 경로` 같은 인용이
+# 실재하지 않는 이름을 가리킨 채 조용히 살아 있었다). 단일 원본은 conventions "상호참조 무결성" 절.
+# (G1) 살아 있는 문서에서 인용 골격(파일명이 든 줄의 따옴표 구획)을 **추출**해 conventions의
+#      `##`·`###` 제목 집합(공백 제거 정규화)에 전부 실재하는지 단언한다.
+# (G2) 통제: 인용·앵커 추출 0건이면 FAIL(공허 통과 차단) · 가짜 이름 부재 · 제목 이름 유일성.
+# (G3) 줄바꿈 인용 통제: 후보 줄의 따옴표가 **미종결**(홀수)이면 인용이 다음 줄로 넘어간 것이고,
+#      줄 단위 추출에서 **조용히 빠진다** — 골격을 한 줄로 쓰게 강제해 그 사각을 닫는다.
+# 스크립트에 한글 리터럴을 두지 않는 **데이터 기반** 검사라 ps1의 byte>127=0 규율을 유지한다
+# (F2·tests/site-includes 용어 추출과 동형).
+
+# 살아 있는 문서 — `docs/milestones/*`·`docs/reports/*`는 역사 기록이라 대상이 아니다
+# (docs/*.md 글롭이 하위 디렉터리를 잡지 않으므로 자연히 제외된다). 목록은 파일로 받는다 —
+# `$(...)`를 for에 풀면 공백이 든 경로에서 쪼개진다.
+living_docs() {
+    ls "$ROOT"/skills/*/*.md "$ROOT"/docs/*.md "$ROOT/README.md" \
+       "$ROOT"/site/docs/*.md "$ROOT"/tests/*/README.md 2>/dev/null
+}
+living_docs > "$SBX/living.txt"
+
+# 앵커 집합 — `##`·`###` 제목만, 공백 제거 정규화(`버전·CHANGELOG` ≡ `버전 · CHANGELOG`).
+# CR도 함께 걷는다: CRLF로 체크아웃된 규약이면 앵커 끝에 `\r`가 붙어 전건 오탐이 된다
+# (Git Bash grep은 가려 주지만 POSIX grep은 가려 주지 않는다 — 셸 간 판정이 갈리지 않게).
+anchor_set() { grep -E '^#{2,3} ' "$CONV" 2>/dev/null | sed 's/^#* //' | tr -d ' \r'; }
+
+# 인용 후보 줄 — 파일명이 든 줄. 스니펫 인클루드 지시어 줄(`8<--`)은 인용이 아니라 제외한다.
+citation_lines() {
+    while IFS= read -r f; do
+        [ -f "$f" ] || continue
+        grep 'conventions\.md' "$f" 2>/dev/null | grep -v '8<--'
+    done < "$SBX/living.txt"
+}
+
+anchor_set     > "$SBX/anchors.txt"
+citation_lines > "$SBX/citelines.txt"
+# 인용 = 후보 줄의 따옴표 구획. 골격 자리표({} 포함)와 빈 구획은 인용이 아니다(빈 줄로 떨어진다).
+grep -o '"[^"]*"' "$SBX/citelines.txt" 2>/dev/null |
+    sed 's/^"//; s/"$//' | grep -v '[{}]' | tr -d ' \r' > "$SBX/cites.txt"
+
+NANCHOR=$(grep -c . "$SBX/anchors.txt")
+NCITE=$(grep -c . "$SBX/cites.txt")
+
+# `--`와 `</dev/null`이 둘 다 필요하다: 인용 이름이 `-`로 시작하면 grep이 그것을 **옵션**으로 읽고,
+# 그러면 패턴 인자가 없어 파일명을 패턴으로 삼아 **stdin을 읽는다** — 그 stdin이 이 루프의 입력이라
+# 나머지 인용이 통째로 소비돼 미검사로 남는다(실측: miss가 0으로 나오며 가드가 조용히 죽는다).
+cite_miss() {
+    n=0
+    while IFS= read -r c; do
+        [ -n "$c" ] || continue
+        grep -qxF -- "$c" "$SBX/anchors.txt" </dev/null || n=$((n + 1))
+    done < "$SBX/cites.txt"
+    echo "$n"
+}
+has_anchor_name() { grep -qxF -- "$1" "$SBX/anchors.txt" </dev/null && echo yes || echo no; }
+odd_quote_lines() { awk '{ n = gsub(/"/, "&"); if (n % 2 == 1) c++ } END { print c + 0 }' "$SBX/citelines.txt"; }
+
+chk "G1: 살아 있는 인용이 전부 실재 앵커를 가리킴" "$(cite_miss)" "0"
+chk "G2: 인용 추출 positive-control(>0)"          "$([ "$NCITE" -gt 0 ] && echo ok || echo no)" "ok"
+chk "G2: 앵커 추출 positive-control(>0)"          "$([ "$NANCHOR" -gt 0 ] && echo ok || echo no)" "ok"
+chk "G2: 통제 — 가짜 앵커 이름(bogus-section) 부재" "$(has_anchor_name 'bogus-section')" "no"
+chk "G2: 앵커 이름 유일성(정규화 후 중복 0)"       "$(sort "$SBX/anchors.txt" | uniq -d | grep -c .)" "0"
+chk "G3: 인용 줄 따옴표 종결(줄바꿈 인용 0)"       "$(odd_quote_lines)" "0"
+
 declared_cases() {
     sed -n 's/.*cases:[^0-9]*\([0-9][0-9]*\).*/\1/p' "$DISC_README" 2>/dev/null | head -1
 }
@@ -369,4 +437,4 @@ chk "F1: README cases 선언 == 실제 케이스 수" "$(declared_cases)" "$((pa
 echo
 echo "# 결과: PASS=$pass FAIL=$fail (실제 커맨드 스킬 N=$N)"
 [ "$fail" -eq 0 ] || exit 1
-echo "# discover 감지 임계값(≥2→hint·<2→none·단일 레포→none·숨김 미카운트) + 단일 원본 동결(B1 카운트 정합·B2 사이트 셸·B3 카탈로그 완전성, 캐노니컬=docs/commands.md, 실제 ${N}종) + 선언 정합(C1 상태값 네 값×세 파일·부재 통제·C2 기준선×세 템플릿·D 브랜치 협업 안전 커버리지·번호경고 규약↔스킬 정합·E 리뷰 검증 규율 반증 시도·판정 계측·재작업 라운드 규약↔스킬↔템플릿 정합 + 계측 줄 골격 형식 정합 + 재검증 선언 + 교차·음성 통제 · F 문서 자기서술 정합 = 역할 앵커 추출·캐노니컬 행 실재·소비자 전파 + 케이스 수 자기 정합) 확인됨 (참조 구현 기준)"
+echo "# discover 감지 임계값(≥2→hint·<2→none·단일 레포→none·숨김 미카운트) + 단일 원본 동결(B1 카운트 정합·B2 사이트 셸·B3 카탈로그 완전성, 캐노니컬=docs/commands.md, 실제 ${N}종) + 선언 정합(C1 상태값 네 값×세 파일·부재 통제·C2 기준선×세 템플릿·D 브랜치 협업 안전 커버리지·번호경고 규약↔스킬 정합·E 리뷰 검증 규율 반증 시도·판정 계측·재작업 라운드 규약↔스킬↔템플릿 정합 + 계측 줄 골격 형식 정합 + 재검증 선언 + 교차·음성 통제 · F 문서 자기서술 정합 = 역할 앵커 추출·캐노니컬 행 실재·소비자 전파 + 케이스 수 자기 정합 · G 상호참조 무결성 = 인용 추출·앵커 실재 대조 + 추출 0건·이름 유일성·줄바꿈 인용 통제) 확인됨 (참조 구현 기준)"
