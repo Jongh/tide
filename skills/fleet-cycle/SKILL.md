@@ -13,7 +13,7 @@ argument-hint: "[부모 폴더 경로(선택, 생략 시 현재 세션 위치)]"
 
 **release는 이 자동화에 포함하지 않는다** — git 작업을 하는 유일한 단계이므로(부수효과 분리·
 tide-guard) cross-repo에서 더 강하게 제외한다. fleet-cycle은 milestone→review까지만 돌리고
-release는 아래 "release 핸드오프"로 사용자에게 넘긴다 (docs/conventions.md).
+release는 아래 release 핸드오프로 사용자에게 넘긴다(`docs/conventions.md`의 "교차 사이클 자동화" 절).
 
 ## 자식 tide 레포 발견·처리 순서
 

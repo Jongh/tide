@@ -6,8 +6,9 @@ argument-hint: "[프로젝트 한 줄 설명(선택)]"
 
 **대상 레포**: 골격·`docs/project-context.md`·`.gitignore`·`CHANGELOG.md` 등 모든 산출물은 **대상
 레포 루트**에 만든다 — 기본은 세션 레포(현행 단일 레포 동작 그대로), 상위 폴더 단일 세션에서 특정
-자식 레포를 지시받으면 그 자식 레포 루트. 상세·격리 규약은 `docs/conventions.md`의 "멀티 레포 /
-대상 레포" 절(이 절도 골격 생성 시 conventions에 포함될 수 있도록 안내한다).
+자식 레포를 지시받으면 그 자식 레포 루트.
+상세·격리 규약은 `docs/conventions.md`의 "멀티 레포 / 대상 레포" 절
+(이 절도 골격 생성 시 conventions에 포함될 수 있도록 안내한다).
 
 먼저 대상 저장소가 **신규**인지 **진행 중**인지 판별해줘:
 - 신호: git 커밋 이력 유무, docs/milestones/·docs/reports/의 기존 산출물 유무,

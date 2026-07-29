@@ -131,8 +131,9 @@ tide는 **v2.0.0부터 다음을 안정(stable) 계약으로 재기준(re-baseli
 > **v1.x 가산 이력(보존)** — 위 11종 중 멀티 레포 커맨드는 v1.x에서 하위 호환 가산으로
 > 더해진 뒤 2.0에서 stable로 동결됐습니다: 읽기 전용 개요 `/tide:fleet`은 **v1.2.0부터**,
 > 교차 사이클 자동화 `/tide:fleet-cycle`은 **v1.5.0부터**, 통합 검증 `/tide:fleet-verify`는
-> **v1.6.0부터** 가산됐습니다. 상세는 [docs/conventions.md](docs/conventions.md)의
-> "멀티 레포 오케스트레이션" 절, 실전 사용법은 [docs/orchestration.md](docs/orchestration.md).
+> **v1.6.0부터** 가산됐습니다.
+> 상세는 [docs/conventions.md](docs/conventions.md)의 "멀티 레포 오케스트레이션" 절,
+> 실전 사용법은 [docs/orchestration.md](docs/orchestration.md).
 
 > **v2.x 가산 이력(보존)** — 2.0 stable 동결 집합(11종) 위에 더해진 커맨드입니다:
 > 발견 우선 작업의 진입점 `/tide:debug`가 **v2.7.0부터** 가산됐습니다 — 세션형으로 열고 닫으며

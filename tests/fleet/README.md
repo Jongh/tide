@@ -95,8 +95,9 @@ fleet은 순서를 **제안만** 하며 cross-repo git을 자동 실행하지 �
 (주석/의존명) 정상 파싱 + BOM'd 줄의 계약 비교 정상. 경고는 **advisory만** — fleet은 순서를 바꾸거나
 차단·실행하지 않는다(읽기 전용·부수효과 분리 불변).
 
-> 분류·요약·advisory 인자의 정규 taxonomy 단일 원본은 `docs/conventions.md` "멀티 레포
-> 오케스트레이션" 절이며, 이 러너는 그 결정적 동작을 회귀 고정한다(advisory→`/tide:impl M{N}`·
+> 분류·요약·advisory 인자의 정규 taxonomy 단일 원본은
+> `docs/conventions.md`의 "멀티 레포 오케스트레이션" 절이며,
+> 이 러너는 그 결정적 동작을 회귀 고정한다(advisory→`/tide:impl M{N}`·
 > `/tide:release v{추천}` 등 인자 포함).
 
 ## 실행

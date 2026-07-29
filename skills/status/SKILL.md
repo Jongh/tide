@@ -40,7 +40,7 @@ tide 사이클의 현재 상태를 읽기 전용으로 보고해줘.
   나머지 규칙으로 이어서 판단한다.
 - 열린 세션 없음 + **미릴리즈인 debug 보고서**의 판정이 전부 "가능" → `다음: /tide:release v{추천 버전}`
   (미릴리즈 판정은 마지막 릴리즈 태그의 트리에 그 보고서가 포함됐는지로 — `git tag`·`git ls-tree`
-  읽기. 기준의 단일 원본은 `docs/conventions.md`의 "debug 세션 → 릴리즈 경로")
+  읽기. 기준의 단일 원본은 `docs/conventions.md`의 "debug 세션" 절 릴리즈 경로 항목)
 
 기존 사이클 규칙 (위 debug 규칙에 해당하지 않을 때):
 - 마일스톤 문서 없음 → /tide:kickoff(골격 미비 시) 또는 /tide:milestone
