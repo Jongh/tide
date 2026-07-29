@@ -13,6 +13,11 @@
 # item STATUS SET (conventions + debug SKILL + debug template) and the change-summary BASELINE
 # (milestone + impl + debug templates).
 #
+# Part F (M33) enforces what a document says ABOUT ITSELF -- the harness case count (this harness's own
+# README 'cases: N' declaration vs its actual case count) and command ROLE ANCHORS (canonical
+# 'role-anchors:' map -> canonical table row presence + consumer propagation). Single source:
+# conventions "document self-description consistency".
+#
 # ASCII-only source (BOM-independent). Korean tokens (the counter <jong> U+C885, the status values, the
 # baseline) are built from code points so the source carries no byte > 127. git mutating verbs live only
 # in setup (init only).
@@ -308,6 +313,106 @@ try {
     # negative control: a bogus token must NOT appear in conventions (same intent as B1's N+1 absence).
     Chk "E: control -- conventions has no bogus refutation token" (HasToken $CONV "$REFUT_TOK-bogus") 'no'
 
+    # === Part F -- document self-description consistency (M33) ==============
+    # (M33) Part B-E enforce drift ACROSS documents declaring one fact; this part enforces what a document
+    # says ABOUT ITSELF -- the two layers that had no guard at all.
+    # (F2) role-anchor propagation: EXTRACT anchors from the canonical 'role-anchors:' map in
+    #      docs/commands.md, then assert (a) the anchor really lives on that command's canonical table row
+    #      and (b) every consumer doc (README, site getting-started) that MENTIONS the command also carries
+    #      the anchor. Data-driven, so no Korean literal enters this source (ASCII-only rule preserved) --
+    #      same shape as the term extraction in tests/site-includes.
+    # (F3) controls: zero extracted anchors -> FAIL (empty-pass guard, the M27 positive-control precedent);
+    #      map names must be real command skills; a bogus anchor must be absent.
+    # (F1) case-count self-consistency: this harness compares its OWN README declaration ('cases: N') with
+    #      its OWN actual case count. F1 is itself a case, so F1 runs LAST and compares against
+    #      'running total + 1' (the chosen route, restated in the README). Extraction failure is a FAIL,
+    #      never a silent skip. Single source: conventions "document self-description consistency".
+
+    $DISC_README = Join-Path $ROOT 'tests\discover\README.md'
+
+    # anchor map extraction -- '<!-- role-anchors: name=token ... -->' on one line.
+    function AnchorPairs() {
+        $raw = ReadUtf8 $CANON_CMD
+        if ($null -eq $raw) { return @() }
+        $m = [regex]::Match($raw, 'role-anchors:([^>]*)')
+        if (-not $m.Success) { return @() }
+        return @($m.Groups[1].Value -split '\s+' | Where-Object { $_ -match '^[a-z-]+=[A-Za-z-]+$' })
+    }
+
+    # anchors are matched on letter/hyphen boundaries so a short anchor (gh) cannot hit inside a word.
+    function HasAnchor($file, $token) {
+        $raw = ReadUtf8 $file
+        if ($null -eq $raw) { return 'no' }
+        $pat = '(^|[^A-Za-z-])' + [regex]::Escape($token) + '([^A-Za-z-]|$)'
+        if ($raw -match $pat) { return 'yes' } else { return 'no' }
+    }
+
+    # canonical self-consistency -- the anchor must live on that command's TABLE ROW (line starts with '|').
+    function CanonRowHas($name, $token) {
+        $raw = ReadUtf8 $CANON_CMD
+        if ($null -eq $raw) { return 'no' }
+        $namePat = '/tide:' + $name + '([^a-z-]|$)'
+        $tokPat  = '(^|[^A-Za-z-])' + [regex]::Escape($token) + '([^A-Za-z-]|$)'
+        foreach ($line in ($raw -split "`r?`n")) {
+            if ($line.StartsWith('|') -and ($line -match $namePat) -and ($line -match $tokPat)) { return 'yes' }
+        }
+        return 'no'
+    }
+
+    # consumer propagation -- if the file MENTIONS the command it must carry the anchor (else not a target).
+    function ConsumerOk($file, $name, $token) {
+        if (-not (Test-Path $file)) { return 'no' }
+        if ((HasCommand $file $name) -eq 'yes') { return (HasAnchor $file $token) }
+        return 'yes'
+    }
+
+    $pairs = AnchorPairs
+    foreach ($p in $pairs) {
+        $aname = $p.Split('=')[0]; $atok = $p.Split('=')[1]
+        Chk "F2: anchor '$atok' on canonical /tide:$aname row" (CanonRowHas $aname $atok)          'yes'
+        Chk "F2: README propagation ($aname=$atok, if mentioned)"       (ConsumerOk $README $aname $atok)  'yes'
+        Chk "F2: site getting-started propagation ($aname=$atok, if mentioned)" (ConsumerOk $SITE_GS $aname $atok) 'yes'
+    }
+
+    # positive control -- with zero anchors extracted the loop above passes vacuously (extraction = FAIL).
+    Chk "F3: anchor extraction positive control (>0)" $(if (@($pairs).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+
+    # map hygiene -- every declared anchor name must be a real command skill (typo / removed command).
+    $namesReal = 'yes'
+    foreach ($p in $pairs) {
+        if (-not (Test-Path (Join-Path $ROOT ('skills\' + $p.Split('=')[0] + '\SKILL.md')))) { $namesReal = 'no' }
+    }
+    Chk "F3: anchor map names are all real command skills" $namesReal 'yes'
+
+    # negative control -- a bogus anchor must NOT appear in the canonical catalog (same intent as B1 N+1).
+    Chk "F3: control -- canonical has no bogus anchor" (HasAnchor $CANON_CMD 'bogusanchor') 'no'
+
+    function DeclaredCases() {
+        $raw = ReadUtf8 $DISC_README
+        if ($null -eq $raw) { return '' }
+        $m = [regex]::Match($raw, 'cases:[^0-9\r\n]*([0-9]+)')
+        if ($m.Success) { return $m.Groups[1].Value } else { return '' }
+    }
+
+    # (F1b) per-part breakdown sums to the declared total -- F1 only checks the TOTAL. Bumping the total
+    # while leaving the breakdown ('Part A 7 + Part B 14 + ...') stale splits the same line silently (one
+    # layer below the self-description drift F1 catches). The breakdown is an ASCII skeleton, so both
+    # shells sum it identically. Scope the sum to the DECLARATION LINE: scanning the whole file also
+    # picks up the same skeleton quoted in the README prose (that really happened in review: 83 vs 62).
+    function PartSum() {
+        $raw = ReadUtf8 $DISC_README
+        if ($null -eq $raw) { return '' }
+        $line = ($raw -split "`r?`n" | Where-Object { $_.Contains('cases:') } | Select-Object -First 1)
+        if ($null -eq $line) { return '' }
+        $s = 0
+        foreach ($m in [regex]::Matches($line, 'Part [A-Z] ([0-9]+)')) { $s += [int]$m.Groups[1].Value }
+        return [string]$s
+    }
+    Chk "F1b: per-part breakdown sums to declared total" (PartSum) (DeclaredCases)
+
+    # (F1) LAST case -- own README declaration ('cases: N') vs actual case count (running total + this one).
+    Chk "F1: README cases declaration == actual case count" (DeclaredCases) ([string]($script:pass + $script:fail + 1))
+
     Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) (actual command skills N=$N)"
 }
 finally {
@@ -315,5 +420,5 @@ finally {
 }
 
 if ($script:fail -ne 0) { exit 1 }
-Write-Host "# discover detection threshold (>=2->hint / <2->none / single-repo->none / hidden-not-counted) + single-source freeze (B1 count / B2 site shell / B3 catalog completeness, canonical=docs/commands.md) + declaration consistency (C1 four statuses x three files + absence control / C2 baseline x three templates / D cross-branch coverage+number-warn conventions<->skill / E review verification discipline refutation+metrics+rework conventions<->skill<->template plus metrics-line skeleton format plus re-verify declaration plus cross and negative controls) confirmed"
+Write-Host "# discover detection threshold (>=2->hint / <2->none / single-repo->none / hidden-not-counted) + single-source freeze (B1 count / B2 site shell / B3 catalog completeness, canonical=docs/commands.md) + declaration consistency (C1 four statuses x three files + absence control / C2 baseline x three templates / D cross-branch coverage+number-warn conventions<->skill / E review verification discipline refutation+metrics+rework conventions<->skill<->template plus metrics-line skeleton format plus re-verify declaration plus cross and negative controls / F document self-description = role-anchor extraction, canonical-row presence, consumer propagation plus case-count self-consistency) confirmed"
 exit 0

@@ -54,9 +54,10 @@ cp -r skills/* ~/.claude/skills/
    **반증 시도(refutation)** 패스를 한 번 거친 뒤 릴리즈 판정(가능/불가)과 추천 버전을 담은
    `docs/reports/M{N}-review.md`를 남깁니다. 역시 **git 작업 없음.**
 
-5. **`/tide:release vX.Y.Z`** — 프리플라이트(판정 "가능" + 테스트 통과 + 워킹트리 확인)를
-   통과하면 버전 범프 → CHANGELOG/README 갱신 → commit → tag → push까지 합니다. tide
-   사이클에서 **git을 만지는 유일한 단계**입니다.
+5. **`/tide:release vX.Y.Z [pr/release]`** — 프리플라이트(판정 "가능" + 테스트 통과 + 워킹트리
+   확인)를 통과하면 버전 범프 → CHANGELOG/README 갱신 → commit → tag → push까지 합니다.
+   `gh`(GitHub CLI)가 있으면 **GitHub 릴리즈 게시 또는 릴리즈 PR 생성 중 하나를 옵트인**으로
+   고를 수 있습니다. tide 사이클에서 **git을 만지는 유일한 단계**입니다.
 
 ### 단축 경로
 
