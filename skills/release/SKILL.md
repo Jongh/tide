@@ -62,7 +62,7 @@ argument-hint: "v0.1.0 [pr|release] (모드 생략 시 push-only / 저장된 선
 
 프리플라이트 통과 후 .tide/phase 파일에 `release` 한 줄을 기록하고
 (.tide/ 디렉터리가 없으면 생성) 다음을 수행:
-1. **게시 모드 해석·검증** — 상세 규약의 단일 원본은 `docs/conventions.md`의 "릴리즈 게시 (gh)"
+1. **게시 모드 해석·검증** — 상세 규약의 단일 원본은 `docs/conventions-release.md`의 "릴리즈 게시 (gh)"
    절이다(여기서 재서술하지 말고 그 절을 따른다). **버전 파일·CHANGELOG를 건드리기 전에** 모드를
    정하고 검증을 끝내, 명시 모드가 검증 실패해도 작업 트리가 더럽혀지지 않게 한다. 요지:
    - **모드 우선순위**: 명시 인자(`pr`/`release`) > `.tide/release-mode` 저장값 > (검증 통과 시)
@@ -79,7 +79,7 @@ argument-hint: "v0.1.0 [pr|release] (모드 생략 시 push-only / 저장된 선
      **closed(미머지)**→중단 / **없음**→생성. **마무리·대기·중단 경로는 버전 범프·CHANGELOG(2·3)를 건너뛴다**
      (머지로 이미 반영됨 — 재편집 금지). 버전은 인자(`/tide:release v{버전} pr`)가 기본 — 인자가 없으면
      열린/머지된 릴리즈 PR이 **유일할 때만** 그 버전으로 추론하고, 후보가 모호하면 버전 명시를 요청하고
-     중단한다(임의 선택 금지). 상세는 conventions "릴리즈 게시 (gh)"의 `pr` 모드 절.
+     중단한다(임의 선택 금지). 상세는 `docs/conventions-release.md`의 "`pr` 모드" 절.
 2. 버전 파일 업데이트 (Cargo.toml / package.json / pyproject.toml /
    .claude-plugin/plugin.json 등 프로젝트에 맞게) — **단, `pr` 모드가 마무리/대기/중단으로 분기된
    경우 2·3(버전 범프·CHANGELOG)을 건너뛴다**(1의 `pr` 상태 인지 참조).
@@ -111,7 +111,8 @@ argument-hint: "v0.1.0 [pr|release] (모드 생략 시 push-only / 저장된 선
        용어 규약 준수). **버전 범프·CHANGELOG는 건너뛴다.** 태그와 릴리즈는 **각각 독립으로** 선확인
        (`git tag`·원격 / `gh release view`)해 **이미 있는 것은 건너뛰고 없는 것만 생성**한다(부분 실패도
        복구 — 한쪽만 있으면 나머지만 만든다). **미머지엔 태그 금지** — merged 확인 후에만 태그를 단다.
-       ⑤ 릴리즈 브랜치 정리(`release/v{버전}` 로컬·원격) — 규약 단일 원본은 conventions의 `pr` 모드 절.
+       ⑤ 릴리즈 브랜치 정리(`release/v{버전}` 로컬·원격) — 단일 원본은
+       `docs/conventions-release.md`의 "`pr` 모드" 절.
        멱등(브랜치 없으면 건너뜀)·비차단(정리 실패가 릴리즈를 무르지 않음)·현재 브랜치 안전(기본 브랜치
        체크아웃 선행).
 

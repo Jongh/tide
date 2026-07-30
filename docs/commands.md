@@ -111,7 +111,7 @@ tide는 12종의 슬래시 커맨드를 제공합니다. 호출은 모두 `/tide
   대화형 질문. `release` = push 후 `gh release create`(가산), `pr` = 릴리즈 브랜치 + `gh pr create`로
   PR을 연 뒤 **머지 후 같은 명령을 다시 실행하면 태그·릴리즈로 자동 마무리**(상태 인지·멱등 — merged면
   finalize, open이면 대기). 게시 전 `git`·`gh`·인증·원격 GitHub 등록을 검증하고, `gh` 부재/검증 실패면
-  현행 push-only로 **바이트 동일**. 단일 원본은 `docs/conventions.md`의 "릴리즈 게시 (gh)" 절.
+  현행 push-only로 **바이트 동일**. 단일 원본은 `docs/conventions-release.md`의 "릴리즈 게시 (gh)" 절.
   tide-guard는 `gh`로 확장하지 않습니다.
 - **커밋 메시지**: `Release {버전}: {핵심 변경사항 한 줄 요약}`
 

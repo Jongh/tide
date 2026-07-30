@@ -18,9 +18,10 @@
 # 'role-anchors:' map -> canonical table row presence + consumer propagation). Single source:
 # conventions "document self-description consistency".
 #
-# Part G (M34) enforces the REFERENCES BETWEEN documents -- it extracts the citations in the living docs
-# and checks each one against the conventions ## / ### anchors (plus empty-extraction, duplicate-name and
-# wrapped-citation controls). Single source: the "cross-reference integrity" clause of the same section.
+# Part G (M34, generalized in M35) enforces the REFERENCES BETWEEN documents -- it extracts the citations
+# in the living docs and checks each one PER FILE against the ## / ### anchors of the conventions
+# DOCUMENT SET (glob 'docs/conventions*.md'), plus empty-extraction, set-wide duplicate-name and
+# wrapped-citation controls. Single source: the "cross-reference integrity" clause of the same section.
 #
 # ASCII-only source (BOM-independent). Korean tokens (the counter <jong> U+C885, the status values, the
 # baseline) are built from code points so the source carries no byte > 127. git mutating verbs live only
@@ -391,31 +392,47 @@ try {
     # negative control -- a bogus anchor must NOT appear in the canonical catalog (same intent as B1 N+1).
     Chk "F3: control -- canonical has no bogus anchor" (HasAnchor $CANON_CMD 'bogusanchor') 'no'
 
-    # === Part G -- cross-reference integrity (M34) ==========================
+    # === Part G -- cross-reference integrity (M34; generalized to a FILE SET in M35) =====
     # (M34) Part F enforces what a document says ABOUT ITSELF; Part G enforces the REFERENCES BETWEEN
     # documents -- the layer that had no guard at all (two citations really did point at names that do
     # not exist as headings, and nothing caught it). Single source: conventions "cross-reference
     # integrity".
-    # (G1) EXTRACT citations (quoted spans on lines that mention the conventions file name) from the
-    #      living docs and assert every one exists in the conventions heading set (## / ###, whitespace
+    # (M35) The conventions are no longer ONE file but a DOCUMENT SET (the body plus per-topic
+    #      fragments). So this part (1) DISCOVERS the set with the glob 'docs/conventions*.md' (never a
+    #      hardcoded list -- adding a fragment must not require editing this runner), (2) keys the
+    #      anchors PER FILE, and (3) picks the anchor set to compare against from the conventions file
+    #      name(s) that appear ON THE CITATION LINE. Move a section into a fragment without updating the
+    #      citation and the guard bites. A line naming two of them passes if EITHER set has the name
+    #      (safe side -- never manufacture a false positive). With no fragment present the set is just
+    #      the body, so the verdict is identical to the pre-generalization one (regression freeze).
+    # (G1) EXTRACT citations (quoted spans on lines that mention a conventions file name) from the
+    #      living docs and assert every one exists in THAT FILE's heading set (## / ###, whitespace
     #      removed for comparison).
     # (G2) controls: zero extracted citations or anchors -> FAIL (empty-pass guard); a bogus name must be
-    #      absent; heading names must be unique after normalization.
+    #      absent from the whole set; heading names must be unique ACROSS THE WHOLE SET after
+    #      normalization (a split must not put the same name in two files).
     # Data-driven, so no Korean literal enters this source (ASCII-only rule preserved) -- same shape as F2.
 
     # living docs -- docs/milestones/* and docs/reports/* are historical records and NOT targets
     # (the docs/*.md glob does not descend into subdirectories, so they drop out naturally).
-    # NOTE: skip dot-directories explicitly. A POSIX glob ('skills/*/*.md') never matches them, but
+    # NOTE: skip dot-directories AND use -Force on the file listings. Get-ChildItem hides files with
+    # the Windows Hidden/System attribute unless -Force is given, while a POSIX glob matches them; the
+    # explicit dot-name filter then removes what the glob would NOT match. Both halves keep the two
+    # shells scanning the same set.
+    # skip dot-directories explicitly: A POSIX glob ('skills/*/*.md') never matches them, but
     # Get-ChildItem -Directory DOES list '.foo' on Windows (a leading dot is not the Hidden attribute),
     # so without this filter the two shells would scan different file sets and could disagree.
     function LivingDocs() {
         $out = @()
         foreach ($d in (Get-ChildItem (Join-Path $ROOT 'skills') -Directory -ErrorAction SilentlyContinue | Where-Object { -not $_.Name.StartsWith('.') })) {
-            $out += @(Get-ChildItem $d.FullName -Filter '*.md' -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+            $out += @(Get-ChildItem $d.FullName -Filter '*.md' -File -Force -ErrorAction SilentlyContinue |
+                    Where-Object { -not $_.Name.StartsWith('.') } | ForEach-Object { $_.FullName })
         }
-        $out += @(Get-ChildItem (Join-Path $ROOT 'docs') -Filter '*.md' -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+        $out += @(Get-ChildItem (Join-Path $ROOT 'docs') -Filter '*.md' -File -Force -ErrorAction SilentlyContinue |
+                    Where-Object { -not $_.Name.StartsWith('.') } | ForEach-Object { $_.FullName })
         $out += @($README)
-        $out += @(Get-ChildItem (Join-Path $ROOT 'site\docs') -Filter '*.md' -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+        $out += @(Get-ChildItem (Join-Path $ROOT 'site\docs') -Filter '*.md' -File -Force -ErrorAction SilentlyContinue |
+                    Where-Object { -not $_.Name.StartsWith('.') } | ForEach-Object { $_.FullName })
         foreach ($d in (Get-ChildItem (Join-Path $ROOT 'tests') -Directory -ErrorAction SilentlyContinue | Where-Object { -not $_.Name.StartsWith('.') })) {
             $r = Join-Path $d.FullName 'README.md'
             if (Test-Path $r) { $out += @($r) }
@@ -423,9 +440,28 @@ try {
         return @($out | Where-Object { Test-Path $_ })
     }
 
-    # anchor set -- ## / ### headings only, spaces removed (so "A - B" and "A-B" compare equal).
-    function AnchorSet() {
-        $raw = ReadUtf8 $CONV
+    # conventions DOCUMENT SET -- discovered with the glob 'docs/conventions*.md' (never hardcoded).
+    # Match the POSIX glob exactly with ordinal Starts/EndsWith, and sort ORDINAL so this walks the set
+    # in the same order as run.sh ('LC_ALL=C sort').
+    function ConvFiles() {
+        # -Force: without it Get-ChildItem skips files carrying the Windows Hidden/System attribute,
+        # while the POSIX glob 'docs/conventions*.md' matches them -- the two shells would then scan
+        # different sets. A leading-dot name still cannot pass StartsWith('conventions'), so -Force does
+        # not over-match relative to the glob either.
+        $fs = @(Get-ChildItem (Join-Path $ROOT 'docs') -File -Force -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name.StartsWith('conventions', [System.StringComparison]::Ordinal) -and
+                               $_.Name.EndsWith('.md', [System.StringComparison]::Ordinal) } |
+                ForEach-Object { $_.FullName })
+        $lst = New-Object 'System.Collections.Generic.List[string]'
+        foreach ($f in $fs) { [void]$lst.Add($f) }
+        $lst.Sort([System.StringComparer]::Ordinal)
+        return @($lst.ToArray())
+    }
+
+    # anchor set of ONE conventions file -- ## / ### headings only, spaces removed (so "A - B" and
+    # "A-B" compare equal). CR is already gone because the split is on \r?\n.
+    function AnchorSetOf($path) {
+        $raw = ReadUtf8 $path
         if ($null -eq $raw) { return @() }
         $out = @()
         foreach ($line in ($raw -split "`r?`n")) {
@@ -434,34 +470,45 @@ try {
         return $out
     }
 
-    # citation candidate lines -- lines naming the conventions file. Snippet-include directive lines
-    # ('8<--') are not citations.
-    function CitationLines() {
-        $out = @()
-        foreach ($f in (LivingDocs)) {
-            $raw = ReadUtf8 $f
-            if ($null -eq $raw) { continue }
-            foreach ($line in ($raw -split "`r?`n")) {
-                if (-not $line.Contains('conventions.md')) { continue }
-                if ($line.Contains('8<--')) { continue }
-                $out += $line
-            }
-        }
-        return $out
-    }
-
     # ordinal (case-sensitive) sets so both shells judge identically -- PowerShell's -contains and
     # hashtable keys are case-INsensitive by default, which would diverge from grep -x.
-    $gAnchors = @(AnchorSet)
-    $gLines   = @(CitationLines)
-    $gCites   = @()
-    foreach ($line in $gLines) {
-        foreach ($m in [regex]::Matches($line, '"([^"]*)"')) {
-            $q = $m.Groups[1].Value
-            if ($q -match '[{}]') { continue }        # skeleton placeholder, not a citation
-            $q = ($q -replace ' ', '')
-            if ($q.Length -eq 0) { continue }         # blank span -- the shell drops it as an empty line
-            $gCites += $q
+    # $gAnchorSets is parallel to $gConvFiles (one HashSet per file); $gAnchors is the flat list over the
+    # WHOLE set, used by the positive control and the set-wide duplicate check.
+    $gConvFiles  = @(ConvFiles)
+    $gConvBases  = @($gConvFiles | ForEach-Object { Split-Path $_ -Leaf })
+    $gAnchorSets = @()
+    $gAnchors    = @()
+    foreach ($p in $gConvFiles) {
+        $s = New-Object 'System.Collections.Generic.HashSet[string]'
+        foreach ($a in (AnchorSetOf $p)) { [void]$s.Add($a); $gAnchors += $a }
+        $gAnchorSets += ,$s
+    }
+
+    # citation candidate lines -- lines naming ANY file of the set; each quoted span is remembered
+    # together with the INDEXES of the files named on its line (its owners). Snippet-include directive
+    # lines ('8<--') are not citations.
+    $gLines      = @()
+    $gCites      = @()
+    $gCiteOwners = @()
+    foreach ($f in (LivingDocs)) {
+        $raw = ReadUtf8 $f
+        if ($null -eq $raw) { continue }
+        foreach ($line in ($raw -split "`r?`n")) {
+            $owners = @()
+            for ($i = 0; $i -lt $gConvBases.Count; $i++) {
+                if ($line.Contains($gConvBases[$i])) { $owners += $i }
+            }
+            if ($owners.Count -eq 0) { continue }
+            if ($line.Contains('8<--')) { continue }
+            $gLines += $line
+            foreach ($m in [regex]::Matches($line, '"([^"]*)"')) {
+                $q = $m.Groups[1].Value
+                if ($q -match '[{}]') { continue }        # skeleton placeholder, not a citation
+                $q = ($q -replace ' ', '')
+                if ($q.Length -eq 0) { continue }         # blank span -- the shell drops it as an empty line
+                $gCites      += $q
+                $gCiteOwners += ,$owners
+            }
         }
     }
     # unterminated quote on a candidate line = the citation wrapped to the next line and would be
@@ -469,11 +516,18 @@ try {
     $gOdd = 0
     foreach ($line in $gLines) { if ((([regex]::Matches($line, '"')).Count % 2) -eq 1) { $gOdd++ } }
 
+    # $aset = union over the whole set (bogus-name control); $dset = names appearing in more than one
+    # place (uniqueness is a WHOLE-SET rule: a split must not put the same name in two files).
     $aset = New-Object 'System.Collections.Generic.HashSet[string]'
     $dset = New-Object 'System.Collections.Generic.HashSet[string]'
     foreach ($a in $gAnchors) { if (-not $aset.Add($a)) { [void]$dset.Add($a) } }
+    # a citation is OK when it resolves in the anchor set of ANY file named on its line (safe side).
     $gMiss = 0
-    foreach ($c in $gCites) { if (-not $aset.Contains($c)) { $gMiss++ } }
+    for ($i = 0; $i -lt $gCites.Count; $i++) {
+        $ok = $false
+        foreach ($k in $gCiteOwners[$i]) { if ($gAnchorSets[$k].Contains($gCites[$i])) { $ok = $true } }
+        if (-not $ok) { $gMiss++ }
+    }
 
     Chk "G1: every live citation resolves to a real anchor" ([string]$gMiss) '0'
     Chk "G2: citation extraction positive control (>0)" $(if ($gCites.Count -gt 0) { 'ok' } else { 'no' }) 'ok'

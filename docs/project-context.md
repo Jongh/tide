@@ -19,10 +19,11 @@
 | `hooks/` | `hooks.json`(PreToolUse 등록) + `tide-guard.sh`(원본 로직)·`tide-guard.ps1`(보조 사본) |
 | `docs/milestones/` | 마일스톤 문서 `M{N}.md` |
 | `docs/reports/` | 완료보고서 `M{N}-impl.md`·리뷰보고서 `M{N}-review.md`·debug 보고서 `debug-{N}.md`(발견 우선 세션 산출물 — 번호는 마일스톤과 무관한 독립 수열)·회고 `retro.md`(최근) + `retro-archive.md`(과거 회고 분리·보존) |
-| `docs/conventions.md` | 단계별 규약 단일 원본 |
+| `docs/conventions.md` | 단계별 규약 단일 원본 — **규약 문서 집합의 본체**(조각은 `docs/conventions-{주제}.md`, 발견 글롭 `docs/conventions*.md`) |
+| `docs/conventions-release.md` | 규약 조각 — 릴리즈 게시(gh) 모드. 사이트 `conventions-release.md`가 `pymdownx.snippets`로 본문(`[start:body]`) 인클루드 |
 | `docs/commands.md` | 커맨드 카탈로그 단일 원본(12종 역할·인자·산출물·금지). 사이트 `commands.md`가 `pymdownx.snippets`로 본문(`[start:body]`) 인클루드 — `tests/discover` 가드가 카운트·셸·이름 완전성을 집행 |
 | `tests/` | 라이브 실증 하니스 (`multi-repo/`·`site-includes/` 등 — `run.sh`·`run.ps1`, 자동 러너 없는 도그푸딩 검증 수단). 발견·위상정렬·deps 파싱·BOM 제거 참조 구현은 `tests/lib/{encoding,discover,deps,toposort}.{sh,ps1}` 공유 단일 원본을 하니스가 source(트리 내 자기완결; source 순서 encoding→discover→deps→toposort) |
-| `site/` | MkDocs 사이트 (`mkdocs.yml`·`docs/` — 문서 사이트 빌드 입력). `conventions`·`orchestration`·`changelog`·`commands` 4종은 저장소 원본을 `pymdownx.snippets`로 인클루드하는 **스니펫 셸**(수기 복제 아님) |
+| `site/` | MkDocs 사이트 (`mkdocs.yml`·`docs/` — 문서 사이트 빌드 입력). `conventions`·`conventions-release`·`orchestration`·`changelog`·`commands`는 저장소 원본을 `pymdownx.snippets`로 인클루드하는 **스니펫 셸**(수기 복제 아님) — `tests/site-includes`가 셸을 **발견**하므로 셸이 늘어도 러너를 고치지 않는다 |
 | `.tide/` | `phase`(로컬 상태 — `.gitignore` 대상, 커밋 안 함) + `debug-session`(열린 debug 세션의 활성 보고서 번호 한 줄 — 로컬 상태, `.gitignore` 대상) + `deps`(의존성 선언 — 커밋함) + `release-mode`(게시 모드 선호도 `pr`/`release` — `deps`와 동급으로 커밋함). gitignore 범위는 `.tide/`가 아니라 `.tide/phase`·`.tide/debug-session` 두 파일만 |
 | `.tide-fleet/` | 부모 레벨 통합 훅(`integration`) — fleet-verify가 읽는 cross-repo 검증 명령(옵트인). 숨김 디렉터리라 fleet 발견에서 제외 |
 
@@ -45,8 +46,9 @@
   **재검증 선언**(`re-verify` 전용 병기어 — `in-review`는 계측 줄과 이중 용도라 재검증 절 삭제를 못 잡았다)·
   교차 통제·음성 통제 + **Part F**: 문서 자기서술 정합(M33) — 역할 앵커(`role-anchors:` 맵 추출 →
   캐노니컬 표 행 실재 + 소비자 문서 전파)와 **케이스 수 자기 정합**(러너가 자기 README의 `cases:`
-  선언을 실측과 대조) + **Part G**: 상호참조 무결성(M34) — 살아 있는 문서의 인용을 추출해 규약의
-  `##`·`###` 앵커 실재를 대조(+ 추출 0건·앵커 이름 유일성 통제))가 모두 존재한다(양 셸 `run.sh`·`run.ps1`). `tests/multi-repo`는 선두 BOM 입력
+  선언을 실측과 대조) + **Part G**: 상호참조 무결성(M34 · M35 일반화) — 살아 있는 문서의 인용을
+  추출해 **규약 문서 집합**(글롭 `docs/conventions*.md`)의 `##`·`###` 앵커 실재를 **파일별로** 대조
+  (+ 추출 0건·집합 전체 이름 유일성·줄바꿈 인용 통제))가 모두 존재한다(양 셸 `run.sh`·`run.ps1`). `tests/multi-repo`는 선두 BOM 입력
   내성 회귀와 읽기/쓰기 구분·`phase=debug` 가드 회귀를 포함한다. **케이스 수는 이 문서에 적지 않는다**
   — 단일 선언처는 각 하니스의 `tests/{name}/README.md`이며(규약: conventions "문서 자기서술 정합"),
   discover는 F1이 그 선언을 기계로 집행한다. 가드 스크립트 수정 시 `.sh`·`.ps1` 두 사본을 함께 갱신
@@ -126,12 +128,15 @@
   보고서 형식은 전부 불변**이다. 단일 원본은 `docs/conventions.md`의 "리뷰 검증 규율" 절, 집행은
   `tests/discover` Part E(규약↔스킬↔템플릿 선언 정합 — 런타임 디스패치 여부는 프롬프트 규율이라
   라이브 도그푸딩 영역)
-- **상호참조 무결성(M34)**: 다른 문서가 규약을 가리키는 **인용**이 개명·삭제로 조용히 끊기지 않게
-  하는 규약이다. 인용 골격은 `` `docs/conventions.md`의 "{앵커}" 절 ``이고 **인용 가능한 앵커는
-  `##`·`###` 제목뿐**(볼드 항목은 소절 승격 또는 인용 수정), 앵커 이름은 문서 안에서 **유일**해야
-  하며, 대조 전 **공백만 제거**해 정규화한다. 집행은 `tests/discover` **Part G**(FAIL — 추출 0건도
-  FAIL). 대상은 **살아 있는 문서**이고 `docs/milestones/*`·`docs/reports/*`는 역사 기록이라 제외되며,
-  규약 문서 **안의** 자기참조는 골격에 파일명이 없어 가드 밖(사람의 리뷰 영역)이다. 단일 원본은
+- **상호참조 무결성(M34, M35에서 문서 집합으로 일반화)**: 다른 문서가 규약을 가리키는 **인용**이
+  개명·삭제·**파일 이동**으로 조용히 끊기지 않게 하는 규약이다. 인용 골격은
+  `` `docs/conventions.md`의 "{앵커}" 절 ``이고 **인용 가능한 앵커는 `##`·`###` 제목뿐**(볼드 항목은
+  소절 승격 또는 인용 수정), 대조 전 **공백만 제거**해 정규화한다. **규약은 문서 집합**이다 —
+  본체 + `docs/conventions-{주제}.md` 조각(발견 글롭 `docs/conventions*.md`)이고, 인용은 **앵커가
+  실제로 사는 파일명**을 가리켜야 하며 앵커 이름은 **집합 전체에서 유일**해야 한다. 집행은
+  `tests/discover` **Part G**(파일별 앵커 집합 대조 · FAIL — 추출 0건도 FAIL). 대상은 **살아 있는
+  문서**이고 `docs/milestones/*`·`docs/reports/*`는 역사 기록이라 제외되며, 같은 파일 **안의**
+  자기참조는 골격에 파일명이 없어 가드 밖(사람의 리뷰 영역)이다. 단일 원본은
   `docs/conventions.md`의 "상호참조 무결성" 절
 - **템플릿 단일 원본**: 마일스톤·보고서 형식은 각 스킬의 `${CLAUDE_SKILL_DIR}/template.md`가 원본
 - **태스크 표기**: `M{N}-T01` … , 선행 의존은 `(deps: M{N}-T01, …)`
@@ -145,10 +150,10 @@
   `docs/conventions.md`(버전·CHANGELOG 절). 릴리즈 노트의 단일 원본은 `CHANGELOG.md`이며
   README의 CHANGELOG 섹션은 포인터만 둔다(이중 갱신 제거). **gh 게시 모드**(`gh` 옵트인 —
   GitHub 릴리즈/PR 택1·검증 게이트·`.tide/release-mode` 선호도·원격 불가 처리·tide-guard 비확장)의
-  단일 원본은 `docs/conventions.md` "릴리즈 게시 (gh)" 절이고, 절차는 `skills/release/SKILL.md`다.
+  단일 원본은 `docs/conventions-release.md`의 "릴리즈 게시 (gh)" 절이고, 절차는 `skills/release/SKILL.md`다.
   `pr` 모드는 PR 머지 후 같은 명령 재실행으로 태그·릴리즈를 자동 마무리한다(상태 인지·멱등). 마무리
   (finalize)는 다 쓴 릴리즈 브랜치(`release/v{버전}` 로컬·원격) 정리까지 포함한다(멱등·비차단·현재
-  브랜치 안전 — 단일 원본 = `docs/conventions.md`의 "`pr` 모드" 절)
+  브랜치 안전 — 단일 원본 = `docs/conventions-release.md`의 "`pr` 모드" 절)
 - **멀티 레포 / 대상 레포**(M13 토대): 각 커맨드는 시작 시 "대상 레포 루트"를 정해(기본=세션 레포,
   현행 동일) 산출물 앵커링·git/테스트 cwd를 그 루트 기준으로 두고, repo-root 인식 가드가
   같은 루트의 `.tide/phase`를 읽어 레포별 격리가 성립한다(가산). 단일 원본은
@@ -209,6 +214,7 @@ M20(에픽 마감)에서 회고 백로그의 이월·견고화 항목을 **각�
 | 루프 신호 소실(리뷰 판정 31/31 "가능" — 판정자=실행자 구조) | 2026-07-28 루프 엔지니어링 분석 | **fix(M32)** — **리뷰 검증 규율** 신설: ① **반증 시도**(refutation)를 재량 → 모든 리뷰의 기본 경로로 승격(읽기 전용·규모 비례·폴백 기록) ② **재검증**(`re-verify` — in-review 수정 1건 이상이면 수정 후 검증 재실행) ③ **판정 계측** 한 줄(차단/권장/사소 in-review 수정 수 · 반증 성립 건수 · 재작업 라운드) ④ **재작업 라운드**(rework)와 수렴 조건(>2면 재분해 권고, advisory). 집행 = `tests/discover` Part E(선언 정합 + 계측 줄 골격 형식 + 재검증 전용 병기어). 보고서 섹션 구조·판정 파싱·`.tide/phase`·가드·프리플라이트·커맨드 12종 전부 불변(절차 가산). 런타임 디스패치는 프롬프트 규율 |
 | 문서 자기서술 드리프트(수기 카운트 반복 노후화 · 역할 서술 무가드) | 2026-07-29 회고 최대 미반영 군집(M30 사소6 → M32 이슈12·13) | **fix(M33)** — **문서 자기서술 정합** 규약 신설: ① 하니스 케이스 수의 **단일 선언처 = 각 `tests/{name}/README.md`**(`cases:` 선언, 러너가 실측과 대조 — 어긋나면 FAIL) ② **역할 앵커 전파**(캐노니컬 `role-anchors:` 맵 → 캐노니컬 표 행 실재 + 소비자 문서 전파, 앵커 없는 행은 대상 아님). 집행 = `tests/discover` Part F. 부수 회수: `/tide:release`의 gh 게시 능력이 캐노니컬에만 있고 README·사이트에 미전파였던 역할 드리프트 정정. 계약 표면 전부 불변 |
 | 규약 단조 증가(9 minor 동안 줄어든 적 0 · 끊긴 인용 무가드) | M32 범위 밖 후속 ① + 2026-07-29 회고 최유력 후보 + M33 리뷰 `다음 단계` | **fix(M34)** — ① **상호참조 무결성** 규약 신설(인용 골격 · 인용 가능 앵커 = `##`·`###`만 · 이름 유일성 · 공백 제거 정규화 · FAIL 집행 · 역사 문서 제외) ② 인용 실태 정합화 — 끊긴 인용 4건·표기 흔들림 1건·중복 앵커 이름 1건을 해소하고 `릴리즈 빌드 출력 검증`을 볼드 항목에서 `###` 소절로 승격 ③ 집행 = `tests/discover` **Part G**(인용 추출 → 앵커 실재 대조 + 추출 0건·이름 유일성·줄바꿈 인용 통제 — 케이스 수는 그 하니스 README가 단일 선언처) ④ **사문화 축약** — 규약이 **처음으로 줄었다**(1066 → 1029줄). 계약 표면(커맨드 12종·phase·가드·프리플라이트·보고서 섹션·판정/계측 형식) 전부 불변. **파일 분할은 범위 밖**(판단 근거만 M34 impl 보고서에 남김) |
+| 규약 단일 파일 부피(본체 1029줄 · 최대 절 243줄) | M34 impl 보고서 후속 ②(분할 판단 근거) + M34 리뷰 `다음 단계`의 분할 지목 | **fix(M35, 1단계)** — ① **규약 문서 집합** 규약 신설(본체 + `docs/conventions-{주제}.md` 조각 · 발견 글롭 `docs/conventions*.md` · 인용은 앵커가 사는 파일명을 가리킴 · 이름 유일성은 집합 전체 · 조각 요건 3가지) ② `tests/discover` **Part G 일반화**(파일별 앵커 집합 대조 — 조각 0개 상태에서 판정 불변 회귀 고정) ③ `## 릴리즈 게시 (gh)` 127줄을 `docs/conventions-release.md`로 **이동**(문장 무수정) + 인용 5건 갱신 ④ 사이트 셸·nav 배선(러너 수정 0 — `tests/site-includes`가 새 셸을 자동 발견). 계약 표면 전부 불변. **오케스트레이션 절(243줄) 분할과 인용 규약의 문서 일반 확대는 범위 밖** |
 
 이로써 오케스트레이션 에픽의 잔여 후속은 fix/수용/환경-이월로 전부 종결됐고, **로드맵 항목 미반영은
 0**이다 — 백로그가 닫혔다. M26은 그 뒤 남아 있던 **코드성 잔여 두 건**(`strip_bom` 단일 원본화·mkdocs

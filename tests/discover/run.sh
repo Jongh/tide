@@ -18,9 +18,9 @@
 # `cases: N` 선언 vs 실제 케이스 수)와 커맨드 **역할 앵커**(캐노니컬 `role-anchors:` 맵 → 캐노니컬
 # 표 행 실재 + 소비자 문서 전파). 단일 원본은 conventions "문서 자기서술 정합" 절.
 #
-# Part G(M34)는 문서 **사이를 잇는 참조**를 집행한다 — 살아 있는 문서의 인용을 추출해 규약의
-# `##`·`###` 앵커에 실재하는지 대조한다(+ 추출 0건·이름 중복·줄바꿈 인용 통제). 단일 원본은 같은
-# 절의 "상호참조 무결성" 소절.
+# Part G(M34 · M35 일반화)는 문서 **사이를 잇는 참조**를 집행한다 — 살아 있는 문서의 인용을 추출해
+# **규약 문서 집합**(글롭 `docs/conventions*.md`)의 `##`·`###` 앵커에 실재하는지 **파일별로** 대조한다
+# (+ 추출 0건·집합 전체 이름 중복·줄바꿈 인용 통제). 단일 원본은 같은 절의 "상호참조 무결성" 소절.
 #
 # 주의: git 차단 동사는 이 스크립트 내부 setup에만 둔다(여기선 init만 — commit 불필요).
 # 러너 호출 명령줄엔 차단 패턴이 없어야 활성 tide-guard가 막지 않는다.
@@ -347,13 +347,21 @@ chk "F3: 앵커 맵의 이름이 전부 실제 커맨드 스킬" "$names_real" "
 # 음성 통제 — 존재하지 않는 가짜 앵커는 캐노니컬에 없어야 한다(B1 N+1종 부재와 동형).
 chk "F3: 통제 — 캐노니컬에 가짜 앵커 없음" "$(has_anchor "$CANON_CMD" "bogusanchor")" "no"
 
-# === Part G — 상호참조 무결성(M34) ======================================
+# === Part G — 상호참조 무결성(M34 · M35에서 규약 문서 **집합**으로 일반화) ====
 # (M34) Part F가 문서의 **자기서술**을 집행한다면, Part G는 문서 **사이를 잇는 참조**를 집행한다 —
 # 지금까지 무방비였던 층이다(실제로 `릴리즈 빌드 출력 검증`·`debug 세션 → 릴리즈 경로` 같은 인용이
 # 실재하지 않는 이름을 가리킨 채 조용히 살아 있었다). 단일 원본은 conventions "상호참조 무결성" 절.
-# (G1) 살아 있는 문서에서 인용 골격(파일명이 든 줄의 따옴표 구획)을 **추출**해 conventions의
-#      `##`·`###` 제목 집합(공백 제거 정규화)에 전부 실재하는지 단언한다.
-# (G2) 통제: 인용·앵커 추출 0건이면 FAIL(공허 통과 차단) · 가짜 이름 부재 · 제목 이름 유일성.
+# (M35) 규약은 이제 한 파일이 아니라 **규약 문서 집합**이다(본체 + 주제별 조각). 그래서 이 파트는
+#      ① 글롭 `docs/conventions*.md`로 **집합을 발견**하고(목록 하드코딩 금지 — 조각을 더해도 러너를
+#      고치지 않는다) ② 앵커를 **파일별로** 묶으며 ③ 인용 후보 줄에 **등장한 규약 파일명**으로 대조할
+#      앵커 집합을 고른다. 절이 조각으로 옮겨 가면 인용도 그 파일명을 가리켜야 통과한다(= 파일을 옮기고
+#      인용을 안 고치면 잡힌다). 한 줄에 두 파일명이 있으면 **어느 쪽 집합에든 있으면 통과**로 본다
+#      (안전 측 — 오탐을 만들지 않는다). 조각이 0개면 집합이 본체 하나뿐이라 일반화 **이전과 같은
+#      판정**이 나온다(회귀 고정).
+# (G1) 살아 있는 문서에서 인용 골격(규약 파일명이 든 줄의 따옴표 구획)을 **추출**해, 그 줄이 가리킨
+#      파일의 `##`·`###` 제목 집합(공백 제거 정규화)에 전부 실재하는지 단언한다.
+# (G2) 통제: 인용·앵커 추출 0건이면 FAIL(공허 통과 차단) · 가짜 이름이 집합 어디에도 없음 ·
+#      제목 이름 유일성은 **집합 전체 기준**(파일이 갈려도 같은 이름을 두 곳에 두지 않는다).
 # (G3) 줄바꿈 인용 통제: 후보 줄의 따옴표가 **미종결**(홀수)이면 인용이 다음 줄로 넘어간 것이고,
 #      줄 단위 추출에서 **조용히 빠진다** — 골격을 한 줄로 쓰게 강제해 그 사각을 닫는다.
 # 스크립트에 한글 리터럴을 두지 않는 **데이터 기반** 검사라 ps1의 byte>127=0 규율을 유지한다
@@ -368,24 +376,66 @@ living_docs() {
 }
 living_docs > "$SBX/living.txt"
 
-# 앵커 집합 — `##`·`###` 제목만, 공백 제거 정규화(`버전·CHANGELOG` ≡ `버전 · CHANGELOG`).
+# 규약 문서 집합 — 글롭으로 **발견**한다. `LC_ALL=C sort`로 정렬해 ps1(ordinal 정렬)과 **같은 순서**로
+# 훑는다. 목록은 파일로 받는다(위와 같은 이유 — 공백이 든 경로에서 단어 분리를 타지 않게).
+conv_files() {
+    for f in "$ROOT"/docs/conventions*.md; do
+        [ -f "$f" ] && printf '%s\n' "$f"
+    done | LC_ALL=C sort
+}
+
+# 파일별 앵커 집합 — `##`·`###` 제목만, 공백 제거 정규화(`버전·CHANGELOG` ≡ `버전 · CHANGELOG`).
 # CR도 함께 걷는다: CRLF로 체크아웃된 규약이면 앵커 끝에 `\r`가 붙어 전건 오탐이 된다
 # (Git Bash grep은 가려 주지만 POSIX grep은 가려 주지 않는다 — 셸 간 판정이 갈리지 않게).
-anchor_set() { grep -E '^#{2,3} ' "$CONV" 2>/dev/null | sed 's/^#* //' | tr -d ' \r'; }
+anchor_set() { grep -E '^#{2,3} ' "$1" 2>/dev/null | sed 's/^#* //' | tr -d ' \r'; }
 
-# 인용 후보 줄 — 파일명이 든 줄. 스니펫 인클루드 지시어 줄(`8<--`)은 인용이 아니라 제외한다.
+# 집합을 훑어 파일마다 `anchors.<i>.txt`(그 파일의 앵커)를 만들고, 통제용으로 전체를 `anchors.txt`에
+# 모은다. 키는 **인덱스**다 — 파일명을 키로 쓰면 이름에 공백이 들었을 때 레코드가 깨진다.
+conv_files > "$SBX/convfiles.txt"
+: > "$SBX/convbases.txt"
+: > "$SBX/anchors.txt"
+NCONV=0
+while IFS= read -r cf; do
+    NCONV=$((NCONV + 1))
+    printf '%s\n' "${cf##*/}" >> "$SBX/convbases.txt"
+    anchor_set "$cf" > "$SBX/anchors.$NCONV.txt"
+    cat "$SBX/anchors.$NCONV.txt" >> "$SBX/anchors.txt"
+done < "$SBX/convfiles.txt"
+
+# 인용 후보 줄 — 집합의 **어느 파일명이든** 든 줄. 스니펫 인클루드 지시어 줄(`8<--`)은 제외한다.
 citation_lines() {
     while IFS= read -r f; do
         [ -f "$f" ] || continue
-        grep 'conventions\.md' "$f" 2>/dev/null | grep -v '8<--'
+        grep -F -f "$SBX/convbases.txt" "$f" 2>/dev/null | grep -v '8<--'
     done < "$SBX/living.txt"
 }
 
-anchor_set     > "$SBX/anchors.txt"
+# 인용의 파일 귀속 — 그 줄에 등장한 규약 파일명들의 인덱스(쉼표 결합). 없으면 빈 문자열.
+line_owners() { # <line> → "1" | "1,2" | ""
+    o=""; i=0
+    while IFS= read -r b; do
+        i=$((i + 1))
+        case "$1" in *"$b"*) o="$o,$i" ;; esac
+    done < "$SBX/convbases.txt"
+    printf '%s' "${o#,}"
+}
+
 citation_lines > "$SBX/citelines.txt"
 # 인용 = 후보 줄의 따옴표 구획. 골격 자리표({} 포함)와 빈 구획은 인용이 아니다(빈 줄로 떨어진다).
-grep -o '"[^"]*"' "$SBX/citelines.txt" 2>/dev/null |
-    sed 's/^"//; s/"$//' | grep -v '[{}]' | tr -d ' \r' > "$SBX/cites.txt"
+# 레코드 형식은 `<인덱스 목록> <인용>` — 인용은 공백 제거 후라 공백을 담지 않는다.
+cite_records() {
+    while IFS= read -r line; do
+        o=$(line_owners "$line")
+        [ -n "$o" ] || continue
+        printf '%s\n' "$line" | grep -o '"[^"]*"' |
+            sed 's/^"//; s/"$//' | grep -v '[{}]' | tr -d ' \r' |
+            while IFS= read -r span; do
+                [ -n "$span" ] || continue
+                printf '%s %s\n' "$o" "$span"
+            done
+    done < "$SBX/citelines.txt"
+}
+cite_records > "$SBX/cites.txt"
 
 NANCHOR=$(grep -c . "$SBX/anchors.txt")
 NCITE=$(grep -c . "$SBX/cites.txt")
@@ -393,14 +443,23 @@ NCITE=$(grep -c . "$SBX/cites.txt")
 # `--`와 `</dev/null`이 둘 다 필요하다: 인용 이름이 `-`로 시작하면 grep이 그것을 **옵션**으로 읽고,
 # 그러면 패턴 인자가 없어 파일명을 패턴으로 삼아 **stdin을 읽는다** — 그 stdin이 이 루프의 입력이라
 # 나머지 인용이 통째로 소비돼 미검사로 남는다(실측: miss가 0으로 나오며 가드가 조용히 죽는다).
+# 귀속된 파일이 둘이면 **어느 집합에든 있으면** 통과다(안전 측).
 cite_miss() {
     n=0
-    while IFS= read -r c; do
+    while IFS= read -r rec; do
+        o=${rec%% *}; c=${rec#* }
         [ -n "$c" ] || continue
-        grep -qxF -- "$c" "$SBX/anchors.txt" </dev/null || n=$((n + 1))
+        ok=no; rest=$o
+        while [ -n "$rest" ]; do
+            i=${rest%%,*}
+            case "$rest" in *,*) rest=${rest#*,} ;; *) rest="" ;; esac
+            grep -qxF -- "$c" "$SBX/anchors.$i.txt" </dev/null && ok=yes
+        done
+        [ "$ok" = yes ] || n=$((n + 1))
     done < "$SBX/cites.txt"
     echo "$n"
 }
+# 가짜 이름·유일성 통제는 **집합 전체**(합친 anchors.txt)를 본다.
 has_anchor_name() { grep -qxF -- "$1" "$SBX/anchors.txt" </dev/null && echo yes || echo no; }
 odd_quote_lines() { awk '{ n = gsub(/"/, "&"); if (n % 2 == 1) c++ } END { print c + 0 }' "$SBX/citelines.txt"; }
 
