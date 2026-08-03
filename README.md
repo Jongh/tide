@@ -40,6 +40,12 @@ porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴리즈)�
 `release`는 **프리플라이트**(리뷰 판정 "가능" + 테스트 통과 + 워킹트리 확인)를
 통과해야 git 작업을 시작합니다.
 
+다만 이 기계적 강제에는 **창**이 있습니다 — `.tide/phase`는 커밋되지 않는 로컬 상태라, 파일이
+아직 없는 구간(fresh clone·신규 머신·플러그인 설치 직후)에는 가드가 아무것도 차단하지 않습니다.
+창은 phase가 **실제로 기록될 때** 닫히며 커맨드를 부르는 것만으로는 닫히지 않습니다(고지 후
+수용 — 상세는 [docs/conventions.md](docs/conventions.md)의 "tide-guard hook" 절). 반대로 가드를
+의도적으로 풀려면 `.tide/phase` 파일을 삭제합니다 — 공표된 해제 수단입니다.
+
 ## 커맨드
 
 | 커맨드 | 역할 | 산출물 |
@@ -47,7 +53,7 @@ porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴리즈)�
 | `/tide:kickoff` | 워크플로우 골격 생성 (+ 진행 중 프로젝트면 구조 문서화) | `docs/milestones/`·`docs/reports/`·`CHANGELOG.md`·`docs/conventions.md`·`docs/project-context.md` |
 | `/tide:milestone` | 다음 마일스톤 문서 생성 | `docs/milestones/M{N}.md` |
 | `/tide:impl [M번호]` | 마일스톤대로 구현 + 테스트 (생략 시 최신, 번호 지정 시 재실행) | 코드 + `docs/reports/M{N}-impl.md` (완료보고서) |
-| `/tide:review` | 비판적 리뷰 + 반증 시도(refutation) 후 릴리즈 판정 | `docs/reports/M{N}-review.md` (리뷰보고서 — 판정 계측 줄 포함) |
+| `/tide:review` | 비판적 리뷰 + 반증 시도(refutation) 후 릴리즈 판정 — **차단 등급은 고치지 않고 `불가` + impl 반환** | `docs/reports/M{N}-review.md` (리뷰보고서 — 판정 계측 줄 포함) |
 | `/tide:cycle [주제/M번호]` | `milestone→impl→review` 자동 체이닝 (deps 기반 실제 병렬[서브에이전트]/순차, release 직전 정지) | 위 단계들의 산출물 + 릴리즈 안내 |
 | `/tide:release vX.Y.Z [pr/release]` | 프리플라이트 → 버전 범프 → CHANGELOG → commit → tag → push. `gh` 있으면 GitHub 릴리즈/PR 게시 택1(옵트인) | 릴리즈 커밋·태그 (+선택 gh 릴리즈/PR) |
 | `/tide:retro` | 누적 사이클 회고 — 반복 문제·수용 트레이드오프·미반영 후속 집계 (읽기 전용) | `docs/reports/retro.md` (회고 문서) |
@@ -143,8 +149,9 @@ tide는 **v2.0.0부터 다음을 안정(stable) 계약으로 재기준(re-baseli
 > 차단합니다). 상세는 [docs/conventions.md](docs/conventions.md)의 "debug 세션" 절.
 
 > **gitignore 마이그레이션(기존 프로젝트)**: `.tide/deps`(의존성 선언)를 채택하는 기존
-> 프로젝트는 `.gitignore`를 `.tide/`에서 **`.tide/phase`로 좁히세요** — phase는 로컬 상태라
-> 무시하되 deps는 커밋해야 하기 때문입니다(신규 `/tide:kickoff` 프로젝트는 이미 적용됨).
+> 프로젝트는 `.gitignore`를 `.tide/`에서 **`.tide/phase`와 `.tide/debug-session` 두 파일로
+> 좁히세요** — 이 둘은 로컬 상태라 무시하되 `.tide/deps`·`.tide/release-mode`는 커밋해야 하기
+> 때문입니다(신규 `/tide:kickoff` 프로젝트는 이미 적용됨).
 
 ## CHANGELOG
 

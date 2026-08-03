@@ -22,8 +22,8 @@ argument-hint: "[프로젝트 한 줄 설명(선택)]"
 4. docs/conventions.md — 단계별 금지행위(impl/review는 git 금지), 상태 파일(.tide/phase)
    규약, 태스크 ID·(deps:) 표기, 버전 파일 위치를 기록하고, 마일스톤·보고서 형식은
    tide 플러그인 각 스킬에 동봉된 template.md가 단일 원본임을 명시
-5. .gitignore에 `.tide/phase` 항목이 없으면 추가 (로컬 상태 파일은 커밋 대상 아님 — `.tide/`
-   전체가 아니라 `.tide/phase`만 무시해 `.tide/deps`는 커밋 가능하게)
+5. .gitignore에 `.tide/phase`·`.tide/debug-session` 항목이 없으면 추가 (둘 다 로컬 상태 파일이라
+   커밋 대상 아님 — `.tide/` 전체가 아니라 이 두 파일만 무시해 `.tide/deps`는 커밋 가능하게)
    - 참고: `.tide/deps`는 레포 간 의존을 한 줄에 형제 레포명 하나씩 선언하는 **선택·옵트인**
      매니페스트로, 선언 시 fleet이 위상정렬해 권장 처리 순서를 제시한다. 선언이므로 커밋 대상
      이며 없으면 의존 0(현행 동작). kickoff가 이 파일을 자동 생성하지는 않는다.

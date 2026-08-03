@@ -32,6 +32,20 @@ New-Item -ItemType Directory -Path $sbx | Out-Null
 $script:pass = 0
 $script:fail = 0
 
+# Completion guard (M37 rework 4) -- a runner that dies partway must never look green.
+# The M37 review blocker: one PowerShell-version-only error aborted the run, most cases never ran,
+# `$script:fail` was still 0, and the script printed its success banner and exited 0. Two mechanisms
+# close that: the trap turns any terminating error into a loud exit 1, and the completed flag
+# (set ONLY by the result line) catches every other way of skipping the end of the run.
+# Keep the TRAP identical in all six run.ps1. The completed flag is in FIVE of the six -- see the
+# comment in tests/site-includes/run.ps1 for why that runner deliberately carries the trap alone.
+$script:completed = $false
+trap {
+    Write-Host "`n# ABORTED at line $($_.InvocationInfo.ScriptLineNumber): $($_.Exception.Message)"
+    Write-Host "# INCOMPLETE RUN -- the harness did not reach its result line; treat as FAIL"
+    exit 1
+}
+
 function Invoke-Guard($cpd, $cwd, $cmd, $bom = $false) {
     $obj = @{ tool_input = @{ command = $cmd } }
     if ($cwd) { $obj['cwd'] = $cwd }
@@ -159,12 +173,17 @@ try {
     Check "A(debug) git push blocked (guard unmodified)" $sbx $A 'git push' 2
     Check "A(debug) git tag -a blocked (annotated tag create=write)" $sbx $A 'git tag -a v1 -m x' 2
 
-    Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail)"
+    Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) [runtime: PowerShell $($PSVersionTable.PSVersion) $($PSVersionTable.PSEdition)]"
+    $script:completed = $true
 }
 finally {
     Remove-Item -Recurse -Force $sbx -ErrorAction SilentlyContinue
 }
 
+if (-not $script:completed) {
+    Write-Host "# INCOMPLETE RUN -- the harness did not reach its result line; treat as FAIL"
+    exit 1
+}
 if ($script:fail -ne 0) { exit 1 }
 Write-Host "# all scenarios passed -- repo-root aware / isolation / fallback / phase=debug confirmed (ps1)"
 exit 0

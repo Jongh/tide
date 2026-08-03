@@ -52,7 +52,8 @@ cp -r skills/* ~/.claude/skills/
 
 4. **`/tide:review`** — 방금 구현을 비판적으로 리뷰하고, 판정 직전 자기 결론을 반박하는
    **반증 시도(refutation)** 패스를 한 번 거친 뒤 릴리즈 판정(가능/불가)과 추천 버전을 담은
-   `docs/reports/M{N}-review.md`를 남깁니다. 역시 **git 작업 없음.**
+   `docs/reports/M{N}-review.md`를 남깁니다. **차단 등급 결함은 리뷰가 고치지 않고 판정 `불가`로
+   impl에 되돌립니다**(권장·사소만 리뷰 중 수정). 역시 **git 작업 없음.**
 
 5. **`/tide:release vX.Y.Z [pr/release]`** — 프리플라이트(판정 "가능" + 테스트 통과 + 워킹트리
    확인)를 통과하면 버전 범프 → CHANGELOG/README 갱신 → commit → tag → push까지 합니다.

@@ -16,10 +16,16 @@ impl/review가 남긴 보고서는 다음 `release` 커밋에 함께 포함됩�
 ## 상태 파일 `.tide/phase`
 
 - 위치: `.tide/phase` — 현재 단계명 한 줄
-  (`milestone` / `impl` / `review` / `release` / `idle`).
-- 각 커맨드는 시작 시 자기 단계명을 기록하고, 최종 보고 직전 `idle`로 되돌립니다
-  (`/tide:status`·`/tide:retro`는 읽기 전용이라 변경하지 않습니다).
-- `.tide/`는 `.gitignore` 대상입니다 — 로컬 상태일 뿐 커밋하지 않습니다.
+  (`milestone` / `impl` / `review` / `release` / `debug` / `idle`).
+- **phase 기록 커맨드 6종**(`milestone`·`impl`·`review`·`release`·`debug`·`cycle`)이 자기 단계명을
+  기록하고 최종 보고 직전 `idle`로 되돌립니다. **기록 시점은 각 커맨드의 절차가 정합니다** —
+  전제조건을 먼저 검사하는 커맨드는 그 검사를 통과한 뒤에 기록하므로, 검사에서 중단되면 phase가
+  기록되지 않습니다. 어느 커맨드가 어느 시점에 쓰는지는 **해당 SKILL이 단일 원본**입니다.
+  나머지 6종은 이 저장소의 phase를 쓰지 않습니다 — `status`·`fleet`은 읽기 전용, `retro`는 회고
+  문서만, `fleet-verify`는 verification-only이고, `kickoff`는 `.gitignore` 항목만 손대며,
+  `fleet-cycle`은 **자식 저장소의** phase만 씁니다.
+- `.gitignore` 대상은 `.tide/phase`와 `.tide/debug-session` **두 파일**입니다 — `.tide/` 전체가
+  아니라서 `.tide/deps`·`.tide/release-mode`는 커밋됩니다.
 
 ## tide-guard hook
 
@@ -32,6 +38,13 @@ impl/review가 남긴 보고서는 다음 `release` 커밋에 함께 포함됩�
   `git push` 패턴의 셸 명령을 차단합니다(exit 2 + 안내 메시지).
 - **상태 파일이 없으면 아무것도 차단하지 않습니다** — tide를 쓰지 않는 프로젝트나
   사용자의 수동 git 작업에는 영향을 주지 않습니다.
+- **fresh clone 창(고지 후 수용)**: `.tide/phase`는 커밋되지 않으므로 **fresh clone·신규 머신·
+  플러그인 설치 직후에는 보호가 0**입니다. 창은 위 **phase 기록 커맨드 6종** 중 하나가 **실제로
+  phase를 기록할 때** 닫히며 **호출만으로는 닫히지 않습니다** — 나머지 6종은 쓰지 않고
+  (`kickoff`·`status`가 여기 들어갑니다), 기록 시점은 커맨드마다 다르므로 전제조건을 먼저
+  검사하는 커맨드가 그 검사에서 중단되면 phase가 기록되지 않아 창이 그대로 열려 있습니다.
+  hook 매처가 `Bash|PowerShell`이라 파일 조작 도구 경로도 훅을 타지 않습니다. 상세와 수용
+  근거는 규약의 tide-guard hook 절에 있습니다.
 - **`idle`에서도 차단됩니다** — tide 도입 후에는 Claude를 통한 git commit/tag/push가
   항상 `/tide:release`로만 일어나는 것이 의도된 동작입니다. tide 사이클 밖에서
   Claude에게 git 작업을 시키려면 `.tide/phase` 파일을 삭제해 가드를 해제합니다.

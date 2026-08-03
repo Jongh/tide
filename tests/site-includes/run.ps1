@@ -35,6 +35,21 @@ $ErrorActionPreference = 'SilentlyContinue'
 $ROOT = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 
 $script:pass = 0; $script:fail = 0
+
+# Completion guard (M37 rework 4) -- a runner that dies partway must never look green.
+# The M37 review blocker: one PowerShell-version-only error aborted the run, most cases never ran,
+# `$script:fail` was still 0, and the script printed its success banner and exited 0. Two mechanisms
+# close that: the trap turns any terminating error into a loud exit 1.
+# THIS RUNNER CARRIES THE TRAP ONLY -- deliberately, and it is the one of the six that differs.
+# The other five wrap their body in try/finally, so a `$script:completed` flag set only by the result
+# line detects a run that skipped the end. Here the body is top-level and the result line is the
+# statement directly before the exit logic, so such a flag could never be observed false: it would be
+# a self-vacuous assertion, the very class this guard exists to prevent. The trap is the real guard.
+trap {
+    Write-Host "`n# ABORTED at line $($_.InvocationInfo.ScriptLineNumber): $($_.Exception.Message)"
+    Write-Host "# INCOMPLETE RUN -- the harness did not reach its result line; treat as FAIL"
+    exit 1
+}
 function Chk($desc, $got, $want) {
     if ($got -eq $want) { $script:pass++; Write-Host ("PASS  {0,-60} ({1})" -f $desc, $got) }
     else { $script:fail++; Write-Host ("FAIL  {0,-60} (got {1}, want {2})" -f $desc, $got, $want) }
@@ -173,7 +188,7 @@ foreach ($page in Get-ChildItem (Join-Path $ROOT 'site\docs') -Filter '*.md' -Fi
 Chk "site: discovered >=1 snippet shell" $(if ($shells -ge 1) { 'ok' } else { 'no' }) 'ok'
 Chk "site: discovered >=1 include directive" $(if ($includesTotal -ge 1) { 'ok' } else { 'no' }) 'ok'
 
-Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) (shells=$shells includes=$includesTotal terms=[$($TERMS -join ',')])"
+Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) (shells=$shells includes=$includesTotal terms=[$($TERMS -join ',')]) [runtime: PowerShell $($PSVersionTable.PSVersion) $($PSVersionTable.PSEdition)]"
 if ($script:fail -ne 0) { exit 1 }
 Write-Host "# site-include resolution (target exists + balanced [start]/[end] marker pair + excluded-term 0 in body + derived terms real in masthead) confirmed -- NOT a mkdocs --strict substitute (render/nav/link = CI)"
 exit 0

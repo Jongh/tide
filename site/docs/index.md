@@ -29,7 +29,9 @@ flowchart LR
   git commit/tag/push는 오직 `release`에서만 일어납니다. 의도치 않은 커밋이 사이클
   중간에 끼어들지 않습니다.
 - **hook으로 기계적 강제** — 프롬프트 지시뿐 아니라 **tide-guard hook**이 `.tide/phase`
-  상태를 보고 `release`가 아닌 동안 git commit/tag/push를 차단합니다.
+  상태를 보고 `release`가 아닌 동안 git commit/tag/push를 차단합니다. 다만 상태 파일이 아직 없는
+  구간(fresh clone 직후)에는 보호가 없고, 창은 phase가 실제로 기록될 때 닫힙니다 — 상세는
+  **[개념](concepts.md)** 에 있습니다.
 - **프로젝트 독립성** — 특정 언어·스택에 묶이지 않습니다. 버전 파일도 `Cargo.toml`·
   `package.json`·`pyproject.toml` 등 스택에 맞춰 다룹니다.
 - **문서화 규율** — 마일스톤·완료보고서·리뷰보고서·회고가 정해진 형식으로 남아,
