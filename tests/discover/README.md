@@ -12,9 +12,12 @@ M21 **오케스트레이션 발견성**의 **결정적 핵심**과, 그와 같�
 가리키는지, 규약 문서 **집합** 기준).
 
 **현재 케이스 수 (cases: 85)** — Part A 7 + Part B 14 + Part C 24 + Part D 7 + Part E 13 + Part F 14 + Part G 6.
-`run.sh` · `run.ps1` @ **Windows PowerShell 5.1** · `run.ps1` @ **pwsh 7** — **세 실행 환경 모두**
-같은 수, FAIL 0. "양 셸 동일"로만 적지 않는다: `.ps1`은 **런타임에 따라 다르게 동작할 수 있고**,
-그 틈에 M37 재작업 3의 차단이 네 라운드를 머물렀다(5.1에서 34/85만 돌고 exit 0).
+`run.sh` @ **dash**(우분투 `/bin/sh`) · `run.sh` @ **bash**(Git Bash) · `run.ps1` @ **Windows
+PowerShell 5.1** · `run.ps1` @ **pwsh 7** — **네 실행 환경 모두** 같은 수, FAIL 0.
+"양 셸 동일"로만 적지 않는다. 두 축이 그 표현 뒤에 숨어 있었다: ⑴ `.ps1`은 **런타임에 따라** 다르게
+동작해 M37 재작업 3의 차단이 네 라운드를 머물렀고(5.1에서 34/85만 돌고 exit 0), ⑵ `.sh`는 **`sh`가
+무엇이냐에 따라** 다르게 동작해 dash 결함이 일곱 라운드를 머물렀다(`\xHH`는 POSIX printf 확장이
+아니라 dash가 글자 그대로 낸다 — 로컬 Git Bash는 `sh`가 bash라 보이지 않았다).
 
 > 이 한 줄이 **케이스 수의 유일한 선언처**다(규약: `docs/conventions.md`의 "문서 자기서술 정합").
 > 러너가 `cases` 토큰으로 이 값을 **추출해 자기 실제 케이스 수와 대조**하므로(Part F의 F1),
@@ -293,18 +296,21 @@ G3 1 = **6**. M35의 일반화는 Part G **내부 구현**만 바꾼 것이라 �
 ## 실행
 
 ```sh
-sh tests/discover/run.sh       # POSIX / Git Bash
+sh   tests/discover/run.sh     # Git Bash (여기서 sh = bash)
+dash tests/discover/run.sh     # 우분투 러너의 /bin/sh 재현 — CI ubuntu 레그와 같은 방언
 ```
 ```powershell
 powershell.exe -File tests\discover\run.ps1   # Windows PowerShell 5.1 (러너가 선언한 런타임)
 pwsh          -File tests\discover\run.ps1   # PowerShell 7
 ```
 
-**두 런타임을 다 돌린다.** 하나만 돌리고 "양 셸 통과"라고 적으면 안 된다 — 그 문장이 네 라운드
-동안 5.1 전용 결함을 가렸다. `.github/workflows/tests.yml`이 이 매트릭스
-(windows × {`powershell`, `pwsh`} + bash)를 CI에서 강제한다.
+**네 가지를 다 돌린다.** 하나만 돌리고 "양 셸 통과"라고 적으면 안 된다 — 그 문장이 네 라운드 동안
+5.1 전용 결함을, 일곱 라운드 동안 dash 결함을 가렸다. `dash`가 없으면 그 축은 CI의 ubuntu 레그가
+유일한 집행이다. `.github/workflows/tests.yml`이 이 매트릭스를 강제한다 —
+`run.ps1`은 windows × {`powershell`(5.1), `pwsh`(7)}, `run.sh`는 bash × {windows, **ubuntu**}이고
+**ubuntu 레그의 `sh`가 dash**다.
 
-각 러너는 전부 통과 시 exit 0, 하나라도 실패 시 exit 1이고, **위 세 실행 환경이 같은 판정**을 낸다.
+각 러너는 전부 통과 시 exit 0, 하나라도 실패 시 exit 1이고, **위 네 실행 환경이 같은 판정**을 낸다.
 그리고 러너가 **중간에 죽으면 반드시 exit 1**이다 — 6종 `run.ps1`은 종료 오류를 잡는 `trap`(중단
 줄 번호·원인 출력)과 **결과 줄만 세우는 완주 플래그**를 갖는다. 둘 중 하나라도 걸리면 성공 배너
 없이 `# ABORTED …` / `# INCOMPLETE RUN …`을 찍고 exit 1이다. 이 가드가 없던 동안 `run.ps1`은

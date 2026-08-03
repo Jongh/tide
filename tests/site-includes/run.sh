@@ -44,7 +44,11 @@ chk() { # <desc> <got> <want>
 # the term must never appear inside the body region. We extract the word immediately
 # before the Korean "methodology" phrase. The KO phrase is built from its UTF-8 bytes so
 # the source carries no hardcoded excluded term (parity with the ASCII-only .ps1 twin).
-ko_methodology=$(printf '\xec\x9d\x98 \xea\xb0\x9c\xeb\xb0\x9c \xeb\xb0\xa9\xeb\xb2\x95\xeb\xa1\xa0')  # "<eui> <gaebal> <bangbeomnon>"
+# 팔진(`\357`류)으로 쓴다 — `\xHH`는 POSIX printf에 없어 dash가 글자 그대로 내보낸다. 지금까지
+# 우분투에서도 통과한 것은 dash가 남긴 `\xec…` 글자를 **GNU sed가 정규식에서 다시 이스케이프로
+# 해석**해 준 우연이다(비-GNU sed에서는 깨진다). 팔진이면 여기서 실제 바이트가 만들어져 sed는
+# 리터럴만 보면 된다 — 셸·sed 구현 어느 쪽에도 기대지 않는다.
+ko_methodology=$(printf '\354\235\230 \352\260\234\353\260\234 \353\260\251\353\262\225\353\241\240')  # "<eui> <gaebal> <bangbeomnon>"
 
 extract_term() { # <file> -> term word (or empty)
     [ -f "$1" ] || return

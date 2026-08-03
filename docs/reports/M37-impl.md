@@ -48,6 +48,18 @@ kickoff ↔ 규약 모순을 닫았다(T06).
 편입했고, `docs/milestones/M37.md`에 **M37-T07**로 선언한 뒤 구현했다 — 선언 없이 집행하면 이
 마일스톤이 일곱 라운드 동안 차단당해 온 그 부류를 새로 만드는 것이기 때문이다.
 
+**CI가 릴리즈 도중 두 번 값을 했다(추가분)**: 첫 푸시는 워크플로 자체가 컴파일되지 않아 **잡이 0개**
+였고(위 (d-2)), 그것을 고친 **두 번째 실행**이 **일곱 라운드의 로컬 검증이 한 번도 잡지 못한 결함**을
+우분투 레그에서 냈다. 두 실행을 뭉뚱그려 "첫 실행"이라 적지 않는다 — 잡히지 않은 것과 잡힌 것은
+서로 다른 실행이고, 전자는 CI가 **자기 자신에 대해** 낸 결함이다. `\xHH`는 **POSIX printf에 없는 확장**이라
+우분투의 `/bin/sh`(dash)가 이스케이프를 해석하지 않고 `\xEF\xBB\xBF`를 **글자 그대로** 내보낸다.
+그래서 `tests/fleet-verify/run.sh`의 BOM 픽스처에 BOM이 들어가지 않아 **25/4**로 떨어졌다. 로컬
+Git Bash는 `sh`가 bash라 `\xHH`가 동작한다 — **실제 POSIX sh에서 한 번도 돌린 적이 없었다.**
+세 곳을 팔진으로 바꿔 닫았고(아래 T07 **(f)**), 이제 로컬 dash로 우분투 레그를 재현할 수 있다.
+
+**라운드를 올리지 않은 이유**: 직전 리뷰 판정은 **`가능`**이었다. 규약상 라운드 +1은 판정이 `불가`일
+때이고, 이번 재실행은 릴리즈 중 CI가 드러낸 결함의 **이어하기·부분 보완**이므로 기존 값을 그대로 옮긴다.
+
 재작업 라운드(rework): 4
 
 ## 태스크별 수행 내용
@@ -153,16 +165,33 @@ kickoff ↔ 규약 모순을 닫았다(T06).
     소비자는 레포에 **없다**(실측 확인)이라 형식 변경이 안전하다.
   - **(d) CI**: `.github/workflows/tests.yml` 신설 — windows × {`powershell`(5.1) · `pwsh`(7)} +
     bash(windows·ubuntu). 하니스 목록은 **하드코딩하지 않고 파일 시스템에서 발견**하며, **0개 발견은
-    실패**다. 러너가 작업 디렉터리를 옮기므로(`fleet-verify` 정리) 매 호출 전 절대 경로로 복귀한다.
+    실패**다.
+  - **(d-2) 워크플로가 컴파일되게 고쳤다(릴리즈 중, 두 번째 결함)**: 첫 푸시에서 GitHub이
+    `shell: ${{ matrix.shell }}`을 거부해 **잡이 0개** 생성됐다(실행 기록에는 "workflow file issue"만
+    남는다). **로컬 YAML 유효성은 GitHub 워크플로 유효성이 아니다** — `python -c "yaml.safe_load"`는
+    통과했었다. 매트릭스 값을 `env: PS_EXE`로 흘리고 `shell:`을 리터럴 `pwsh`로 고정했으며, 하니스를
+    **자식 프로세스**(`& $env:PS_EXE -NoProfile -File`)로 띄우게 바꿨다. 자식 프로세스 방식이 세 가지를
+    한꺼번에 없앤다 — ⓐ `multi-repo`의 Git Bash 호스트 실패(초안은 `shell: bash`였고 로컬에서
+    `multi-repo` 실패로 잡혔다) ⓑ `fleet-verify`의 `Set-Location` 정리가 다음 하니스를 깨는 것
+    ⓒ GitHub이 주입하는 `$ErrorActionPreference`가 러너로 새는 것. **초안의 "매 호출 전 절대 경로로
+    복귀한다"는 이 재설계로 대체됐다.**
   - **(e) 서술 정정**: `tests/discover/README.md`의 "양 셸 동일" 표기를 **세 실행 환경**으로 고치고,
     실행 예시에 두 런타임을 다 적었다.
+  - **(f) dash 비호환 수정(릴리즈 중 CI가 잡은 것)**: `\xHH` 이스케이프 **세 곳**을 POSIX 팔진으로
+    바꿨다 — `tests/fleet-verify/run.sh`의 BOM 픽스처 2곳(`\357\273\277`)과
+    `tests/site-includes/run.sh:47`의 한글 토큰 1곳. 뒤엣것은 우분투에서 **통과하고 있었지만**
+    dash가 남긴 `\xec…` 글자를 **GNU sed가 정규식에서 다시 이스케이프로 해석**해 준 우연이었다 —
+    비-GNU sed에서는 깨진다. 팔진이면 셸이 실제 바이트를 만들어 sed는 리터럴만 보면 되므로 **셸·sed
+    구현 어느 쪽에도 기대지 않는다**. `tests/lib/encoding.sh`의 `strip_bom`(sed 정규식의 `\xEF…`)은
+    **바꾸지 않았다** — 셸과 무관하게 sed가 해석하는 자리이고, 픽스처가 고쳐진 뒤 dash에서 진짜 BOM을
+    받아 정상 동작함을 실측했다(비-GNU sed 이식성은 M38 몫).
 
 ## 변경 파일 요약
 
 | 구분 | 파일 |
 |---|---|
 | 추가 | `docs/reports/M37-impl.md` (이 문서) · **`.github/workflows/tests.yml`**(T07) |
-| 수정 | `docs/conventions.md`(T01·T05) · `hooks/tide-guard.sh`·`hooks/tide-guard.ps1`·`docs/project-context.md`(T02) · `site/docs/concepts.md`·`README.md`·`site/docs/index.md`(T03) · `tests/discover/run.sh`·`tests/discover/run.ps1`·`tests/discover/README.md`(T04) · `docs/reports/M36-impl.md`(T05) · `skills/kickoff/SKILL.md`·`docs/orchestration.md`(T06) · **`tests/{discover,fleet,fleet-cycle,fleet-verify,multi-repo,site-includes}/run.ps1` 6종 · `docs/milestones/M37.md`**(T07) |
+| 수정 | `docs/conventions.md`(T01·T05) · `hooks/tide-guard.sh`·`hooks/tide-guard.ps1`·`docs/project-context.md`(T02) · `site/docs/concepts.md`·`README.md`·`site/docs/index.md`(T03) · `tests/discover/run.sh`·`tests/discover/run.ps1`·`tests/discover/README.md`(T04) · `docs/reports/M36-impl.md`(T05) · `skills/kickoff/SKILL.md`·`docs/orchestration.md`(T06) · **`tests/{discover,fleet,fleet-cycle,fleet-verify,multi-repo,site-includes}/run.ps1` 6종 · `tests/fleet-verify/run.sh` · `tests/site-includes/run.sh`(둘 다 T07 (f) dash 수정) · `CHANGELOG.md` · `docs/milestones/M37.md`**(T07) |
 | 삭제 | (없음) |
 
 기준선 = 이 단계 시작 시점의 워킹트리다. **M36의 산출물이 아직 커밋 전**이므로 위 파일 다수가 git
@@ -174,20 +203,24 @@ kickoff ↔ 규약 모순을 닫았다(T06).
 ## 테스트 결과
 
 이 프로젝트는 테스트 러너가 없고 **자기완결 라이브 하니스 6종**(`run.sh`/`run.ps1` 쌍)으로 검증한다.
-전 하니스를 **세 실행 환경 전부**에서 실행해 **FAIL 0**(재작업 4부터 런타임을 수치마다 명시한다 —
-"양 셸"이라는 표현이 네 라운드 동안 5.1 전용 결함을 가렸다):
+전 하니스를 **네 실행 환경 전부**에서 실행해 **FAIL 0**(재작업 4부터 실행 환경을 수치마다 명시한다 —
+"양 셸"이라는 표현이 네 라운드 동안 5.1 전용 결함을, 그리고 일곱 라운드 동안 dash 결함을 가렸다):
 
-| 하니스 | `run.sh` (POSIX) | `run.ps1` @ **5.1** | `run.ps1` @ **pwsh 7** |
-|---|---|---|---|
-| `tests/discover` | 85 / 0 · exit 0 | 85 / 0 · exit 0 | 85 / 0 · exit 0 |
-| `tests/fleet` | 41 / 0 · exit 0 | 41 / 0 · exit 0 | 41 / 0 · exit 0 |
-| `tests/fleet-cycle` | 23 / 0 · exit 0 | 23 / 0 · exit 0 | 23 / 0 · exit 0 |
-| `tests/fleet-verify` | 29 / 0 · exit 0 | 29 / 0 · exit 0 | 29 / 0 · exit 0 |
-| `tests/multi-repo` | 30 / 0 · exit 0 | 30 / 0 · exit 0 | 30 / 0 · exit 0 |
-| `tests/site-includes` | 34 / 0 · exit 0 | 34 / 0 · exit 0 | 34 / 0 · exit 0 |
+| 하니스 | `run.sh` @ **dash** | `run.sh` @ **bash** | `run.ps1` @ **5.1** | `run.ps1` @ **pwsh 7** |
+|---|---|---|---|---|
+| `tests/discover` | 85 / 0 · exit 0 | 85 / 0 · exit 0 | 85 / 0 · exit 0 | 85 / 0 · exit 0 |
+| `tests/fleet` | 41 / 0 · exit 0 | 41 / 0 · exit 0 | 41 / 0 · exit 0 | 41 / 0 · exit 0 |
+| `tests/fleet-cycle` | 23 / 0 · exit 0 | 23 / 0 · exit 0 | 23 / 0 · exit 0 | 23 / 0 · exit 0 |
+| `tests/fleet-verify` | **29 / 0 · exit 0** | 29 / 0 · exit 0 | 29 / 0 · exit 0 | 29 / 0 · exit 0 |
+| `tests/multi-repo` | 30 / 0 · exit 0 | 30 / 0 · exit 0 | 30 / 0 · exit 0 | 30 / 0 · exit 0 |
+| `tests/site-includes` | 34 / 0 · exit 0 | 34 / 0 · exit 0 | 34 / 0 · exit 0 | 34 / 0 · exit 0 |
 
 정확한 런타임: `powershell.exe` = **PowerShell 5.1.26100.8875 Desktop**, `pwsh` = **7.6.4 Core**
-(러너가 결과 줄에 스스로 각인한 값이다). **18회 전부 exit 0**이다.
+(러너가 결과 줄에 스스로 각인한 값이다). **24회 전부 exit 0**이다.
+
+**dash 열이 이번에 새로 생겼다.** 수정 전 같은 열은 `fleet-verify` **25 / 4 · exit 1**이었고, 그것이
+CI 우분투 레그의 실패와 **정확히 같은 수치**다 — 즉 우분투 레그는 이제 **로컬에서 재현 가능**하다.
+픽스처 바이트도 대조했다: `sh`·`dash` 양쪽에서 `ef bb bf`로 동일하다(수정 전 dash는 글자 12개였다).
 
 **완주 가드가 실제로 무는지 — 6종 각각 살아 있는 주입으로 실증**(레포 밖 사본, 원본 무변경, 사본
 삭제). 차단과 **같은 부류의 결함**(6+ 전용 3인자 `Join-Path`)을 결과 줄 직전에 주입하고 5.1에서 실행:
@@ -385,7 +418,13 @@ T01·T02·T03·T05·T06의 산출물은 그대로다.
 
 ## 미해결·후속 메모
 
-0. **CI의 `ubuntu-latest` 레그는 로컬에서 검증하지 못했다** — 이 개발 환경에 Linux가 없다.
+0. **~~CI의 `ubuntu-latest` 레그는 로컬에서 검증하지 못했다~~ — 닫혔다(부분).** CI가 실제로 돌아
+   그 레그의 결함을 냈고, **로컬 `dash`로 같은 수치를 재현**해 고쳤다(위 T07 (f) · 테스트 결과의
+   dash 열). CI 로그 실측으로 그 레그가 **6종을 전부 실행**했음도 확인했다(5종 그린 + `fleet-verify`
+   25/4) — 즉 우분투의 coreutils·awk·로케일 축까지 한 번은 실제로 돌았다. 다만 **"닫혔다"고 적지
+   않는다**: 셸 방언 축은 **재현 가능해졌을 뿐**이고, 고친 트리의 우분투 실행은 아직 없다(리뷰는
+   push하지 않는다). **릴리즈 후 첫 확인 항목**이다. 아래 원 서술은 기록으로 남긴다.
+   - **원 기록** — 이 개발 환경에 Linux가 없다.
    `run.sh` 6종에 Windows 의존 흔적이 **0건**이고(`.exe`·`powershell`·드라이브 문자·`cygpath` 전무)
    shebang이 전부 `#!/bin/sh`라 **돌 것으로 보지만 실측이 아니다**. windows 레그 3종
    (bash · `powershell` 5.1 · `pwsh` 7)은 이 머신에서 그대로 재현했다. 첫 CI 실행에서 ubuntu 레그가

@@ -104,7 +104,11 @@ mk_repo() { mkdir -p "$1/docs/milestones"; git -C "$1" init -q; printf '# M1\n' 
 # --- (1) 훅 발견/파싱: BOM 제거·주석/빈 줄 무시 → 명령 줄만 추출 ---
 HP="$SBX/parse"; mkdir -p "$HP/.tide-fleet"
 # 선두 BOM + 주석 + 빈 줄 + 명령 2줄
-printf '\xEF\xBB\xBF# integration hook\n\ndocker compose up -d\nnpm run integration-test\n# trailing comment\n' \
+# BOM 바이트는 **팔진**(`\357\273\277`)으로 쓴다 — `\xHH`는 POSIX printf에 없는 확장이라
+# dash(우분투의 `/bin/sh`)가 이스케이프를 해석하지 않고 `\xEF\xBB\xBF` **글자 그대로** 내보낸다.
+# 그러면 이 픽스처에 BOM이 아예 들어가지 않아 아래 BOM 케이스 4개가 FAIL한다(M37 재작업 4의
+# CI 첫 실행이 우분투 레그에서 잡은 결함 — 로컬 Git Bash는 sh=bash라 일곱 라운드 동안 보이지 않았다).
+printf '\357\273\277# integration hook\n\ndocker compose up -d\nnpm run integration-test\n# trailing comment\n' \
     > "$HP/.tide-fleet/integration"
 parsed=$(read_hook "$HP" | tr '\n' '|' | sed 's/|$//')
 chk "훅 파싱: BOM·주석·빈 줄 제거 후 명령 2줄" "$parsed" "docker compose up -d|npm run integration-test"
@@ -118,7 +122,7 @@ chk "훅 파싱: 첫 줄 선두 BOM 제거됨" "$first" "docker compose up -d"
 NH="$SBX/nohook"; mkdir -p "$NH"
 chk "옵트인 생략: 훅 파일 없음 → skip" "$(hook_class "$NH")" "skip"
 EH="$SBX/emptyhook"; mkdir -p "$EH/.tide-fleet"
-printf '\xEF\xBB\xBF# only comments\n\n   \n' > "$EH/.tide-fleet/integration"
+printf '\357\273\277# only comments\n\n   \n' > "$EH/.tide-fleet/integration"   # 팔진 — 위 주석 참조
 chk "옵트인 생략: 주석·빈 줄뿐(유효 0) → skip" "$(hook_class "$EH")" "skip"
 chk "옵트인 생략: skip이면 실행 분류도 skip"    "$(run_hook "$EH")" "skip"
 
