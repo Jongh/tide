@@ -1,7 +1,16 @@
 #!/bin/sh
 # tide-guard — PreToolUse hook
 # .tide/phase가 release가 아닌 동안 git commit/tag/push를 차단한다.
-# 상태 파일이 없으면 아무것도 차단하지 않는다 (tide 미사용 프로젝트에 영향 없음).
+# 상태 파일이 없으면 아무것도 차단하지 않는다. 이 무차단은 두 경우를 함께 덮는다 —
+#   (a) tide 미사용 프로젝트(영향 없음), (b) tide 레포인데 phase가 아직 없는 상태.
+# (b)가 보호 창이다: .tide/phase는 gitignore 대상이라 fresh clone·신규 머신·플러그인 설치 직후에는
+# git 쓰기 보호가 0이고, 창은 phase가 실제로 기록될 때 닫힌다 — 호출만으로는 닫히지 않는다
+# (phase를 아예 쓰지 않는 커맨드가 있고, 쓰는 커맨드도 전제조건 검사에서 중단되면 기록 전에 끝난다).
+# 어느 커맨드가 쓰는지·언제 쓰는지는 docs/conventions.md "상태 파일 (.tide/phase)" 절과 각 SKILL이
+# 단일 원본이다 — 여기에 명단을 복제하지 않는다.
+# 매처가 Bash|PowerShell이라 Edit/Write 도구 경로는 훅을 타지 않고, phase를 기록하는 주체가 LLM이라
+# 기계적 가드의 전제조건 자체가 프롬프트 규율이다 — 보호는 조건부다. 창·우회 표면은 고지 후 수용이며,
+# 단일 원본 = docs/conventions.md "tide-guard hook" 절, 3.0 후보 등재는 "2.0 안정성" 절.
 
 input=$(cat)
 

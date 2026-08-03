@@ -197,6 +197,141 @@ chk "C2: skills/milestone/template.md 가 기준선 선언" "$(has_token "$MS_TP
 chk "C2: skills/impl/template.md 가 기준선 선언"      "$(has_token "$IMPL_TPL" "기준선")" "yes"
 chk "C2: skills/debug/template.md 가 기준선 선언"     "$(has_token "$DBG_TPL" "기준선")" "yes"
 
+# (C3) phase 기록 커맨드 **명단**(M37) — 규약이 그 명단의 **유일한 열거처**를 자기 절로 정하고
+#      발행 페이지 `site/docs/concepts.md` 하나만 예외로 뒀다. 이 케이스가 그 선언을 집행한다.
+#      규약의 선언이 **두 명단**(phase를 쓰는 6종 · 쓰지 않는 6종)을 함께 걸었으므로 집행도 **둘 다**
+#      문다 — 선언 범위와 집행 범위를 같은 넓이로 둔다(M37 리뷰 차단 #1).
+#        - **기록 명단**: 여섯 이름이 **한 줄에 모두** 있으면서 `phase` 문맥인 줄(커맨드 카탈로그
+#          행은 phase 문맥이 아니라 걸리지 않는다).
+#        - **비기록 명단**: 두 파일 모두 문장으로 풀어 써 **여러 줄에 걸치므로** 여섯 이름이 모두
+#          드는 **가장 짧은 연속 줄 묶음(창, 최대 4줄)** 으로 뽑는다.
+#      **캐노니컬 이름은 이 러너가 탐침(needle)으로 갖는다** — 기록 6종은 `grep -F` 리터럴 연쇄,
+#      비기록 6종은 awk `index` 리터럴이다. 드리프트 표면이 없어진 것이 아니라 러너로 **옮겨졌다**
+#      (커맨드 이름을 바꾸면 러너 두 사본도 함께 고친다). 다만 러너는 명단을 **선언**하지 않고
+#      탐침만 하므로 이름이 어긋나면 추출이 0이 되어 개수 케이스가 **크게 FAIL**한다(공허 통과 아님).
+#      무는 것: 개수 · 두 파일의 집합 일치(양쪽이 다 비면 `no`) · 열거 파일이 그 둘뿐 ·
+#      기록∩비기록 = 공집합 · 음성 통제.
+CONCEPTS="$ROOT/site/docs/concepts.md"
+
+roster_line() { # <file> → 명단 줄(없으면 빈 출력)
+    [ -f "$1" ] || return 0
+    grep -F -- "phase" "$1" | grep -F -- "milestone" | grep -F -- "impl"       | grep -F -- "review" | grep -F -- "release" | grep -F -- "debug"       | grep -F -- "cycle" | head -1
+}
+roster_set() { # <file> → 명단 줄의 백틱 토큰 집합(정렬·공백 구분)
+    roster_line "$1" | grep -oE '`[a-z][a-z-]*`' | tr -d '`' | LC_ALL=C sort -u       | tr '
+' ' ' | sed 's/ *$//'
+}
+roster_count() { # <file> → 명단 이름 개수
+    roster_set "$1" | tr ' ' '
+' | grep -c '[a-z]'
+}
+roster_has() { # <file> <name> → yes|no
+    case " $(roster_set "$1") " in *" $2 "*) echo yes ;; *) echo no ;; esac
+}
+# C-3 자신의 훑는 대상(살아 있는 문서·스킬·훅) — 두 명단이 **같은 범위**를 훑는다. 이름을
+# `living_docs`로 두지 않는다: Part G가 **다른 범위**의 동명 함수를 갖고 있어(`tests/*/README.md`
+# 포함·훅 제외) 두 정의가 같은 이름이면 C-3의 범위가 **어느 정의가 나중에 실행됐는지**에 달린다
+# (M37 리뷰 권장 #2). 범위의 의미는 **재귀 + 점 제외**다 — `skills/`를 양 셸 모두 재귀로 훑되
+# **점(`.`)으로 시작하는 파일·디렉터리는 양쪽 다 제외**한다(여기는 `-prune`, `run.ps1`은 **레포
+# 상대 경로**의 성분 검사). 러너의 다른 스캔이 전부 글롭이라 점을 자연히 제외하는 것과 같은 의미이며,
+# 한쪽만 제외하면 두 셸이 다른 집합을 훑어 판정이 갈린다(M37 리뷰 차단 — 그때는 ps1이 **절대경로**를
+# 봐서 레포가 점 디렉터리 아래 있으면 `skills/**`가 통째로 빠졌다).
+# `docs/milestones/`·`docs/reports/`는 시점 기록물이라 여기 들지 않는다.
+roster_scan_files() { # → 대상 파일 절대 경로(한 줄에 하나)
+    for f in "$ROOT/README.md" "$ROOT"/docs/*.md "$ROOT"/site/docs/*.md              "$ROOT/hooks/tide-guard.sh" "$ROOT/hooks/tide-guard.ps1"; do
+        [ -f "$f" ] && printf '%s
+' "$f"
+    done
+    # `-name '.*' -prune`은 **방문 지점의 basename**만 본다 — 시작점(`$ROOT/skills`) 위쪽 경로에
+    # 점 성분이 있어도 영향을 주지 않는다(레포 상대 경로 기준이라는 뜻).
+    [ -d "$ROOT/skills" ] && find "$ROOT/skills" -name '.*' -prune -o -type f -name '*.md' -print
+    return 0
+}
+roster_files() { # → 명단 줄을 가진 살아 있는 문서(레포 상대 경로, 정렬·공백 구분)
+    roster_scan_files | while IFS= read -r f; do
+        [ -n "$(roster_line "$f")" ] && printf '%s
+' "${f#"$ROOT"/}"
+    done | LC_ALL=C sort -u | tr '
+' ' ' | sed 's/ *$//'
+}
+
+# 비기록 명단(phase를 쓰지 않는 6종) — 두 파일 모두 산문으로 풀어 써 **여러 줄에 걸친다**. 그래서
+# 여섯 이름이 모두 드는 **가장 짧은 연속 줄 묶음(창)** 을 뽑는다(최대 4줄 — 실측 스팬은 규약 2줄·
+# 발행 페이지 3줄). **상한을 넘으면 창을 찾지 못하고** 개수 케이스가 크게 FAIL한다 — 그 상한이
+# 집행 경계이며 `run.ps1`과 같은 값이다(awk는 대소문자를 구분해 `W`와 `w`가 별개다 — ps1은 그렇지
+# 않아 M37 리뷰 차단 #1이 났다). 창의 무관한 백틱 토큰(`.gitignore` 등)을 거르는 것은 창의
+# 최소성이 아니라 아래 추출 정규식이다.
+nonwriter_window() { # <file> → 창 텍스트(없으면 빈 출력)
+    [ -f "$1" ] || return 0
+    awk 'BEGIN { W = 4 }
+        { L[NR] = $0 }
+        END {
+            for (w = 1; w <= W; w++)
+                for (i = 1; i + w - 1 <= NR; i++) {
+                    s = ""
+                    for (k = i; k <= i + w - 1; k++) s = s "\n" L[k]
+                    if (index(s, "`status`") && index(s, "`fleet`") && index(s, "`retro`") &&
+                        index(s, "`fleet-verify`") && index(s, "`kickoff`") && index(s, "`fleet-cycle`")) {
+                        print s
+                        exit
+                    }
+                }
+        }' "$1"
+}
+nonwriter_set() { # <file> → 창의 백틱 토큰 집합(정렬·공백 구분)
+    nonwriter_window "$1" | grep -oE '`[a-z][a-z-]*`' | tr -d '`' | LC_ALL=C sort -u       | tr '
+' ' ' | sed 's/ *$//'
+}
+nonwriter_count() { # <file> → 비기록 명단 이름 개수
+    nonwriter_set "$1" | tr ' ' '
+' | grep -c '[a-z]'
+}
+nonwriter_has() { # <file> <name> → yes|no
+    case " $(nonwriter_set "$1") " in *" $2 "*) echo yes ;; *) echo no ;; esac
+}
+nonwriter_files() { # → 비기록 명단 창을 가진 살아 있는 문서(레포 상대 경로)
+    roster_scan_files | while IFS= read -r f; do
+        [ -n "$(nonwriter_window "$f")" ] && printf '%s
+' "${f#"$ROOT"/}"
+    done | LC_ALL=C sort -u | tr '
+' ' ' | sed 's/ *$//'
+}
+# 집합 일치 — **양쪽이 다 비면 `no`**. 빈 문자열끼리의 `'' = ''`는 참이라 추출이 통째로 깨진 날
+# 이 단언이 자기 공허하게 통과한다(M37 리뷰 사소 #4).
+sets_equal() { # <a> <b> → yes|no
+    if [ -n "$1" ] && [ "$1" = "$2" ]; then echo yes; else echo no; fi
+}
+# 기록·비기록 명단은 **서로소**여야 한다 — 창·줄 추출이 엉뚱한 쪽을 집으면 개수·집합 일치는
+# 통과해도 여기서 걸린다(추출 대상 오인의 통제).
+rosters_disjoint() { # <file> → yes|no
+    _a=" $(roster_set "$1") "
+    _b="$(nonwriter_set "$1")"
+    if [ "$_a" = "  " ] || [ -z "$_b" ]; then echo no; return 0; fi
+    for _n in $_b; do
+        case "$_a" in *" $_n "*) echo no; return 0 ;; esac
+    done
+    echo yes
+}
+
+chk "C3: 규약 명단 이름 6개"        "$(roster_count "$CONV")"     "6"
+chk "C3: 발행 페이지 명단 이름 6개" "$(roster_count "$CONCEPTS")" "6"
+chk "C3: 두 명단 집합 일치"     "$(sets_equal "$(roster_set "$CONV")" "$(roster_set "$CONCEPTS")")" "yes"
+chk "C3: 열거 파일은 규약·발행 페이지 둘뿐" "$(roster_files)"     "docs/conventions.md site/docs/concepts.md"
+
+# 비기록 명단도 같은 넓이로 문다 — 규약의 선언이 두 목록을 함께 걸었다(리뷰 차단 #1).
+chk "C3: 규약 비기록 명단 이름 6개"        "$(nonwriter_count "$CONV")"     "6"
+chk "C3: 발행 페이지 비기록 명단 이름 6개" "$(nonwriter_count "$CONCEPTS")" "6"
+chk "C3: 두 비기록 명단 집합 일치" "$(sets_equal "$(nonwriter_set "$CONV")" "$(nonwriter_set "$CONCEPTS")")" "yes"
+chk "C3: 비기록 열거 파일은 규약·발행 페이지 둘뿐" "$(nonwriter_files)" "docs/conventions.md site/docs/concepts.md"
+chk "C3: 규약의 기록·비기록 명단은 서로소"        "$(rosters_disjoint "$CONV")"     "yes"
+chk "C3: 발행 페이지의 기록·비기록 명단은 서로소" "$(rosters_disjoint "$CONCEPTS")" "yes"
+
+# 음성 통제 — 존재하지 않는 이름은 어느 명단에도 없다(C1 '보류함' 통제와 동일 취지).
+chk "C3: 명단 통제 — 규약에 phantom-cmd 없음"        "$(roster_has "$CONV" phantom-cmd)"     "no"
+chk "C3: 명단 통제 — 발행 페이지에 phantom-cmd 없음" "$(roster_has "$CONCEPTS" phantom-cmd)" "no"
+chk "C3: 비기록 명단 통제 — 규약에 phantom-cmd 없음"        "$(nonwriter_has "$CONV" phantom-cmd)"     "no"
+chk "C3: 비기록 명단 통제 — 발행 페이지에 phantom-cmd 없음" "$(nonwriter_has "$CONCEPTS" phantom-cmd)" "no"
+
 # === Part D — 브랜치 간 협업 안전(M31) 선언 정합 =========================
 # (M31) Part B/C와 동형 — 규약(conventions 단일 원본)과 그것을 배선하는 스킬이 같은 메커니즘을
 # 선언하는지 결합한다. 두 검사(릴리즈 커버리지 체크·마일스톤 번호 사전경고)는 프롬프트 규율이라
@@ -235,6 +370,8 @@ chk "D: 통제 — conventions에 가짜 토큰 없음" "$(has_token "$CONV" "gi
 # (E1) 반증 시도: `refutation`이 conventions·review SKILL 둘 다에 등장,
 # (E2) 판정 계측: `in-review`가 conventions·review SKILL·review 템플릿 세 곳 모두에 등장,
 # (E3) 재작업 라운드: `rework`가 conventions·review 템플릿·impl 템플릿 세 곳 모두에 등장.
+# (E6) 판례 부류(M36): `vacuous-pass`가 conventions·review SKILL 둘 다에 등장,
+# (E7) 부인 기록(M36): `precedent-waiver`가 conventions·review SKILL·review 템플릿 세 곳 모두에 등장.
 # 단일 원본은 conventions "리뷰 검증 규율" 절.
 
 REV_SKILL="$ROOT/skills/review/SKILL.md"
@@ -243,6 +380,8 @@ REFUT_TOK='refutation'
 MEAS_TOK='in-review'
 REWORK_TOK='rework'
 REVERIFY_TOK='re-verify'
+VACUOUS_TOK='vacuous-pass'
+WAIVER_TOK='precedent-waiver'
 
 in_both() { # <token> <f1> <f2> → yes|no
     for f in "$2" "$3"; do
@@ -276,6 +415,18 @@ done
 # 있어(이중 용도) **재검증 절을 통째로 지워도 E2가 통과**한다(M32 리뷰의 반증 패스가 복사본에서 실증).
 # 그래서 재검증 전용 ASCII 병기어 `re-verify`를 세 파일에 결합한다.
 chk "E5: 재검증($REVERIFY_TOK) 세 파일 전부에 등장" "$(in_all_three "$REVERIFY_TOK" "$CONV" "$REV_SKILL" "$REV_TPL")" "yes"
+
+# (E6) 차단 등급 판례(M36) — 판례 부류 이름 `vacuous-pass`가 규약과 review 스킬 둘 다에 선언.
+# E1(반증 시도)과 같은 2곳 결합 층위다 — 판례는 절차 지시(스킬)와 기준(규약)에 있고, 보고서 템플릿엔
+# 슬롯을 두지 않는다(복제 선언을 불필요하게 늘리지 않는다).
+chk "E6: 판례 부류($VACUOUS_TOK) 규약↔review SKILL 정합" "$(in_both "$VACUOUS_TOK" "$CONV" "$REV_SKILL")" "yes"
+
+# (E7) 부인 기록(M36) — `precedent-waiver`는 규약(의무)·스킬(절차)·템플릿(기록 슬롯) 세 곳 전부가
+# 있어야 실제로 남는다. 템플릿에서만 지워도 이 단언이 물어야 한다(E2·E5와 같은 3곳 결합).
+chk "E7: 부인 기록($WAIVER_TOK) 세 파일 전부에 등장" "$(in_all_three "$WAIVER_TOK" "$CONV" "$REV_SKILL" "$REV_TPL")" "yes"
+
+# 음성 통제 — 가짜 판례 토큰은 규약에 없어야 한다(E의 `refutation-bogus` 통제와 동형, 구별력 입증).
+chk "E: 통제 — conventions에 가짜 판례 토큰 없음" "$(has_token "$CONV" "${VACUOUS_TOK}-bogus")" "no"
 
 # 교차 통제 — 반증 시도는 review 자산이라 impl 템플릿에 없어야 한다(토큰 구별력, Part D 교차 통제와 동형).
 chk "E: 통제 — impl 템플릿에 반증 토큰 없음" "$(has_token "$IMPL_TPL" "$REFUT_TOK")" "no"
@@ -496,4 +647,4 @@ chk "F1: README cases 선언 == 실제 케이스 수" "$(declared_cases)" "$((pa
 echo
 echo "# 결과: PASS=$pass FAIL=$fail (실제 커맨드 스킬 N=$N)"
 [ "$fail" -eq 0 ] || exit 1
-echo "# discover 감지 임계값(≥2→hint·<2→none·단일 레포→none·숨김 미카운트) + 단일 원본 동결(B1 카운트 정합·B2 사이트 셸·B3 카탈로그 완전성, 캐노니컬=docs/commands.md, 실제 ${N}종) + 선언 정합(C1 상태값 네 값×세 파일·부재 통제·C2 기준선×세 템플릿·D 브랜치 협업 안전 커버리지·번호경고 규약↔스킬 정합·E 리뷰 검증 규율 반증 시도·판정 계측·재작업 라운드 규약↔스킬↔템플릿 정합 + 계측 줄 골격 형식 정합 + 재검증 선언 + 교차·음성 통제 · F 문서 자기서술 정합 = 역할 앵커 추출·캐노니컬 행 실재·소비자 전파 + 케이스 수 자기 정합 · G 상호참조 무결성 = 인용 추출·앵커 실재 대조 + 추출 0건·이름 유일성·줄바꿈 인용 통제) 확인됨 (참조 구현 기준)"
+echo "# discover 감지 임계값(≥2→hint·<2→none·단일 레포→none·숨김 미카운트) + 단일 원본 동결(B1 카운트 정합·B2 사이트 셸·B3 카탈로그 완전성, 캐노니컬=docs/commands.md, 실제 ${N}종) + 선언 정합(C1 상태값 네 값×세 파일·부재 통제·C2 기준선×세 템플릿·C3 phase 명단 기록·비기록 두 목록의 규약↔발행 페이지 집합 일치·유일 열거처·서로소·음성 통제·D 브랜치 협업 안전 커버리지·번호경고 규약↔스킬 정합·E 리뷰 검증 규율 반증 시도·판정 계측·재작업 라운드 규약↔스킬↔템플릿 정합 + 계측 줄 골격 형식 정합 + 재검증 선언 + 교차·음성 통제 · F 문서 자기서술 정합 = 역할 앵커 추출·캐노니컬 행 실재·소비자 전파 + 케이스 수 자기 정합 · G 상호참조 무결성 = 인용 추출·앵커 실재 대조 + 추출 0건·이름 유일성·줄바꿈 인용 통제) 확인됨 (참조 구현 기준)"

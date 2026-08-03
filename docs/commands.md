@@ -25,7 +25,7 @@ tide는 12종의 슬래시 커맨드를 제공합니다. 호출은 모두 `/tide
 | `/tide:kickoff` | 워크플로우 골격 생성 (+ 진행 중 프로젝트면 구조 문서화) | `docs/` 골격·`CHANGELOG.md`·`conventions.md`·`project-context.md` | ✗ |
 | `/tide:milestone` | 다음 마일스톤 문서 생성 | `docs/milestones/M{N}.md` | ✗ |
 | `/tide:impl [M번호]` | 마일스톤대로 구현 + 테스트 | 코드 + `docs/reports/M{N}-impl.md` | ✗ |
-| `/tide:review` | 비판적 리뷰 + 반증 시도(refutation) 후 릴리즈 판정 | `docs/reports/M{N}-review.md` (판정 계측 줄 포함) | ✗ |
+| `/tide:review` | 비판적 리뷰 + 반증 시도(refutation) 후 릴리즈 판정 — **차단 등급은 고치지 않고 `불가` + impl 반환** | `docs/reports/M{N}-review.md` (판정 계측 줄 포함) | ✗ |
 | `/tide:cycle [주제/M번호]` | `milestone→impl→review` 자동 체이닝 | 위 단계들의 산출물 + 릴리즈 안내 | ✗ |
 | `/tide:release vX.Y.Z [pr/release]` | 프리플라이트 → 버전 범프 → CHANGELOG → commit → tag → push. `gh` 있으면 GitHub 릴리즈/PR 게시 택1(옵트인) | 릴리즈 커밋·태그 (+선택 gh 릴리즈/PR) | ✓ |
 | `/tide:retro` | 누적 사이클 회고 (읽기 전용) | `docs/reports/retro.md` | ✗ |

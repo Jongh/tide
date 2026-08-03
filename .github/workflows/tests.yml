@@ -1,0 +1,108 @@
+name: tests
+
+# Runtime matrix for the test harnesses (M37-T07).
+#
+# Why this file exists: until M37 rework 4 there was NO test workflow here -- `.github/workflows/`
+# held only the mkdocs deploy. Every "PASS n FAIL 0" in seven review rounds was produced locally, by
+# hand, on a runtime nobody had declared. That is how the M37 rework 3 blocker survived four rounds:
+# `tests/discover/run.ps1` aborted on Windows PowerShell 5.1 -- the runtime its own first line
+# declares -- ran 34 of 85 cases, printed its success banner and exited 0, while every measurement
+# was being taken under `pwsh` 7.
+#
+# So the PowerShell runtime is an explicit matrix axis, not an implementation detail. On GitHub's
+# windows runners `powershell` IS Windows PowerShell 5.1 and `pwsh` is PowerShell 7.
+#
+# Three things this file must NOT do, all learned the hard way in the M37 rework 4 review/release:
+#   1. It must not enumerate the harnesses. A hardcoded list is a second declaration of the roster:
+#      add a seventh harness and CI stays green while never running it -- green-because-we-looked-less,
+#      the exact `vacuous-pass` class this milestone exists to kill. The list is DISCOVERED from the
+#      filesystem, and discovering zero is a failure, not a pass.
+#   2. It must not assume the working directory survives a harness. `tests/fleet-verify/run.ps1`
+#      leaves the process CWD in the temp folder (its cleanup does `Set-Location`), so a loop running
+#      the harnesses IN-PROCESS dies on the harness after it. Every harness is launched as its own
+#      child process below, which also keeps GitHub's injected `$ErrorActionPreference` out of them.
+#   3. It must not put `${{ }}` in `shell:`. The first version of this file used
+#      `shell: ${{ matrix.shell }}` and GitHub refused to compile the workflow -- no jobs were created
+#      at all, and the run reported only "workflow file issue". Local YAML validity is not GitHub
+#      workflow validity; only a real push proves this file. The matrix runtime now reaches the step
+#      through `env:` (expressions are fine there) and `shell:` stays a literal.
+#   4. It must not launch a `run.ps1` from Git Bash. `tests/multi-repo/run.ps1` fails when started
+#      from a Git Bash host but passes from a native PowerShell host (a pre-existing BOM/launch-context
+#      sensitivity its own comment documents). So the PowerShell job's host shell is `pwsh` and only
+#      the CHILD process varies across the matrix.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  powershell:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ps: [powershell, pwsh]
+    steps:
+      - uses: actions/checkout@v4
+      - name: discover and run every run.ps1 harness
+        shell: pwsh
+        env:
+          PS_EXE: ${{ matrix.ps }}
+        run: |
+          $root = $PWD.Path
+          $harnesses = @(Get-ChildItem (Join-Path $root 'tests') -Directory |
+              Where-Object { Test-Path (Join-Path $_.FullName 'run.ps1') } |
+              Sort-Object Name)
+          if ($harnesses.Count -eq 0) {
+              Write-Host "no run.ps1 harness discovered under tests/ -- refusing to pass"
+              exit 1
+          }
+          Write-Host "runtime: $env:PS_EXE -- discovered $($harnesses.Count): $(($harnesses | ForEach-Object { $_.Name }) -join ', ')"
+          $failed = @()
+          foreach ($h in $harnesses) {
+              Write-Host "::group::$($h.Name)"
+              & $env:PS_EXE -NoProfile -File (Join-Path $h.FullName 'run.ps1')
+              $code = $LASTEXITCODE
+              Write-Host "::endgroup::"
+              if ($code -ne 0) { $failed += "$($h.Name) (exit $code)" }
+          }
+          if ($failed.Count -gt 0) {
+              Write-Host "FAILED: $($failed -join ', ')"
+              exit 1
+          }
+          Write-Host "all $($harnesses.Count) harnesses passed"
+
+  posix:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: discover and run every run.sh harness
+        shell: bash
+        run: |
+          root="$PWD"
+          found=0
+          failed=""
+          for d in "$root"/tests/*/; do
+              [ -f "$d/run.sh" ] || continue
+              t=$(basename "$d")
+              found=$((found + 1))
+              echo "::group::$t"
+              if ! ( cd "$root" && sh "$d/run.sh" ); then failed="$failed $t"; fi
+              echo "::endgroup::"
+          done
+          if [ "$found" -eq 0 ]; then
+              echo "no run.sh harness discovered under tests/ -- refusing to pass"
+              exit 1
+          fi
+          echo "discovered $found harnesses"
+          if [ -n "$failed" ]; then echo "FAILED:$failed"; exit 1; fi
+          echo "all $found harnesses passed"

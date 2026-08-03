@@ -57,6 +57,21 @@ if (Test-Path $sbx) { Remove-Item -Recurse -Force $sbx }
 New-Item -ItemType Directory -Force -Path $sbx | Out-Null
 
 $script:pass = 0; $script:fail = 0
+
+# Completion guard (M37 rework 4) -- a runner that dies partway must never look green.
+# The M37 review blocker: one PowerShell-version-only error aborted the run, most cases never ran,
+# `$script:fail` was still 0, and the script printed its success banner and exited 0. Two mechanisms
+# close that: the trap turns any terminating error into a loud exit 1, and the completed flag
+# (set ONLY by the result line) catches every other way of skipping the end of the run.
+# Keep the TRAP identical in all six run.ps1. The completed flag is in FIVE of the six -- see the
+# comment in tests/site-includes/run.ps1 for why that runner deliberately carries the trap alone.
+$script:completed = $false
+trap {
+    Write-Host "`n# ABORTED at line $($_.InvocationInfo.ScriptLineNumber): $($_.Exception.Message)"
+    Write-Host "# INCOMPLETE RUN -- the harness did not reach its result line; treat as FAIL"
+    exit 1
+}
+
 function Chk($desc, $got, $want) {
     if ($got -eq $want) { $script:pass++; Write-Host ("PASS  {0,-56} ({1})" -f $desc, $got) }
     else { $script:fail++; Write-Host ("FAIL  {0,-56} (got {1}, want {2})" -f $desc, $got, $want) }
@@ -231,6 +246,194 @@ try {
     Chk "C2: skills/impl/template.md declares '$BASELINE'"      (HasToken $IMPL_TPL $BASELINE) 'yes'
     Chk "C2: skills/debug/template.md declares '$BASELINE'"     (HasToken $DBG_TPL $BASELINE)  'yes'
 
+    # (C3) phase-writing command ROSTER (M37) -- conventions declares its own "state file" section the
+    # SOLE place enumerating this roster, with the published page site/docs/concepts.md as the ONLY
+    # exception. This part enforces that declaration. Background: M36 got this fact wrong THREE times on
+    # the same axis because the roster was replicated in five files and each round fixed only some.
+    # The conventions declaration covers BOTH lists (the six that write phase and the six that do not),
+    # so the enforcement covers both as well -- declaration width == enforcement width (M37 review
+    # blocker #1).
+    #   - WRITER roster line = one line holding all six command names AND the word 'phase'
+    #     (command-catalog rows are not phase context, so they do not match).
+    #   - NON-WRITER roster = prose spread over SEVERAL lines in both files, so it is extracted as the
+    #     SHORTEST run of consecutive lines (window, max 4) holding all six names.
+    # The canonical NAMES ARE written in this runner as needles (writer names below, non-writer names in
+    # $NONWRITER_NEEDLES). The drift surface did not disappear -- it MOVED here (renaming a command means
+    # fixing both runner copies too). What the runner does not do is DECLARE the roster: it only probes,
+    # and if a name drifts the extraction drops to 0 and the count cases fail loudly (no vacuous pass).
+    # Checks: counts, set equality across the two files, the set of enumerating files, writer/non-writer
+    # disjointness, and negative controls.
+    $CONCEPTS = Join-Path $ROOT 'site\docs\concepts.md'
+    $ROSTER_NEEDLES = @('phase','milestone','impl','review','release','debug','cycle')
+    $NONWRITER_NEEDLES = @('`status`','`fleet`','`retro`','`fleet-verify`','`kickoff`','`fleet-cycle`')
+
+    function RosterLine($file) {
+        $raw = ReadUtf8 $file
+        if ($null -eq $raw) { return '' }
+        foreach ($ln in ($raw -split "`r?`n")) {
+            $ok = $true
+            foreach ($n in $ROSTER_NEEDLES) { if (-not $ln.Contains($n)) { $ok = $false; break } }
+            if ($ok) { return $ln }
+        }
+        return ''
+    }
+    function RosterSet($file) {
+        $ln = RosterLine $file
+        if ($ln -eq '') { return '' }
+        $names = @()
+        foreach ($m in [regex]::Matches($ln, '`([a-z][a-z-]*)`')) { $names += $m.Groups[1].Value }
+        if ($names.Count -eq 0) { return '' }
+        return (($names | Sort-Object -Unique -CaseSensitive) -join ' ')
+    }
+    function RosterCount($file) {
+        $s = RosterSet $file
+        if ($s -eq '') { return 0 }
+        return ($s -split ' ').Count
+    }
+    function RosterHas($file, $name) {
+        if ((' ' + (RosterSet $file) + ' ') -like ('* ' + $name + ' *')) { return 'yes' } else { return 'no' }
+    }
+    # C-3's own scan set (living docs + skills + hooks) -- BOTH rosters sweep the SAME range. The name is
+    # deliberately NOT 'LivingDocs': Part G defines its own LivingDocs with a DIFFERENT range
+    # (tests/*/README.md in, hooks out), and two same-named functions would make C-3's range depend on
+    # which definition ran last (M37 review recommendation #2). The range means RECURSIVE PLUS
+    # DOT-EXCLUDED PLUS CASE-SENSITIVE '.md' -- the axes measured to agree in both shells are: dot names,
+    # dot directories (nested included), a dot component ABOVE the repo root, the Hidden attribute, and
+    # extension case. Each is listed in tests/discover/README.md's range table; nothing here claims axes
+    # beyond those. Per branch:
+    #   - docs and site\docs (flat): -Force plus a NAME check mirrors the POSIX glob in run.sh -- a glob
+    #     does not match '.foo.md' but Get-ChildItem does, and a glob DOES match Hidden-attribute files
+    #     but Get-ChildItem without -Force does not. The ordinal EndsWith('.md') is there because
+    #     -Filter is CASE-INSENSITIVE on Windows while the glob and find are not: without it 'X.MD'
+    #     would be scanned here and skipped by run.sh.
+    #   - skills (recursive): mirrors run.sh's `find ... -name '.*' -prune`. The check runs on the path
+    #     RELATIVE TO $ROOT, one segment at a time. Testing $_.FullName instead was the M37 review
+    #     blocker: a dot directory ANYWHERE ABOVE the repo (~/.config, .worktrees, CI caches) dropped
+    #     the whole skills subtree from the scan and this runner went silently green while run.sh failed.
+    # docs/milestones and docs/reports are point-in-time records and are not in the range.
+    function RosterScanFiles {
+        $cands = @((Join-Path $ROOT 'README.md'))
+        foreach ($d in @('docs', 'site\docs')) {
+            $dir = Join-Path $ROOT $d
+            if (Test-Path -LiteralPath $dir) {
+                $cands += (Get-ChildItem -LiteralPath $dir -Filter '*.md' -File -Force -ErrorAction SilentlyContinue |
+                            Where-Object { -not $_.Name.StartsWith('.') -and $_.Name.EndsWith('.md', [System.StringComparison]::Ordinal) } |
+                            ForEach-Object { $_.FullName })
+            }
+        }
+        $sk = Join-Path $ROOT 'skills'
+        if (Test-Path -LiteralPath $sk) {
+            $cands += (Get-ChildItem -LiteralPath $sk -Recurse -Filter '*.md' -File -Force -ErrorAction SilentlyContinue |
+                        Where-Object {
+                            $rel = $_.FullName.Substring($ROOT.Length + 1)
+                            $_.Name.EndsWith('.md', [System.StringComparison]::Ordinal) -and
+                                @($rel -split '[\\/]' | Where-Object { $_.StartsWith('.') }).Count -eq 0
+                        } | ForEach-Object { $_.FullName })
+        }
+        # Nested two-arg Join-Path, NOT the three-arg form: -AdditionalChildPath is PowerShell 6+, and
+        # this file's declared runtime is Windows PowerShell 5.1, where a third argument is a binding
+        # error. That was the M37 rework 3 blocker -- it aborted the run and still exited 0.
+        $hooks = Join-Path $ROOT 'hooks'
+        $cands += (Join-Path $hooks 'tide-guard.sh')
+        $cands += (Join-Path $hooks 'tide-guard.ps1')
+        $out = @()
+        foreach ($f in $cands) { if (Test-Path -LiteralPath $f) { $out += $f } }
+        return $out
+    }
+    function RelPath($f) { return (($f.Substring($ROOT.Length + 1)).Replace([string][char]92, '/')) }
+    function RosterFiles {
+        $hits = @()
+        foreach ($f in (RosterScanFiles)) {
+            if ((RosterLine $f) -ne '') { $hits += (RelPath $f) }
+        }
+        if ($hits.Count -eq 0) { return '' }
+        return (($hits | Sort-Object -Unique -CaseSensitive) -join ' ')
+    }
+
+    # Non-writer roster -- shortest window (max 4 consecutive lines) holding all six names. Measured
+    # spans: conventions 2 lines, published page 3. Beyond the bound the window is NOT found and the
+    # count case fails loudly -- the bound is the enforced boundary, identical in both runners.
+    # The bound variable is NOT named $W: PowerShell variable names are CASE-INSENSITIVE, so $W and the
+    # loop's $w would be ONE variable, the condition would always hold and the window would grow to the
+    # whole file (M37 review blocker #1 -- run.sh's awk is case-sensitive, so the two shells split).
+    # Unrelated backtick tokens on the window's lines (e.g. `.gitignore`) are dropped by the extraction
+    # regex below, not by the window being minimal.
+    function NonWriterWindow($file) {
+        $raw = ReadUtf8 $file
+        if ($null -eq $raw) { return '' }
+        foreach ($n in $NONWRITER_NEEDLES) { if (-not $raw.Contains($n)) { return '' } }
+        $L = @($raw -split "`r?`n")
+        $WMAX = 4
+        for ($w = 1; $w -le $WMAX; $w++) {
+            for ($i = 0; ($i + $w) -le $L.Count; $i++) {
+                $s = ($L[$i..($i + $w - 1)] -join "`n")
+                $ok = $true
+                foreach ($n in $NONWRITER_NEEDLES) { if (-not $s.Contains($n)) { $ok = $false; break } }
+                if ($ok) { return $s }
+            }
+        }
+        return ''
+    }
+    function NonWriterSet($file) {
+        $win = NonWriterWindow $file
+        if ($win -eq '') { return '' }
+        $names = @()
+        foreach ($m in [regex]::Matches($win, '`([a-z][a-z-]*)`')) { $names += $m.Groups[1].Value }
+        if ($names.Count -eq 0) { return '' }
+        return (($names | Sort-Object -Unique -CaseSensitive) -join ' ')
+    }
+    function NonWriterCount($file) {
+        $s = NonWriterSet $file
+        if ($s -eq '') { return 0 }
+        return ($s -split ' ').Count
+    }
+    function NonWriterHas($file, $name) {
+        if ((' ' + (NonWriterSet $file) + ' ') -like ('* ' + $name + ' *')) { return 'yes' } else { return 'no' }
+    }
+    function NonWriterFiles {
+        $hits = @()
+        foreach ($f in (RosterScanFiles)) {
+            if ((NonWriterWindow $f) -ne '') { $hits += (RelPath $f) }
+        }
+        if ($hits.Count -eq 0) { return '' }
+        return (($hits | Sort-Object -Unique -CaseSensitive) -join ' ')
+    }
+    # Set equality -- BOTH empty must be 'no'. '' -eq '' is true, so the day extraction breaks entirely
+    # this assertion would pass vacuously (M37 review minor #4).
+    function SetsEqual($a, $b) {
+        if ($a -ne '' -and $a -eq $b) { return 'yes' } else { return 'no' }
+    }
+    # Writer and non-writer rosters must be DISJOINT -- if either extractor grabs the wrong side, the
+    # count and set-equality cases still pass but this one catches it.
+    function RostersDisjoint($file) {
+        $a = RosterSet $file
+        $b = NonWriterSet $file
+        if ($a -eq '' -or $b -eq '') { return 'no' }
+        foreach ($n in ($b -split ' ')) {
+            if ((' ' + $a + ' ') -like ('* ' + $n + ' *')) { return 'no' }
+        }
+        return 'yes'
+    }
+
+    Chk "C3: conventions roster holds 6 names"    (RosterCount $CONV)     6
+    Chk "C3: published page roster holds 6 names" (RosterCount $CONCEPTS) 6
+    Chk "C3: the two rosters are identical" (SetsEqual (RosterSet $CONV) (RosterSet $CONCEPTS)) 'yes'
+    Chk "C3: only conventions + published page enumerate" (RosterFiles) 'docs/conventions.md site/docs/concepts.md'
+
+    # The non-writer half is bitten at the same width -- the conventions declaration binds both lists.
+    Chk "C3: conventions non-writer roster holds 6 names"    (NonWriterCount $CONV)     6
+    Chk "C3: published page non-writer roster holds 6 names" (NonWriterCount $CONCEPTS) 6
+    Chk "C3: the two non-writer rosters are identical" (SetsEqual (NonWriterSet $CONV) (NonWriterSet $CONCEPTS)) 'yes'
+    Chk "C3: only conventions + published page enumerate non-writers" (NonWriterFiles) 'docs/conventions.md site/docs/concepts.md'
+    Chk "C3: conventions writer/non-writer rosters are disjoint"    (RostersDisjoint $CONV)     'yes'
+    Chk "C3: published page writer/non-writer rosters are disjoint" (RostersDisjoint $CONCEPTS) 'yes'
+
+    # Negative control -- a non-existent name is in neither roster (same intent as C1's bogus status).
+    Chk "C3: roster control -- conventions has no 'phantom-cmd'"    (RosterHas $CONV 'phantom-cmd')     'no'
+    Chk "C3: roster control -- published page has no 'phantom-cmd'" (RosterHas $CONCEPTS 'phantom-cmd') 'no'
+    Chk "C3: non-writer control -- conventions has no 'phantom-cmd'"    (NonWriterHas $CONV 'phantom-cmd')     'no'
+    Chk "C3: non-writer control -- published page has no 'phantom-cmd'" (NonWriterHas $CONCEPTS 'phantom-cmd') 'no'
+
     # === Part D -- cross-branch collaboration safety (M31) declaration consistency ==========
     # (M31) Same class as Part B/C -- bind the conventions single source and the skill that wires it.
     # The two checks (release coverage / milestone number pre-warning) are prompt discipline, so runtime
@@ -265,6 +468,8 @@ try {
     # (E1) refutation pass: 'refutation' in BOTH conventions and review SKILL;
     # (E2) verdict metrics: 'in-review' in conventions + review SKILL + review template;
     # (E3) rework round: 'rework' in conventions + review template + impl template.
+    # (E6) precedent class (M36): 'vacuous-pass' in BOTH conventions and review SKILL;
+    # (E7) precedent waiver (M36): 'precedent-waiver' in conventions + review SKILL + review template.
 
     $REV_SKILL  = Join-Path $ROOT 'skills\review\SKILL.md'
     $REV_TPL    = Join-Path $ROOT 'skills\review\template.md'
@@ -272,6 +477,8 @@ try {
     $MEAS_TOK     = 'in-review'
     $REWORK_TOK   = 'rework'
     $REVERIFY_TOK = 're-verify'
+    $VACUOUS_TOK  = 'vacuous-pass'
+    $WAIVER_TOK   = 'precedent-waiver'
 
     function InBoth($token, $f1, $f2) {
         foreach ($f in @($f1, $f2)) { if ((HasToken $f $token) -ne 'yes') { return 'no' } }
@@ -308,6 +515,20 @@ try {
     # also lives in the metrics line (dual use), so DELETING the whole re-verify clause still passes E2
     # (proven on a scratch copy by the M32 review's refutation pass). Bind the dedicated ASCII gloss instead.
     Chk "E5: re-verify ($REVERIFY_TOK) in all three files" (InAllThree $REVERIFY_TOK $CONV $REV_SKILL $REV_TPL) 'yes'
+
+    # (E6) blocking-grade precedent (M36) -- the precedent class name is declared in BOTH the convention
+    # (the criterion) and the review skill (the procedure). Same two-way layer as E1's refutation: the
+    # report template gets no slot for it, so no duplicate declaration is added needlessly.
+    Chk "E6: precedent class ($VACUOUS_TOK) conventions <-> review SKILL" (InBoth $VACUOUS_TOK $CONV $REV_SKILL) 'yes'
+
+    # (E7) precedent waiver (M36) -- the waiver only actually gets recorded if all three carry it:
+    # conventions (the duty), review SKILL (the procedure), review template (the record slot). Deleting it
+    # from the template ALONE must bite here (same three-way bind as E2/E5).
+    Chk "E7: precedent waiver ($WAIVER_TOK) in all three files" (InAllThree $WAIVER_TOK $CONV $REV_SKILL $REV_TPL) 'yes'
+
+    # negative control: a bogus precedent token must NOT appear in conventions (same shape as the bogus
+    # refutation token control -- proves this guard discriminates rather than passing vacuously).
+    Chk "E: control -- conventions has no bogus precedent token" (HasToken $CONV "$VACUOUS_TOK-bogus") 'no'
 
     # cross control: refutation is a review asset -> must be ABSENT from the impl template (discriminates).
     Chk "E: control -- impl template has no refutation token" (HasToken $IMPL_TPL $REFUT_TOK) 'no'
@@ -562,12 +783,17 @@ try {
     # (F1) LAST case -- own README declaration ('cases: N') vs actual case count (running total + this one).
     Chk "F1: README cases declaration == actual case count" (DeclaredCases) ([string]($script:pass + $script:fail + 1))
 
-    Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) (actual command skills N=$N)"
+    Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) (actual command skills N=$N) [runtime: PowerShell $($PSVersionTable.PSVersion) $($PSVersionTable.PSEdition)]"
+    $script:completed = $true
 }
 finally {
     Remove-Item -Recurse -Force $sbx -ErrorAction SilentlyContinue
 }
 
+if (-not $script:completed) {
+    Write-Host "# INCOMPLETE RUN -- the harness did not reach its result line; treat as FAIL"
+    exit 1
+}
 if ($script:fail -ne 0) { exit 1 }
-Write-Host "# discover detection threshold (>=2->hint / <2->none / single-repo->none / hidden-not-counted) + single-source freeze (B1 count / B2 site shell / B3 catalog completeness, canonical=docs/commands.md) + declaration consistency (C1 four statuses x three files + absence control / C2 baseline x three templates / D cross-branch coverage+number-warn conventions<->skill / E review verification discipline refutation+metrics+rework conventions<->skill<->template plus metrics-line skeleton format plus re-verify declaration plus cross and negative controls / F document self-description = role-anchor extraction, canonical-row presence, consumer propagation plus case-count self-consistency / G cross-reference integrity = citation extraction vs real anchors plus empty-extraction, name-uniqueness and wrapped-citation controls) confirmed"
+Write-Host "# discover detection threshold (>=2->hint / <2->none / single-repo->none / hidden-not-counted) + single-source freeze (B1 count / B2 site shell / B3 catalog completeness, canonical=docs/commands.md) + declaration consistency (C1 four statuses x three files + absence control / C2 baseline x three templates / C3 phase roster both lists (writer + non-writer) conventions<->published page set equality, sole enumerator, disjointness, negative control / D cross-branch coverage+number-warn conventions<->skill / E review verification discipline refutation+metrics+rework conventions<->skill<->template plus metrics-line skeleton format plus re-verify declaration plus cross and negative controls / F document self-description = role-anchor extraction, canonical-row presence, consumer propagation plus case-count self-consistency / G cross-reference integrity = citation extraction vs real anchors plus empty-extraction, name-uniqueness and wrapped-citation controls) confirmed"
 exit 0

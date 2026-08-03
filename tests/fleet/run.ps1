@@ -29,6 +29,20 @@ if (Test-Path $sbx) { Remove-Item -Recurse -Force $sbx }
 New-Item -ItemType Directory -Force -Path $sbx | Out-Null
 
 $script:pass = 0; $script:fail = 0
+
+# Completion guard (M37 rework 4) -- a runner that dies partway must never look green.
+# The M37 review blocker: one PowerShell-version-only error aborted the run, most cases never ran,
+# `$script:fail` was still 0, and the script printed its success banner and exited 0. Two mechanisms
+# close that: the trap turns any terminating error into a loud exit 1, and the completed flag
+# (set ONLY by the result line) catches every other way of skipping the end of the run.
+# Keep the TRAP identical in all six run.ps1. The completed flag is in FIVE of the six -- see the
+# comment in tests/site-includes/run.ps1 for why that runner deliberately carries the trap alone.
+$script:completed = $false
+trap {
+    Write-Host "`n# ABORTED at line $($_.InvocationInfo.ScriptLineNumber): $($_.Exception.Message)"
+    Write-Host "# INCOMPLETE RUN -- the harness did not reach its result line; treat as FAIL"
+    exit 1
+}
 function Chk($desc, $got, $want) {
     if ($got -eq $want) { $script:pass++; Write-Host ("PASS  {0,-52} ({1})" -f $desc, $got) }
     else { $script:fail++; Write-Host ("FAIL  {0,-52} (got {1}, want {2})" -f $desc, $got, $want) }
@@ -314,12 +328,17 @@ try {
     MkRepo (Join-Path $BM2 'svc'); W (Join-Path $BM2 'svc\.tide\deps') 'auth'   # BOM + dep name (no comment)
     Chk "BOM tolerance: BOM+dep-name first line matches" ((ReadDeps (Join-Path $BM2 'svc')) -join ',') 'auth'
 
-    Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail)"
+    Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) [runtime: PowerShell $($PSVersionTable.PSVersion) $($PSVersionTable.PSEdition)]"
+    $script:completed = $true
 }
 finally {
     Remove-Item -Recurse -Force $sbx -ErrorAction SilentlyContinue
 }
 
+if (-not $script:completed) {
+    Write-Host "# INCOMPLETE RUN -- the harness did not reach its result line; treat as FAIL"
+    exit 1
+}
 if ($script:fail -ne 0) { exit 1 }
 Write-Host "# fleet discovery / 5-position classify / 1:1 summary / hidden-skip / degrade / multi-digit-milestone / topo-sort / cycle-fallback / full-operator contract / BOM-tolerance confirmed"
 exit 0
