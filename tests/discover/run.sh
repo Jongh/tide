@@ -100,6 +100,11 @@ chk "A: 발견 = svc-a,svc-b (숨김 제외)"            "$(discover "$PH" | tr 
 # (B3) 카탈로그 완전성(각 커맨드 이름 등장)을 검증한다 — M20 리뷰 #6 회귀 고정의 확장.
 
 # 실제 커맨드 스킬 개수 = skills/*/SKILL.md 파일 수.
+# (M38-T04) 의미는 **"점으로 시작하는 디렉터리는 커맨드 스킬이 아니다"** 이고, 이 글롭이 그 의미를
+# 공짜로 만족한다(POSIX 글롭은 선행 점 성분을 매치하지 않는다). ps1의 `Get-ChildItem -Directory`는
+# 점 디렉터리를 **포함**하므로 그쪽에 같은 의미의 점 필터를 명시했다 — 없던 동안 `skills/.spare/SKILL.md`
+# 하나로 sh 85/0 exit 0 vs ps1 79/6 exit 1로 갈렸다(같은 러너의 Part G는 점 필터를 갖고 있어
+# **한 러너 안에서 파트끼리 규율이 달랐다**). 범위 표의 Part B 가지가 이 의미의 선언처다.
 N=$(ls "$ROOT"/skills/*/SKILL.md 2>/dev/null | grep -c .)
 chk "B: 실제 커맨드 스킬 개수 측정(>0)" "$([ "$N" -gt 0 ] && echo ok || echo no)" "ok"
 
@@ -621,8 +626,138 @@ chk "G2: 통제 — 가짜 앵커 이름(bogus-section) 부재" "$(has_anchor_na
 chk "G2: 앵커 이름 유일성(정규화 후 중복 0)"       "$(sort "$SBX/anchors.txt" | uniq -d | grep -c .)" "0"
 chk "G3: 인용 줄 따옴표 종결(줄바꿈 인용 0)"       "$(odd_quote_lines)" "0"
 
+# === Part H — 실행 환경 축 선언 정합 (M38-T06) ===========================
+# 규약이 실행 환경의 각 축에 **이름을 붙여 선언**하고(단일 원본: `docs/conventions.md`의
+# "실행 환경 축" 절) 축마다 집행처를 적는다. 이 파트가 무는 것은 **정확히 다섯**이다:
+# ⑴ 선언된 각 축 이름이 **규약 표의 행**에 실재하는지 ⑵ 축 이름 **집합**이 규약과
+# `tests/discover/README.md`에서 **일치**하는지(Part C의 집합 일치 기법과 동형)
+# ⑶ `env-axis-ci-jobs:` 매핑이 가리킨 CI 잡이 `.github/workflows/tests.yml`에 **잡 키로 실재**하는지
+# ⑷ 그 잡 이름이 **해당 축의 표 행**에 적혀 있는지
+# ⑸ 반대로, **선언된** 축의 행이 워크플로에 **실재하는** 잡 이름을 적으면 그 축이 **매핑에 등재**돼
+#    있는지(커버리지 — 매핑은 옵트인이 아니다).
+# 무는 범위를 이보다 넓게 말하지 않는다 — 묻지 **않는** 것 넷: ⓐ CI 잡을 **지목하지 않는** 집행처
+# (러너 자기 탐침 · "실제 푸시 뿐" · "미집행")가 오늘도 사실인지 ⓑ 잡을 지목한 칸의 **나머지 서술**
+# ("2 OS" 등)이 실제 구성과 맞는지 ⓒ **실재하지 않는 이름을 잡인 것처럼 적은 산문**(⑸는 실재하는 잡
+# 이름을 축 행에서 되찾는 방향으로만 돈다 — 기계는 임의 백틱 토큰이 잡 지목인지 구별할 수 없다)
+# ⓓ **`env-axes:`에 선언되지 않은 표 행**(위 다섯이 전부 선언된 축을 기점으로 돌기 때문 — 선언에
+# 없는 행은 축이 아니라 표 안의 산문이다). 넷 다 **사람의 리뷰가 본다**(규약의 같은 절 "기계가 묻지
+# 않는 것" 고지가 단일 원본이고 M39 후보인 `job:<이름>` 해소 가능 표기도 거기 적혀 있다).
+# M38 리뷰가 이 자리를 **두 번** 실측으로 반증했다 — ⑶⑷ 이전에는 `posix` 잡을 지우고 표를 그대로
+# 둬도 **90/0 초록**, ⑸ 이전에는 **선언된** 미등재 축이 실재 잡을 지목해도 초록이었다.
+# 축 이름·잡 이름은 전부 **ASCII 병기어**라 ps1의 ASCII 전용 규율과 정합한다(Part F의 역할 앵커와
+# 동형 — 데이터 기반이라 스크립트에 한글 리터럴을 두지 않는다).
+env_axes() { # <file> → 공백 구분·정렬된 축 ASCII 이름 (선언 줄 `env-axes: …` 한 줄에서 추출)
+    grep -F 'env-axes:' "$1" 2>/dev/null | head -1 |
+        sed 's/.*env-axes://; s/-->.*//' |
+        tr ' \011' '\n\n' | grep -E '^[a-z][a-z-]*$' |
+        LC_ALL=C sort | tr '\n' ' ' | sed 's/ *$//'
+}
+CONV_AXES=$(env_axes "$CONV")
+READ_AXES=$(env_axes "$DISC_README")
+NAXES=$(printf '%s\n' "$CONV_AXES" | tr ' ' '\n' | grep -c .)
+
+# (H2) 선언된 축마다 규약 **표의 행**(`|`로 시작하는 줄)에 그 이름이 실재 — 선언만 늘리고 표를
+# 안 고치는 것(집행 없는 축을 집행되는 것처럼 적는 부류)을 막는다.
+axis_row_miss() {
+    m=0
+    for a in $CONV_AXES; do
+        nd=$(printf '`%s`' "$a")
+        if grep -F -- "$nd" "$CONV" | grep -qE '^\|'; then : ; else m=$((m + 1)); fi
+    done
+    echo "$m"
+}
+has_axis() { # <집합> <이름> → yes|no
+    case " $1 " in *" $2 "*) echo yes ;; *) echo no ;; esac
+}
+
+# (H6~H9) 표의 **집행 칸**이 CI 잡을 지목하는 축은 그 잡이 실제로 존재하는지까지 문다.
+# 매핑의 단일 원본은 규약의 `env-axis-ci-jobs: <축>=<잡>` 선언 줄이고, 잡 이름 집합은 워크플로의
+# `jobs:` 블록에서 **발견**한다(목록 하드코딩 금지 — 발견형 유지). H8은 그 잡 이름이 해당 축의
+# 표 행에도 적혀 있는지를 봐서 매핑만 고치고 표를 두는 반대 방향의 드리프트도 막는다.
+WF="$ROOT/.github/workflows/tests.yml"
+env_axis_jobs() { # <file> → 정렬된 `축=잡` 쌍 (선언 줄 `env-axis-ci-jobs: …` 한 줄에서 추출)
+    grep -F 'env-axis-ci-jobs:' "$1" 2>/dev/null | head -1 |
+        sed 's/.*env-axis-ci-jobs://; s/-->.*//' |
+        tr ' \011' '\n\n' | grep -E '^[a-z][a-z-]*=[a-z][a-z0-9-]*$' |
+        LC_ALL=C sort | tr '\n' ' ' | sed 's/ *$//'
+}
+ci_job_names() { # <workflow> → 정렬된 잡 키 (`jobs:` 블록의 2칸 들여쓰기 키만 — `on:` 아래 키 제외)
+    awk '/^jobs:/{f=1;next} f&&/^[A-Za-z]/{f=0} f&&/^  [a-z][a-z0-9-]*:[ \011]*$/{gsub(/[ \011:]/,"");print}' \
+        "$1" 2>/dev/null | LC_ALL=C sort | tr '\n' ' ' | sed 's/ *$//'
+}
+AXIS_JOBS=$(env_axis_jobs "$CONV")
+CI_JOBS=$(ci_job_names "$WF")
+NAXJOBS=$(printf '%s\n' "$AXIS_JOBS" | tr ' ' '\n' | grep -c .)
+
+axis_job_miss() { # 매핑이 가리킨 잡이 워크플로에 실재하지 않는 건수
+    m=0
+    for pair in $AXIS_JOBS; do
+        j=${pair#*=}
+        case " $CI_JOBS " in *" $j "*) : ;; *) m=$((m + 1)) ;; esac
+    done
+    echo "$m"
+}
+axis_job_row_miss() { # 그 잡 이름이 해당 축의 규약 표 행에 적혀 있지 않은 건수
+    m=0
+    for pair in $AXIS_JOBS; do
+        a=${pair%%=*}; j=${pair#*=}
+        na=$(printf '`%s`' "$a"); nj=$(printf '`%s`' "$j")
+        if grep -F -- "$na" "$CONV" | grep -E '^\|' | grep -qF -- "$nj"; then : ; else m=$((m + 1)); fi
+    done
+    echo "$m"
+}
+has_job() { # <집합> <이름> → yes|no
+    case " $1 " in *" $2 "*) echo yes ;; *) echo no ;; esac
+}
+
+chk "H1: 축 이름 추출 positive-control(>0)"        "$([ "$NAXES" -gt 0 ] && echo ok || echo no)" "ok"
+chk "H2: 선언된 축마다 규약 표 행 실재"            "$(axis_row_miss)" "0"
+chk "H3: 축 이름 집합 일치(규약 ↔ discover README)" "$([ -n "$CONV_AXES" ] && [ "$CONV_AXES" = "$READ_AXES" ] && echo yes || echo no)" "yes"
+chk "H4: 통제 — 가짜 축 이름(bogus-axis) 규약 부재" "$(has_axis "$CONV_AXES" bogus-axis)" "no"
+chk "H5: 통제 — 가짜 축 이름(bogus-axis) README 부재" "$(has_axis "$READ_AXES" bogus-axis)" "no"
+# (H10·H11) **커버리지** — 매핑은 옵트인이 아니다. 워크플로에서 발견한 잡 이름을 어떤 축 행이
+# 적고 있으면 그 축은 매핑에 `축=잡`으로 등재돼 있어야 한다. 없으면 매핑에 올리지 않는 것만으로
+# H7·H8을 피해 갈 수 있다 — M38 리뷰가 그 옆문을 실측으로 열어 보였다(미등재 축의 집행 칸에 없는
+# 잡 이름을 적어도 94/0 초록). 발견형이라 잡 목록도 축 목록도 하드코딩하지 않는다.
+axis_job_cover() { # → "<대조 성사 수> <미등재 수>"
+    n=0; m=0
+    for j in $CI_JOBS; do
+        nj=$(printf '`%s`' "$j")
+        grep -F -- "$nj" "$CONV" 2>/dev/null | grep -E '^\|' > "$SBX/jobrows.txt"
+        while IFS= read -r row; do
+            for a in $CONV_AXES; do
+                na=$(printf '`%s`' "$a")
+                case "$row" in
+                    *"$na"*)
+                        n=$((n + 1))
+                        case " $AXIS_JOBS " in
+                            *" $a=$j "*) : ;;
+                            *) m=$((m + 1)) ;;
+                        esac
+                        ;;
+                esac
+            done
+        done < "$SBX/jobrows.txt"
+    done
+    echo "$n $m"
+}
+COVER=$(axis_job_cover)
+COVER_HITS=${COVER% *}
+COVER_MISS=${COVER#* }
+
+chk "H6: 축→CI 잡 매핑 추출 positive-control(>0)"  "$([ "$NAXJOBS" -gt 0 ] && echo ok || echo no)" "ok"
+chk "H7: 매핑된 CI 잡이 워크플로에 실재"           "$(axis_job_miss)" "0"
+chk "H8: 매핑된 잡 이름이 해당 축 표 행에 실재"    "$(axis_job_row_miss)" "0"
+chk "H9: 통제 — 가짜 잡 이름(bogus-job) 워크플로 부재" "$(has_job "$CI_JOBS" bogus-job)" "no"
+chk "H10: 커버리지 대조 positive-control(>0)"      "$([ "$COVER_HITS" -gt 0 ] && echo ok || echo no)" "ok"
+chk "H11: 축 행이 적은 CI 잡이 매핑에 등재"        "$COVER_MISS" "0"
+
 declared_cases() {
-    sed -n 's/.*cases:[^0-9]*\([0-9][0-9]*\).*/\1/p' "$DISC_README" 2>/dev/null | head -1
+    # **첫 매치 고정** — sed의 선행 `.*`는 탐욕이라 한 줄에 `cases:`가 둘이면 **마지막**을 집는데
+    # ps1의 `[regex]::Match`는 **첫 번째**를 집는다(M38 리뷰 사소 4의 실측: 같은 입력에 sed 7 ↔
+    # .NET 42). `grep -o`는 매치를 파일·줄 순서대로 내므로 `head -1`이 곧 첫 매치다 — 양 셸 동형.
+    grep -o 'cases:[^0-9]*[0-9][0-9]*' "$DISC_README" 2>/dev/null | head -1 |
+        grep -o '[0-9][0-9]*' | head -1
 }
 
 # (F1b) 파트별 내역 합 == 총계 선언 — F1은 **총계**만 본다. 총계를 고치면서 내역
@@ -647,4 +782,4 @@ chk "F1: README cases 선언 == 실제 케이스 수" "$(declared_cases)" "$((pa
 echo
 echo "# 결과: PASS=$pass FAIL=$fail (실제 커맨드 스킬 N=$N)"
 [ "$fail" -eq 0 ] || exit 1
-echo "# discover 감지 임계값(≥2→hint·<2→none·단일 레포→none·숨김 미카운트) + 단일 원본 동결(B1 카운트 정합·B2 사이트 셸·B3 카탈로그 완전성, 캐노니컬=docs/commands.md, 실제 ${N}종) + 선언 정합(C1 상태값 네 값×세 파일·부재 통제·C2 기준선×세 템플릿·C3 phase 명단 기록·비기록 두 목록의 규약↔발행 페이지 집합 일치·유일 열거처·서로소·음성 통제·D 브랜치 협업 안전 커버리지·번호경고 규약↔스킬 정합·E 리뷰 검증 규율 반증 시도·판정 계측·재작업 라운드 규약↔스킬↔템플릿 정합 + 계측 줄 골격 형식 정합 + 재검증 선언 + 교차·음성 통제 · F 문서 자기서술 정합 = 역할 앵커 추출·캐노니컬 행 실재·소비자 전파 + 케이스 수 자기 정합 · G 상호참조 무결성 = 인용 추출·앵커 실재 대조 + 추출 0건·이름 유일성·줄바꿈 인용 통제) 확인됨 (참조 구현 기준)"
+echo "# discover 감지 임계값(≥2→hint·<2→none·단일 레포→none·숨김 미카운트) + 단일 원본 동결(B1 카운트 정합·B2 사이트 셸·B3 카탈로그 완전성, 캐노니컬=docs/commands.md, 실제 ${N}종) + 선언 정합(C1 상태값 네 값×세 파일·부재 통제·C2 기준선×세 템플릿·C3 phase 명단 기록·비기록 두 목록의 규약↔발행 페이지 집합 일치·유일 열거처·서로소·음성 통제·D 브랜치 협업 안전 커버리지·번호경고 규약↔스킬 정합·E 리뷰 검증 규율 반증 시도·판정 계측·재작업 라운드 규약↔스킬↔템플릿 정합 + 계측 줄 골격 형식 정합 + 재검증 선언 + 교차·음성 통제 · F 문서 자기서술 정합 = 역할 앵커 추출·캐노니컬 행 실재·소비자 전파 + 케이스 수 자기 정합 · G 상호참조 무결성 = 인용 추출·앵커 실재 대조 + 추출 0건·이름 유일성·줄바꿈 인용 통제 · H 실행 환경 축 선언 정합 = 축 이름 추출·규약 표 행 실재·집합 일치·CI 잡 매핑의 워크플로 실재와 해당 축 표 행 실재·매핑 커버리지(축 행이 적은 잡의 등재)·음성 통제 — 잡을 지목하지 않는 집행 칸과 잡을 지목한 칸의 나머지 서술은 사람의 리뷰 영역이라 여기서 묻지 않음) 확인됨 (참조 구현 기준)"

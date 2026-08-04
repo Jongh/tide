@@ -188,6 +188,24 @@ foreach ($page in Get-ChildItem (Join-Path $ROOT 'site\docs') -Filter '*.md' -Fi
 Chk "site: discovered >=1 snippet shell" $(if ($shells -ge 1) { 'ok' } else { 'no' }) 'ok'
 Chk "site: discovered >=1 include directive" $(if ($includesTotal -ge 1) { 'ok' } else { 'no' }) 'ok'
 
+# === case-count self-consistency (M38-T01) ==============================
+# The completion guard (M37) catches a runner that ABORTS; it does not catch one that stays alive
+# and RUNS LESS -- and this harness is DISCOVERY-DRIVEN (shells x include targets), so "found
+# fewer shells than last time" is exactly the silent shrink it must not survive. The expected
+# case count has a single declaration site -- this harness's README (convention: the document
+# self-description section of docs/conventions.md) -- never hardcoded here. If the declaration
+# cannot be read (file missing / no `cases` token) the extraction is empty and this FAILS:
+# "could not read it, so skip the check and pass" is the very class this kills.
+# The case is itself a case, so it goes LAST and compares running-total + 1 (same shape as
+# tests/discover F1; identical assertion name and verdict in both shells).
+function DeclaredCases($path) {
+    if (-not (Test-Path $path)) { return '' }
+    $raw = [System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8)
+    $m = [regex]::Match($raw, 'cases:[^0-9\r\n]*([0-9]+)')
+    if ($m.Success) { return $m.Groups[1].Value } else { return '' }
+}
+Chk "case-count: README cases declaration == actual" (DeclaredCases (Join-Path $ROOT 'tests\site-includes\README.md')) ([string]($script:pass + $script:fail + 1))
+
 Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) (shells=$shells includes=$includesTotal terms=[$($TERMS -join ',')]) [runtime: PowerShell $($PSVersionTable.PSVersion) $($PSVersionTable.PSEdition)]"
 if ($script:fail -ne 0) { exit 1 }
 Write-Host "# site-include resolution (target exists + balanced [start]/[end] marker pair + excluded-term 0 in body + derived terms real in masthead) confirmed -- NOT a mkdocs --strict substitute (render/nav/link = CI)"

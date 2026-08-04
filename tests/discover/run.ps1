@@ -134,7 +134,17 @@ try {
     # re-duplication), (B3) catalog completeness (each command name present). Extends M20-review #6.
 
     # actual command skill count = number of skills/*/SKILL.md files
+    #
+    # (M38-T04) The dot filter is the MEANING, not an implementation detail: a directory whose name
+    # starts with '.' is NOT a command skill. `run.sh` gets that for free -- its POSIX glob
+    # `skills/*/SKILL.md` never matches a leading-dot component -- while `Get-ChildItem -Directory`
+    # DOES return `.spare`, so without this filter the two shells scan different sets. Measured
+    # divergence before the fix, with a single `skills/.spare/SKILL.md` present: sh 85/0 exit 0 vs
+    # ps1 79/6 exit 1. Part G of this same runner already carried the dot filter, so the two parts
+    # of ONE runner disagreed on the same question. Ordinal per M38-T03 (culture comparison skips
+    # ignorable characters, which would make ps1 scan LESS than the glob).
     $N = @(Get-ChildItem (Join-Path $ROOT 'skills') -Directory -ErrorAction SilentlyContinue |
+        Where-Object { -not $_.Name.StartsWith('.', [System.StringComparison]::Ordinal) } |
         Where-Object { Test-Path (Join-Path $_.FullName 'SKILL.md') }).Count
     Chk "B: actual command skill count measured (>0)" $(if ($N -gt 0) { 'ok' } else { 'no' }) 'ok'
 
@@ -188,7 +198,9 @@ try {
         if ($raw -match $pat) { return 'yes' } else { return 'no' }
     }
     $allNamesOk = 'yes'
-    foreach ($d in Get-ChildItem (Join-Path $ROOT 'skills') -Directory -ErrorAction SilentlyContinue) {
+    # same dot filter as the count above (M38-T04) -- one meaning, both places.
+    foreach ($d in (Get-ChildItem (Join-Path $ROOT 'skills') -Directory -ErrorAction SilentlyContinue |
+                    Where-Object { -not $_.Name.StartsWith('.', [System.StringComparison]::Ordinal) })) {
         if (Test-Path (Join-Path $d.FullName 'SKILL.md')) {
             if ((HasCommand $CANON_CMD $d.Name) -ne 'yes') { $allNamesOk = 'no' }
         }
@@ -317,7 +329,7 @@ try {
             $dir = Join-Path $ROOT $d
             if (Test-Path -LiteralPath $dir) {
                 $cands += (Get-ChildItem -LiteralPath $dir -Filter '*.md' -File -Force -ErrorAction SilentlyContinue |
-                            Where-Object { -not $_.Name.StartsWith('.') -and $_.Name.EndsWith('.md', [System.StringComparison]::Ordinal) } |
+                            Where-Object { -not $_.Name.StartsWith('.', [System.StringComparison]::Ordinal) -and $_.Name.EndsWith('.md', [System.StringComparison]::Ordinal) } |
                             ForEach-Object { $_.FullName })
             }
         }
@@ -327,7 +339,7 @@ try {
                         Where-Object {
                             $rel = $_.FullName.Substring($ROOT.Length + 1)
                             $_.Name.EndsWith('.md', [System.StringComparison]::Ordinal) -and
-                                @($rel -split '[\\/]' | Where-Object { $_.StartsWith('.') }).Count -eq 0
+                                @($rel -split '[\\/]' | Where-Object { $_.StartsWith('.', [System.StringComparison]::Ordinal) }).Count -eq 0
                         } | ForEach-Object { $_.FullName })
         }
         # Nested two-arg Join-Path, NOT the three-arg form: -AdditionalChildPath is PowerShell 6+, and
@@ -580,7 +592,7 @@ try {
         $namePat = '/tide:' + $name + '([^a-z-]|$)'
         $tokPat  = '(^|[^A-Za-z-])' + [regex]::Escape($token) + '([^A-Za-z-]|$)'
         foreach ($line in ($raw -split "`r?`n")) {
-            if ($line.StartsWith('|') -and ($line -match $namePat) -and ($line -match $tokPat)) { return 'yes' }
+            if ($line.StartsWith('|', [System.StringComparison]::Ordinal) -and ($line -match $namePat) -and ($line -match $tokPat)) { return 'yes' }
         }
         return 'no'
     }
@@ -645,16 +657,16 @@ try {
     # so without this filter the two shells would scan different file sets and could disagree.
     function LivingDocs() {
         $out = @()
-        foreach ($d in (Get-ChildItem (Join-Path $ROOT 'skills') -Directory -ErrorAction SilentlyContinue | Where-Object { -not $_.Name.StartsWith('.') })) {
+        foreach ($d in (Get-ChildItem (Join-Path $ROOT 'skills') -Directory -ErrorAction SilentlyContinue | Where-Object { -not $_.Name.StartsWith('.', [System.StringComparison]::Ordinal) })) {
             $out += @(Get-ChildItem $d.FullName -Filter '*.md' -File -Force -ErrorAction SilentlyContinue |
-                    Where-Object { -not $_.Name.StartsWith('.') } | ForEach-Object { $_.FullName })
+                    Where-Object { -not $_.Name.StartsWith('.', [System.StringComparison]::Ordinal) } | ForEach-Object { $_.FullName })
         }
         $out += @(Get-ChildItem (Join-Path $ROOT 'docs') -Filter '*.md' -File -Force -ErrorAction SilentlyContinue |
-                    Where-Object { -not $_.Name.StartsWith('.') } | ForEach-Object { $_.FullName })
+                    Where-Object { -not $_.Name.StartsWith('.', [System.StringComparison]::Ordinal) } | ForEach-Object { $_.FullName })
         $out += @($README)
         $out += @(Get-ChildItem (Join-Path $ROOT 'site\docs') -Filter '*.md' -File -Force -ErrorAction SilentlyContinue |
-                    Where-Object { -not $_.Name.StartsWith('.') } | ForEach-Object { $_.FullName })
-        foreach ($d in (Get-ChildItem (Join-Path $ROOT 'tests') -Directory -ErrorAction SilentlyContinue | Where-Object { -not $_.Name.StartsWith('.') })) {
+                    Where-Object { -not $_.Name.StartsWith('.', [System.StringComparison]::Ordinal) } | ForEach-Object { $_.FullName })
+        foreach ($d in (Get-ChildItem (Join-Path $ROOT 'tests') -Directory -ErrorAction SilentlyContinue | Where-Object { -not $_.Name.StartsWith('.', [System.StringComparison]::Ordinal) })) {
             $r = Join-Path $d.FullName 'README.md'
             if (Test-Path $r) { $out += @($r) }
         }
@@ -757,7 +769,143 @@ try {
     Chk "G2: anchor names unique after normalization" ([string]$dset.Count) '0'
     Chk "G3: citation lines have balanced quotes (no wrapped citation)" ([string]$gOdd) '0'
 
+    # === Part H -- execution-environment axis declaration consistency (M38-T06) =====
+    # The convention NAMES each axis of the execution environment (single source: the
+    # execution-environment axis section of docs/conventions.md) and records what enforces it.
+    # What this part bites is EXACTLY five things: (1) each declared axis name really occurs in a
+    # ROW of the convention's table, (2) the axis-name SET matches the one declared in
+    # tests/discover/README.md (same set-equality technique as Part C), (3) each CI job named by the
+    # `env-axis-ci-jobs:` mapping really exists as a job key in .github/workflows/tests.yml,
+    # (4) that job name is written in THAT axis's table row, and (5) conversely, a DECLARED axis
+    # whose row writes a job name that really EXISTS in the workflow must be REGISTERED in the
+    # mapping (coverage -- the mapping is not opt-in).
+    # It does not claim more. FOUR things are not asked by any machine: (a) whether an enforcement
+    # cell that names NO CI job (the runner's own probe, "only a real push", "unenforced") is still
+    # true; (b) whether the REST of a job-naming cell's prose ("2 OS", "matrix") matches reality;
+    # (c) prose that names a NON-EXISTENT thing as if it were a job -- (5) only runs in the direction
+    # of jobs that really exist, because no machine can tell whether an arbitrary backticked token in
+    # prose is meant as a job reference (enforcement cells legitimately carry file paths too); and
+    # (d) a table row for an axis that is NOT declared in `env-axes:` -- all five checks start from
+    # the DECLARED axes, so an undeclared row is prose inside a table, not an axis. That layer is the
+    # human review's; the convention's "what the machine does not ask" notice is the single source
+    # and records the M39 candidate (a resolvable `job:<name>` notation).
+    # The M38 review measured the overclaim TWICE: before (3)/(4), deleting the `posix` job outright
+    # and leaving the table untouched still scored 90/0 green; before (5), a DECLARED but unmapped
+    # axis naming a real job escaped the check. That is why (3)(4)(5) exist.
+    # Axis and job names are ASCII co-terms, so this is data-driven like Part F's role anchors --
+    # no Korean literal in the source.
+    function EnvAxes($file) {
+        $raw = ReadUtf8 $file
+        if ($null -eq $raw) { return '' }
+        $line = ($raw -split "`r?`n" | Where-Object { $_.Contains('env-axes:') } | Select-Object -First 1)
+        if ($null -eq $line) { return '' }
+        $tail = $line.Substring($line.IndexOf('env-axes:') + 9)
+        $cut = $tail.IndexOf('-->')
+        if ($cut -ge 0) { $tail = $tail.Substring(0, $cut) }
+        $names = @($tail -split '\s+' | Where-Object { $_ -match '^[a-z][a-z-]*$' })
+        return (($names | Sort-Object -CaseSensitive) -join ' ')
+    }
+    $convAxes = EnvAxes $CONV
+    $readAxes = EnvAxes $DISC_README
+    $nAxes = @($convAxes -split ' ' | Where-Object { $_ -ne '' }).Count
+
+    # (H2) every declared axis must occur in a TABLE ROW (line starting with '|') of the convention --
+    # declaring an axis without wiring it into the table is the "claims enforcement it does not have"
+    # class this milestone exists to remove.
+    $axisRowMiss = 0
+    $convLines = @((ReadUtf8 $CONV) -split "`r?`n")
+    foreach ($a in @($convAxes -split ' ' | Where-Object { $_ -ne '' })) {
+        $needle = '`' + $a + '`'
+        $hit = @($convLines | Where-Object { $_.StartsWith('|', [System.StringComparison]::Ordinal) -and $_.Contains($needle) }).Count
+        if ($hit -eq 0) { $axisRowMiss++ }
+    }
+    function HasAxis($set, $name) {
+        if ((" $set " ).Contains(" $name ")) { return 'yes' } else { return 'no' }
+    }
+
+    # (H6..H9) Rows whose enforcement cell points at a CI JOB are pinned down to the job's existence.
+    # The mapping's single source is the convention's `env-axis-ci-jobs: <axis>=<job>` line; the job
+    # NAMES are DISCOVERED from the workflow's `jobs:` block (no hardcoded roster). H8 also checks the
+    # job name is written in that axis's table row, closing the opposite drift (fixing the mapping
+    # while leaving the table stale).
+    function EnvAxisJobs($file) {
+        $raw = ReadUtf8 $file
+        if ($null -eq $raw) { return '' }
+        $line = ($raw -split "`r?`n" | Where-Object { $_.Contains('env-axis-ci-jobs:') } | Select-Object -First 1)
+        if ($null -eq $line) { return '' }
+        $tail = $line.Substring($line.IndexOf('env-axis-ci-jobs:') + 17)
+        $cut = $tail.IndexOf('-->')
+        if ($cut -ge 0) { $tail = $tail.Substring(0, $cut) }
+        $pairs = @($tail -split '\s+' | Where-Object { $_ -match '^[a-z][a-z-]*=[a-z][a-z0-9-]*$' })
+        return (($pairs | Sort-Object -CaseSensitive) -join ' ')
+    }
+    function CiJobNames($file) {
+        # job keys = 2-space-indented keys INSIDE the `jobs:` block (so the keys under `on:` -- push,
+        # pull_request, workflow_dispatch -- are not mistaken for jobs).
+        $raw = ReadUtf8 $file
+        if ($null -eq $raw) { return '' }
+        $out = @(); $inJobs = $false
+        foreach ($line in ($raw -split "`r?`n")) {
+            if ($line -match '^jobs:') { $inJobs = $true; continue }
+            if ($inJobs -and $line -match '^[A-Za-z]') { $inJobs = $false }
+            if ($inJobs -and $line -match '^  ([a-z][a-z0-9-]*):[ \t]*$') { $out += $matches[1] }
+        }
+        return (($out | Sort-Object -CaseSensitive) -join ' ')
+    }
+    $WF = Join-Path $ROOT '.github\workflows\tests.yml'
+    $axisJobs = EnvAxisJobs $CONV
+    $ciJobs = CiJobNames $WF
+    $nAxisJobs = @($axisJobs -split ' ' | Where-Object { $_ -ne '' }).Count
+
+    $axisJobMiss = 0
+    $axisJobRowMiss = 0
+    foreach ($pair in @($axisJobs -split ' ' | Where-Object { $_ -ne '' })) {
+        $a = $pair.Substring(0, $pair.IndexOf('='))
+        $j = $pair.Substring($pair.IndexOf('=') + 1)
+        if ((HasAxis $ciJobs $j) -ne 'yes') { $axisJobMiss++ }
+        $na = '`' + $a + '`'
+        $nj = '`' + $j + '`'
+        $rows = @($convLines | Where-Object {
+            $_.StartsWith('|', [System.StringComparison]::Ordinal) -and $_.Contains($na) -and $_.Contains($nj)
+        }).Count
+        if ($rows -eq 0) { $axisJobRowMiss++ }
+    }
+
+    Chk "H1: axis-name extraction positive control (>0)" $(if ($nAxes -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "H2: every declared axis has a convention table row" ([string]$axisRowMiss) '0'
+    Chk "H3: axis-name sets equal (conventions vs discover README)" $(if ($convAxes -ne '' -and $convAxes -eq $readAxes) { 'yes' } else { 'no' }) 'yes'
+    Chk "H4: control -- bogus axis name (bogus-axis) absent in conventions" (HasAxis $convAxes 'bogus-axis') 'no'
+    Chk "H5: control -- bogus axis name (bogus-axis) absent in README" (HasAxis $readAxes 'bogus-axis') 'no'
+    # (H10/H11) COVERAGE -- the mapping is not opt-in. If any axis row writes a job name discovered
+    # in the workflow, that axis must be registered in the mapping; otherwise simply staying out of
+    # the mapping buys an exemption from H7/H8 (the side door the M38 review opened by measurement:
+    # an unmapped axis naming a nonexistent job still scored 94/0). Nothing is hardcoded -- both the
+    # job names and the axis names are discovered.
+    $coverHits = 0
+    $coverMiss = 0
+    foreach ($j in @($ciJobs -split ' ' | Where-Object { $_ -ne '' })) {
+        $nj = '`' + $j + '`'
+        foreach ($row in @($convLines | Where-Object {
+                    $_.StartsWith('|', [System.StringComparison]::Ordinal) -and $_.Contains($nj) })) {
+            foreach ($a in @($convAxes -split ' ' | Where-Object { $_ -ne '' })) {
+                if ($row.Contains('`' + $a + '`')) {
+                    $coverHits++
+                    if ((HasAxis $axisJobs ($a + '=' + $j)) -ne 'yes') { $coverMiss++ }
+                }
+            }
+        }
+    }
+
+    Chk "H6: axis-to-CI-job mapping extraction positive control (>0)" $(if ($nAxisJobs -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "H7: every mapped CI job exists in the workflow" ([string]$axisJobMiss) '0'
+    Chk "H8: every mapped job name is in that axis's table row" ([string]$axisJobRowMiss) '0'
+    Chk "H9: control -- bogus job name (bogus-job) absent in workflow" (HasAxis $ciJobs 'bogus-job') 'no'
+    Chk "H10: coverage scan positive control (>0)" $(if ($coverHits -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "H11: every CI job named by an axis row is registered in the mapping" ([string]$coverMiss) '0'
+
     function DeclaredCases() {
+        # FIRST match, deliberately -- the sh side now pins the same end (M38 review minor 4: sed's
+        # greedy leading `.*` took the LAST `cases:` on a line while .NET takes the FIRST).
         $raw = ReadUtf8 $DISC_README
         if ($null -eq $raw) { return '' }
         $m = [regex]::Match($raw, 'cases:[^0-9\r\n]*([0-9]+)')
@@ -795,5 +943,5 @@ if (-not $script:completed) {
     exit 1
 }
 if ($script:fail -ne 0) { exit 1 }
-Write-Host "# discover detection threshold (>=2->hint / <2->none / single-repo->none / hidden-not-counted) + single-source freeze (B1 count / B2 site shell / B3 catalog completeness, canonical=docs/commands.md) + declaration consistency (C1 four statuses x three files + absence control / C2 baseline x three templates / C3 phase roster both lists (writer + non-writer) conventions<->published page set equality, sole enumerator, disjointness, negative control / D cross-branch coverage+number-warn conventions<->skill / E review verification discipline refutation+metrics+rework conventions<->skill<->template plus metrics-line skeleton format plus re-verify declaration plus cross and negative controls / F document self-description = role-anchor extraction, canonical-row presence, consumer propagation plus case-count self-consistency / G cross-reference integrity = citation extraction vs real anchors plus empty-extraction, name-uniqueness and wrapped-citation controls) confirmed"
+Write-Host "# discover detection threshold (>=2->hint / <2->none / single-repo->none / hidden-not-counted) + single-source freeze (B1 count / B2 site shell / B3 catalog completeness, canonical=docs/commands.md) + declaration consistency (C1 four statuses x three files + absence control / C2 baseline x three templates / C3 phase roster both lists (writer + non-writer) conventions<->published page set equality, sole enumerator, disjointness, negative control / D cross-branch coverage+number-warn conventions<->skill / E review verification discipline refutation+metrics+rework conventions<->skill<->template plus metrics-line skeleton format plus re-verify declaration plus cross and negative controls / F document self-description = role-anchor extraction, canonical-row presence, consumer propagation plus case-count self-consistency / G cross-reference integrity = citation extraction vs real anchors plus empty-extraction, name-uniqueness and wrapped-citation controls / H execution-environment axis declaration = axis-name extraction, convention table row, set equality, CI-job mapping exists in the workflow and in that axis's row, mapping coverage (a job named by a row must be registered), negative controls -- cells naming no CI job, and the rest of a job-naming cell's prose, are the human review's layer, not asked here) confirmed"
 exit 0

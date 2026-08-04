@@ -306,6 +306,24 @@ mk_repo "$BM2/svc"; mkdir -p "$BM2/svc/.tide"
 printf '\357\273\277auth\n' > "$BM2/svc/.tide/deps"   # 선두 BOM + 의존명(주석 없음)
 chk "BOM 내성: BOM+의존명 첫 줄 이름 매칭" "$(read_deps "$BM2/svc" | tr '\n' ',')" "auth,"
 
+# === 케이스 수 자기 정합 (M38-T01) ======================================
+# 완주 가드(M37)는 러너가 **중단**되는 것을 잡지, 죽지 않고 **덜 도는** 것을 잡지 않는다 —
+# 조건 분기가 파트를 건너뛰거나 발견형 스캔이 0건을 집으면 아무도 모른다. 기대 케이스 수의
+# **단일 선언처는 이 하니스의 README**이며(규약: `docs/conventions.md`의 "문서 자기서술 정합"),
+# 러너에 수를 하드코딩하지 않는 것이 요점이다. 선언을 못 읽으면(파일 없음·`cases` 토큰 없음)
+# 추출이 빈 문자열이 되어 **FAIL**이다 — "못 읽어서 대조를 건너뛰고 통과"는 두지 않는다(자기 공허 금지).
+# 이 케이스 자신도 한 건이라 계수가 순환하므로 **마지막 케이스**로 두고 `누계 + 1`과 비교한다
+# (`tests/discover`의 F1과 동형 — 단언 이름·판정은 양 셸이 같다).
+HARNESS_README="$ROOT/tests/fleet/README.md"
+declared_cases() {
+    # **첫 매치 고정** — sed의 선행 `.*`는 탐욕이라 한 줄에 `cases:`가 둘이면 **마지막**을 집는데
+    # ps1의 `[regex]::Match`는 **첫 번째**를 집는다(M38 리뷰 사소 4의 실측: 같은 입력에 sed 7 ↔
+    # .NET 42). `grep -o`는 매치를 파일·줄 순서대로 내므로 `head -1`이 곧 첫 매치다 — 양 셸 동형.
+    grep -o 'cases:[^0-9]*[0-9][0-9]*' "$HARNESS_README" 2>/dev/null | head -1 |
+        grep -o '[0-9][0-9]*' | head -1
+}
+chk "case-count: README cases declaration == actual" "$(declared_cases)" "$((pass + fail + 1))"
+
 echo
 echo "# 결과: PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ] || exit 1

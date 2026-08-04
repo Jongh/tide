@@ -46,6 +46,80 @@ trap {
     exit 1
 }
 
+# === supported launch context (M38-T05) =================================
+# DIAGNOSIS. This runner used to score 29/1 when started from a Git Bash host and 30/0 from a native
+# PowerShell host (both PS versions). The single failing case was scenario 9, "blocks commit [BOM
+# input -> cwd, not CPD]". Cause, measured: the guard reads its hook input with [Console]::In, whose
+# decoding comes from [Console]::InputEncoding -- i.e. the CONSOLE INPUT CODE PAGE, which a child
+# process inherits from the launching host. Measured on the same machine:
+#   * native PowerShell host -> child console input CP 65001 (UTF-8): the 3 BOM bytes are absorbed
+#     by the UTF-8 decoder, the guard sees a clean '{' and parses.
+#   * Git Bash host          -> child console input CP 949 (the ANSI page): EF BB decodes as ONE
+#     double-byte char (U+7664) and BF as U+003F, so the leading characters are neither U+FEFF nor
+#     U+00EF U+00BB U+00BF -- the two forms the guard strips. ConvertFrom-Json then throws, $cwd
+#     stays null, the guard falls back to CLAUDE_PROJECT_DIR (which has NO phase) and ALLOWS.
+# So the axis is the LAUNCH CONTEXT (console input code page), not the BOM and not $OutputEncoding.
+#
+# DISPOSITION (b): declare + enforce. Option (a) -- make any host give the same verdict -- would
+# mean either hardening the guard's BOM strip (the hook is UNTOUCHED this cycle by milestone
+# invariant) or having this runner rewrite the shared console's code page (a side effect on the
+# user's terminal that would also HIDE the guard's real fragility). So the supported launch context
+# is declared in this harness's README and enforced HERE: the runner probes its own delivery channel
+# before asserting anything, and refuses loudly outside it. It must not quietly return a different
+# verdict -- that silent divergence is the entire class M38 exists to remove.
+# The guard-side robustness gap (a BOM mangled by a non-UTF-8 console page) is recorded as carried
+# forward, not fixed here.
+#
+# The probe is BEHAVIOURAL, not a code-page allowlist: it sends EF BB BF + '{}' down the very same
+# Start-Process stdin path and asks whether the leading BOM arrived in a form the guard strips.
+# Hardcoding "CP must be 65001" would red the CI legs that pass today for the right reason.
+function Test-StdinChannel {
+    $probeIn = Join-Path $sbx 'probe-in.json'
+    [System.IO.File]::WriteAllBytes($probeIn,
+        ([byte[]](0xEF, 0xBB, 0xBF) + [System.Text.Encoding]::ASCII.GetBytes('{}')))
+    $probePs = Join-Path $sbx 'probe-stdin.ps1'
+    # ok = after removing whatever the leading BOM became, the payload is intact '{}'. Three shapes
+    # are acceptable because all three leave the guard able to parse:
+    #   * nothing left of it   -- the UTF-8 decoder absorbed the preamble (CP 65001 hosts)
+    #   * one U+FEFF           -- decoded as the BOM character
+    #   * U+00EF U+00BB U+00BF -- byte-preserving single-byte page; the guard strips this form too
+    # Anything else (e.g. CP 949 turning EF BB into one U+7664) means the channel mangles bytes.
+    # The probe compares CODE POINTS, never a literal BOM: this file stays ASCII-only (0 bytes > 127).
+    $probeBody = @'
+$s = [Console]::In.ReadToEnd()
+$c = @($s.ToCharArray())
+$i = 0
+if ($c.Count -ge 1 -and [int]$c[0] -eq 0xFEFF) { $i = 1 }
+elseif ($c.Count -ge 3 -and [int]$c[0] -eq 0xEF -and [int]$c[1] -eq 0xBB -and [int]$c[2] -eq 0xBF) { $i = 3 }
+if ($c.Count -eq ($i + 2) -and $c[$i] -eq '{' -and $c[$i + 1] -eq '}') {
+    Write-Output 'ok'
+} else {
+    Write-Output 'mangled'
+}
+'@
+    [System.IO.File]::WriteAllText($probePs, $probeBody, (New-Object System.Text.UTF8Encoding($false)))
+    $probeOut = Join-Path $sbx 'probe-out.txt'
+    Start-Process -FilePath 'powershell' `
+        -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',$probePs `
+        -RedirectStandardInput $probeIn -RedirectStandardOutput $probeOut `
+        -NoNewWindow -Wait | Out-Null
+    if (-not (Test-Path $probeOut)) { return 'mangled' }
+    return ((Get-Content $probeOut -Raw) -replace '\s', '')
+}
+
+$channel = Test-StdinChannel
+if ($channel -ne 'ok') {
+    Write-Host "# UNSUPPORTED LAUNCH CONTEXT -- stdin byte channel is mangled (probe: '$channel')"
+    Write-Host "# console input code page: $([Console]::InputEncoding.CodePage) ($([Console]::InputEncoding.WebName))"
+    Write-Host "# This harness feeds hooks\tide-guard.ps1 through stdin, and the guard decodes stdin with"
+    Write-Host "# the CONSOLE INPUT code page inherited from the launching host. On a non-UTF-8 page the"
+    Write-Host "# BOM regression case (scenario 9) silently flips instead of failing, so this runner"
+    Write-Host "# refuses to produce a verdict here. Launch it from a native PowerShell/pwsh host"
+    Write-Host "# (see tests/multi-repo/README.md, 'supported launch context'), not from Git Bash."
+    Remove-Item -Recurse -Force $sbx -ErrorAction SilentlyContinue
+    exit 1
+}
+
 function Invoke-Guard($cpd, $cwd, $cmd, $bom = $false) {
     $obj = @{ tool_input = @{ command = $cmd } }
     if ($cwd) { $obj['cwd'] = $cwd }
@@ -172,6 +246,31 @@ try {
     Check "A(debug) git commit blocked (guard unmodified)" $sbx $A $BLOCK 2
     Check "A(debug) git push blocked (guard unmodified)" $sbx $A 'git push' 2
     Check "A(debug) git tag -a blocked (annotated tag create=write)" $sbx $A 'git tag -a v1 -m x' 2
+
+    # === case-count self-consistency (M38-T01) ==========================
+    # The completion guard (M37) catches a runner that ABORTS; it does not catch one that stays
+    # alive and RUNS LESS (a branch skipping a scenario, a non-terminating error walking past a
+    # case). The expected case count has a single declaration site -- this harness's README
+    # (convention: the document self-description section of docs/conventions.md) -- never
+    # hardcoded here. If the declaration cannot be read (file missing / no `cases` token) the
+    # extraction is empty and this FAILS: "could not read it, so skip and pass" is the class
+    # this kills. The case is itself a case, so it goes LAST and compares running-total + 1
+    # (same shape as `tests/discover` F1; identical assertion name and verdict in both shells).
+    # `Check` here is exit-code-only, so this asserts inline against the same counters.
+    $ccPath = Join-Path $repoRoot 'tests\multi-repo\README.md'
+    $ccGot = ''
+    if (Test-Path $ccPath) {
+        $ccRaw = [System.IO.File]::ReadAllText($ccPath, [System.Text.Encoding]::UTF8)
+        $ccM = [regex]::Match($ccRaw, 'cases:[^0-9\r\n]*([0-9]+)')
+        if ($ccM.Success) { $ccGot = $ccM.Groups[1].Value }
+    }
+    $ccDesc = 'case-count: README cases declaration == actual'
+    $ccWant = [string]($script:pass + $script:fail + 1)
+    if ($ccGot -eq $ccWant) {
+        $script:pass++; Write-Host ("PASS  {0,-50} ({1})" -f $ccDesc, $ccGot)
+    } else {
+        $script:fail++; Write-Host ("FAIL  {0,-50} (got {1}, want {2})" -f $ccDesc, $ccGot, $ccWant)
+    }
 
     Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) [runtime: PowerShell $($PSVersionTable.PSVersion) $($PSVersionTable.PSEdition)]"
     $script:completed = $true

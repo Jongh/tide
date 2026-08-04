@@ -27,9 +27,17 @@ name: tests
 #      workflow validity; only a real push proves this file. The matrix runtime now reaches the step
 #      through `env:` (expressions are fine there) and `shell:` stays a literal.
 #   4. It must not launch a `run.ps1` from Git Bash. `tests/multi-repo/run.ps1` fails when started
-#      from a Git Bash host but passes from a native PowerShell host (a pre-existing BOM/launch-context
-#      sensitivity its own comment documents). So the PowerShell job's host shell is `pwsh` and only
-#      the CHILD process varies across the matrix.
+#      from a Git Bash host but passes from a native PowerShell host (a BOM/launch-context
+#      sensitivity now DIAGNOSED and ENFORCED -- M38-T05: that runner probes its own stdin byte
+#      channel at startup and refuses loudly outside the supported context, instead of silently
+#      scoring 29/1). So the PowerShell job's host shell is `pwsh` and only the CHILD process
+#      varies across the matrix.
+#
+# The `pairing` job (M38-T02) closes the other half of point 1. The two runner jobs each DISCOVER
+# their own harness set, and until now nobody asked whether the two sets were the same: drop a
+# `tests/seventh/run.sh` with no `run.ps1` next to it and the PowerShell job stays green while never
+# running it. Discovering zero is already a failure; discovering a DIFFERENT set was not. The M37
+# review graded this minor and left a `precedent-waiver`; this job closes that waiver.
 
 on:
   push:
@@ -106,3 +114,46 @@ jobs:
           echo "discovered $found harnesses"
           if [ -n "$failed" ]; then echo "FAILED:$failed"; exit 1; fi
           echo "all $found harnesses passed"
+
+  # Cross-check the two jobs' harness sets. A harness with only one of the two runners is invisible
+  # to the OTHER job, which stays green while never running it -- the `vacuous-pass` class. This job
+  # only DISCOVERS (no runner is executed), so it is fast; it hardcodes no roster, and it names the
+  # harness that is missing a side, because "the sets differ" is not actionable on its own.
+  pairing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: cross-check run.sh and run.ps1 harness sets
+        shell: bash
+        run: |
+          # NOTE: GitHub's bash runs with `set -e`, so no trailing `[ ... ] && cmd` (a false test
+          # would kill the step). Everything below is explicit if/then. `tests/lib` legitimately has
+          # neither runner and must not be reported -- only directories with EXACTLY ONE are.
+          sh_n=0; ps_n=0; sh_only=""; ps_only=""
+          for d in "$PWD"/tests/*/; do
+              t=$(basename "$d")
+              has_sh=0; has_ps=0
+              if [ -f "$d/run.sh" ]; then has_sh=1; sh_n=$((sh_n + 1)); fi
+              if [ -f "$d/run.ps1" ]; then has_ps=1; ps_n=$((ps_n + 1)); fi
+              if [ "$has_sh" -eq 1 ] && [ "$has_ps" -eq 0 ]; then sh_only="$sh_only $t"; fi
+              if [ "$has_ps" -eq 1 ] && [ "$has_sh" -eq 0 ]; then ps_only="$ps_only $t"; fi
+          done
+          echo "run.sh harnesses: $sh_n / run.ps1 harnesses: $ps_n"
+          if [ "$sh_n" -eq 0 ] || [ "$ps_n" -eq 0 ]; then
+              echo "a runner side discovered ZERO harnesses under tests/ -- refusing to pass"
+              exit 1
+          fi
+          rc=0
+          if [ -n "$sh_only" ]; then
+              echo "MISSING run.ps1 (the PowerShell job never runs these):$sh_only"
+              rc=1
+          fi
+          if [ -n "$ps_only" ]; then
+              echo "MISSING run.sh (the posix job never runs these):$ps_only"
+              rc=1
+          fi
+          if [ "$rc" -ne 0 ]; then
+              echo "harness sets differ -- every harness needs both run.sh and run.ps1"
+              exit 1
+          fi
+          echo "paired: all $sh_n harnesses carry both run.sh and run.ps1"
