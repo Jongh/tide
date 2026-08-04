@@ -142,6 +142,30 @@ chk "A(debug) git commit 차단 (가드 무수정)"             "$SBX" "$A" "$BL
 chk "A(debug) git push 차단 (가드 무수정)"               "$SBX" "$A" "git push"                    2
 chk "A(debug) git tag -a 차단 (주석 태그 생성=쓰기)"     "$SBX" "$A" "git tag -a v1 -m x"          2
 
+# === 케이스 수 자기 정합 (M38-T01) ======================================
+# 완주 가드(M37)는 러너가 **중단**되는 것을 잡지, 죽지 않고 **덜 도는** 것을 잡지 않는다 —
+# 조건 분기가 시나리오를 건너뛰거나 비종료 오류가 케이스를 지나가면 아무도 모른다. 기대 케이스
+# 수의 **단일 선언처는 이 하니스의 README**이며(규약: `docs/conventions.md`의 "문서 자기서술 정합"),
+# 러너에 수를 하드코딩하지 않는 것이 요점이다. 선언을 못 읽으면(파일 없음·`cases` 토큰 없음)
+# 추출이 빈 문자열이 되어 **FAIL**이다 — "못 읽어서 대조를 건너뛰고 통과"는 두지 않는다(자기 공허 금지).
+# 이 케이스 자신도 한 건이라 계수가 순환하므로 **마지막 케이스**로 두고 `누계 + 1`과 비교한다
+# (`tests/discover`의 F1과 동형 — 단언 이름·판정은 양 셸이 같다).
+# 이 하니스의 `chk`는 훅 exit 코드 전용 시그니처라 여기서는 같은 계수기·같은 출력 골격으로
+# 직접 판정한다(별도 단언 헬퍼를 만들지 않는다).
+HARNESS_README="$REPO_ROOT/tests/multi-repo/README.md"
+CC_DESC="case-count: README cases declaration == actual"
+# **첫 매치 고정** — sed의 선행 `.*`는 탐욕이라 한 줄에 `cases:`가 둘이면 **마지막**을 집는데
+# ps1의 `[regex]::Match`는 **첫 번째**를 집는다(M38 리뷰 사소 4의 실측: 같은 입력에 sed 7 ↔ .NET 42).
+# `grep -o`는 매치를 파일·줄 순서대로 내므로 `head -1`이 곧 첫 매치다 — 양 셸 동형.
+CC_GOT=$(grep -o 'cases:[^0-9]*[0-9][0-9]*' "$HARNESS_README" 2>/dev/null | head -1 |
+         grep -o '[0-9][0-9]*' | head -1)
+CC_WANT=$((pass + fail + 1))
+if [ "$CC_GOT" = "$CC_WANT" ]; then
+    pass=$((pass + 1)); printf 'PASS  %-58s (%s)\n' "$CC_DESC" "$CC_GOT"
+else
+    fail=$((fail + 1)); printf 'FAIL  %-58s (got %s, want %s)\n' "$CC_DESC" "$CC_GOT" "$CC_WANT"
+fi
+
 echo
 echo "# 결과: PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ] || exit 1

@@ -206,6 +206,23 @@ try {
     Chk "discovery-ignore: .tide-fleet not included" $hasFleet 'no'
     Chk "discovery-ignore: 2 nodes (hidden excluded)" "$discCount" '2'
 
+    # === case-count self-consistency (M38-T01) ==========================
+    # The completion guard (M37) catches a runner that ABORTS; it does not catch one that stays
+    # alive and RUNS LESS (a branch skipping a part, a discovery scan finding zero). The expected
+    # case count has a single declaration site -- this harness's README (convention: the
+    # document self-description section of docs/conventions.md) -- never hardcoded here.
+    # If the declaration cannot be read (file missing / no `cases` token) the extraction is empty
+    # and this FAILS: "could not read it, so skip the check and pass" is the very class this kills.
+    # This case is itself a case, so it goes LAST and compares against running-total + 1 (same
+    # shape as `tests/discover` F1; identical assertion name and verdict in both shells).
+    function DeclaredCases($path) {
+        if (-not (Test-Path $path)) { return '' }
+        $raw = [System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8)
+        $m = [regex]::Match($raw, 'cases:[^0-9\r\n]*([0-9]+)')
+        if ($m.Success) { return $m.Groups[1].Value } else { return '' }
+    }
+    Chk "case-count: README cases declaration == actual" (DeclaredCases (Join-Path $ROOT 'tests\fleet-verify\README.md')) ([string]($script:pass + $script:fail + 1))
+
     Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) [runtime: PowerShell $($PSVersionTable.PSVersion) $($PSVersionTable.PSEdition)]"
     $script:completed = $true
 }

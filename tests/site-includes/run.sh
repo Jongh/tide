@@ -169,6 +169,26 @@ done
 chk "site: discovered >=1 snippet shell" "$([ "$shells" -ge 1 ] && echo ok || echo no)" "ok"
 chk "site: discovered >=1 include directive" "$([ "$includes_total" -ge 1 ] && echo ok || echo no)" "ok"
 
+# === case-count self-consistency (M38-T01) ==============================
+# The completion guard (M37) catches a runner that ABORTS; it does not catch one that stays alive
+# and RUNS LESS -- and this harness is DISCOVERY-DRIVEN (shells x include targets), so "found
+# fewer shells than last time" is exactly the silent shrink it must not survive. The expected
+# case count has a single declaration site -- this harness's README (convention: the document
+# self-description section of docs/conventions.md) -- never hardcoded here. If the declaration
+# cannot be read (file missing / no `cases` token) the extraction is empty and this FAILS:
+# "could not read it, so skip the check and pass" is the very class this kills.
+# The case is itself a case, so it goes LAST and compares running-total + 1 (same shape as
+# tests/discover F1; identical assertion name and verdict in both shells).
+HARNESS_README="$ROOT/tests/site-includes/README.md"
+declared_cases() {
+    # **첫 매치 고정** — sed의 선행 `.*`는 탐욕이라 한 줄에 `cases:`가 둘이면 **마지막**을 집는데
+    # ps1의 `[regex]::Match`는 **첫 번째**를 집는다(M38 리뷰 사소 4의 실측: 같은 입력에 sed 7 ↔
+    # .NET 42). `grep -o`는 매치를 파일·줄 순서대로 내므로 `head -1`이 곧 첫 매치다 — 양 셸 동형.
+    grep -o 'cases:[^0-9]*[0-9][0-9]*' "$HARNESS_README" 2>/dev/null | head -1 |
+        grep -o '[0-9][0-9]*' | head -1
+}
+chk "case-count: README cases declaration == actual" "$(declared_cases)" "$((pass + fail + 1))"
+
 echo
 echo "# result: PASS=$pass FAIL=$fail (shells=$shells includes=$includes_total terms=[$TERMS])"
 [ "$fail" -eq 0 ] || exit 1
