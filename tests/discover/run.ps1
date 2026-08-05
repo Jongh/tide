@@ -453,19 +453,33 @@ try {
     # via ASCII mechanism tokens (git read commands), keeping this source ASCII-only.
     # (D1) release coverage check: 'git diff --name-only' in BOTH conventions and release SKILL;
     # (D2) milestone number pre-warning: 'git log --all' in BOTH conventions and milestone SKILL.
+    # (D3/M39) the coverage check's UNCOMMITTED half: 'git status --porcelain' in BOTH conventions and
+    # release SKILL. Without it the check sees only the committed diff while release stages the working
+    # tree into the tag -- what the check looks at and what actually ships would diverge (the origin of
+    # M39). It is a separate token from D1 because D1 alone passes even if scope (2) is dropped whole.
 
     $REL_SKILL = Join-Path $ROOT 'skills\release\SKILL.md'
     $MS_SKILL  = Join-Path $ROOT 'skills\milestone\SKILL.md'
     $COV_TOK  = 'git diff --name-only'
+    $UNCOMMITTED_TOK = 'git status --porcelain'
     $WARN_TOK = 'git log --all'
 
     Chk "D1: conventions declares coverage check ($COV_TOK)"      (HasToken $CONV $COV_TOK)      'yes'
     Chk "D1: release SKILL wires coverage check"                  (HasToken $REL_SKILL $COV_TOK) 'yes'
     Chk "D2: conventions declares number pre-warning ($WARN_TOK)" (HasToken $CONV $WARN_TOK)     'yes'
     Chk "D2: milestone SKILL wires number pre-warning"            (HasToken $MS_SKILL $WARN_TOK) 'yes'
+    Chk "D3: conventions declares uncommitted scope ($UNCOMMITTED_TOK)" (HasToken $CONV $UNCOMMITTED_TOK)      'yes'
+    Chk "D3: release SKILL wires uncommitted scope"                     (HasToken $REL_SKILL $UNCOMMITTED_TOK) 'yes'
+
+    # (D4/M39 review rec.2) the user-facing CANONICAL CATALOG must declare the same scope. M39 fixed the
+    # conventions and the skill but left the catalog on the old scope, so the published page (the site
+    # includes this body) went stale -- the conventions<->skill binding (D1/D3) could not see it. Binding
+    # the consumer doc closes that class (same intent as Part F's role-anchor consumer propagation).
+    Chk "D4: canonical catalog declares uncommitted scope" (HasToken $CANON_CMD $UNCOMMITTED_TOK) 'yes'
 
     # cross control: each mechanism must be ABSENT from the opposite skill (token discriminates).
     Chk "D: control -- milestone SKILL has no coverage token"  (HasToken $MS_SKILL $COV_TOK)  'no'
+    Chk "D: control -- milestone SKILL has no uncommitted-scope token" (HasToken $MS_SKILL $UNCOMMITTED_TOK) 'no'
     Chk "D: control -- release SKILL has no number-warn token" (HasToken $REL_SKILL $WARN_TOK) 'no'
 
     # negative control: a bogus mechanism token must NOT appear in conventions (guard discriminates).
@@ -774,21 +788,30 @@ try {
     # execution-environment axis section of docs/conventions.md) and records what enforces it.
     # What this part bites is EXACTLY five things: (1) each declared axis name really occurs in a
     # ROW of the convention's table, (2) the axis-name SET matches the one declared in
-    # tests/discover/README.md (same set-equality technique as Part C), (3) each CI job named by the
-    # `env-axis-ci-jobs:` mapping really exists as a job key in .github/workflows/tests.yml,
-    # (4) that job name is written in THAT axis's table row, and (5) conversely, a DECLARED axis
-    # whose row writes a job name that really EXISTS in the workflow must be REGISTERED in the
-    # mapping (coverage -- the mapping is not opt-in).
+    # tests/discover/README.md (same set-equality technique as Part C), (3) each `job:<name>` token in
+    # the table really exists as a job key in .github/workflows/tests.yml, (4) that token sits in a
+    # row carrying a DECLARED axis (an orphan token in an undeclared row FAILs), and (5) conversely,
+    # every job that really EXISTS in the workflow is either REGISTERED by some axis row's `job:`
+    # token or DECLARED EXEMPT (coverage -- registration is not opt-in).
+    # (M39) The mapping's single source moved from the `env-axis-ci-jobs:` line to the table's
+    # `job:<name>` tokens -- two declaration sites became one. That changed (4)'s meaning: it used to
+    # ask "is the mapped job also in the table row" which, now that the table IS the source, would be
+    # a TAUTOLOGY (a vacuous pass); it now asks "is the table's job token in a DECLARED axis row".
     # It does not claim more. FOUR things are not asked by any machine: (a) whether an enforcement
     # cell that names NO CI job (the runner's own probe, "only a real push", "unenforced") is still
     # true; (b) whether the REST of a job-naming cell's prose ("2 OS", "matrix") matches reality;
-    # (c) prose that names a NON-EXISTENT thing as if it were a job -- (5) only runs in the direction
-    # of jobs that really exist, because no machine can tell whether an arbitrary backticked token in
-    # prose is meant as a job reference (enforcement cells legitimately carry file paths too); and
-    # (d) a table row for an axis that is NOT declared in `env-axes:` -- all five checks start from
-    # the DECLARED axes, so an undeclared row is prose inside a table, not an axis. That layer is the
-    # human review's; the convention's "what the machine does not ask" notice is the single source
-    # and records the M39 candidate (a resolvable `job:<name>` notation).
+    # (c) PROSE in an enforcement cell claiming a job that does not exist (see below); (d) an
+    # undeclared table row carrying NO `job:` token at all (pure prose -- the five checks start
+    # from declared axes or from `job:` tokens). That layer is the human review's; the convention's
+    # "what the machine does not ask" notice is the single source and records the M40 candidate.
+    # What `job:` closed AND did not close: enforcement cells used to be prose, so a NON-EXISTENT name
+    # written as if it were a job never reached the check (no machine can tell whether an arbitrary
+    # backticked token is a job reference -- the M38 review measured this with `nowhere`). The `job:`
+    # prefix removes that ambiguity for references it MARKS, and (3) then bites their existence.
+    # PROSE claims survive untouched -- measured by the M39 review in both shells: keeping the token
+    # and appending "CI `nowhere` also enforces" stays green, and replacing a token-less axis cell with
+    # "CI `nowhere` enforces" stays green. The DEFINITION of what counts as a job reference changed;
+    # the misleading surface did not disappear. That is why (c) stays in the notice.
     # The M38 review measured the overclaim TWICE: before (3)/(4), deleting the `posix` job outright
     # and leaving the table untouched still scored 90/0 green; before (5), a DECLARED but unmapped
     # axis naming a real job escaped the check. That is why (3)(4)(5) exist.
@@ -824,20 +847,38 @@ try {
     }
 
     # (H6..H9) Rows whose enforcement cell points at a CI JOB are pinned down to the job's existence.
-    # The mapping's single source is the convention's `env-axis-ci-jobs: <axis>=<job>` line; the job
-    # NAMES are DISCOVERED from the workflow's `jobs:` block (no hardcoded roster). H8 also checks the
-    # job name is written in that axis's table row, closing the opposite drift (fixing the mapping
-    # while leaving the table stale).
-    function EnvAxisJobs($file) {
+    # (M39) The mapping's single source is the TABLE ROW's `job:<name>` tokens (no separate line); the
+    # job NAMES are DISCOVERED from the workflow's `jobs:` block (no hardcoded roster). H8 checks the
+    # token sits in a DECLARED axis row, closing the opposite drift (hiding a token in an undeclared row).
+    $axisRows = @($convLines | Where-Object { $_.StartsWith('|', [System.StringComparison]::Ordinal) })
+    function RowJobTokens($row) {
+        return @([regex]::Matches($row, 'job:[a-z][a-z0-9-]*') | ForEach-Object { $_.Value.Substring(4) })
+    }
+    function RowAxisNames($row, $axes) {
+        return @($axes | Where-Object { $row.Contains('`' + $_ + '`') })
+    }
+    function EnvAxisJobs($rows, $axes) {
+        $pairs = @()
+        foreach ($row in $rows) {
+            if (-not $row.Contains('job:')) { continue }
+            foreach ($j in (RowJobTokens $row)) {
+                foreach ($a in (RowAxisNames $row $axes)) { $pairs += ($a + '=' + $j) }
+            }
+        }
+        return ((@($pairs | Sort-Object -CaseSensitive -Unique)) -join ' ')
+    }
+    function EnvExemptJobs($file) {
+        # jobs deliberately declared NOT to be environment axes (e.g. the repo-consistency `pairing`
+        # job). Exemption is a DECLARATION, not silence -- adding a CI job forces the axis/exempt call.
         $raw = ReadUtf8 $file
         if ($null -eq $raw) { return '' }
-        $line = ($raw -split "`r?`n" | Where-Object { $_.Contains('env-axis-ci-jobs:') } | Select-Object -First 1)
+        $line = ($raw -split "`r?`n" | Where-Object { $_.Contains('env-axis-exempt-jobs:') } | Select-Object -First 1)
         if ($null -eq $line) { return '' }
-        $tail = $line.Substring($line.IndexOf('env-axis-ci-jobs:') + 17)
+        $tail = $line.Substring($line.IndexOf('env-axis-exempt-jobs:') + 21)
         $cut = $tail.IndexOf('-->')
         if ($cut -ge 0) { $tail = $tail.Substring(0, $cut) }
-        $pairs = @($tail -split '\s+' | Where-Object { $_ -match '^[a-z][a-z-]*=[a-z][a-z0-9-]*$' })
-        return (($pairs | Sort-Object -CaseSensitive) -join ' ')
+        $names = @($tail -split '\s+' | Where-Object { $_ -match '^[a-z][a-z0-9-]*$' })
+        return (($names | Sort-Object -CaseSensitive) -join ' ')
     }
     function CiJobNames($file) {
         # job keys = 2-space-indented keys INSIDE the `jobs:` block (so the keys under `on:` -- push,
@@ -853,22 +894,36 @@ try {
         return (($out | Sort-Object -CaseSensitive) -join ' ')
     }
     $WF = Join-Path $ROOT '.github\workflows\tests.yml'
-    $axisJobs = EnvAxisJobs $CONV
+    $axesList = @($convAxes -split ' ' | Where-Object { $_ -ne '' })
+    $axisJobs = EnvAxisJobs $axisRows $axesList
     $ciJobs = CiJobNames $WF
+    $exemptJobs = EnvExemptJobs $CONV
     $nAxisJobs = @($axisJobs -split ' ' | Where-Object { $_ -ne '' }).Count
 
     $axisJobMiss = 0
-    $axisJobRowMiss = 0
     foreach ($pair in @($axisJobs -split ' ' | Where-Object { $_ -ne '' })) {
-        $a = $pair.Substring(0, $pair.IndexOf('='))
         $j = $pair.Substring($pair.IndexOf('=') + 1)
         if ((HasAxis $ciJobs $j) -ne 'yes') { $axisJobMiss++ }
-        $na = '`' + $a + '`'
-        $nj = '`' + $j + '`'
-        $rows = @($convLines | Where-Object {
-            $_.StartsWith('|', [System.StringComparison]::Ordinal) -and $_.Contains($na) -and $_.Contains($nj)
-        }).Count
-        if ($rows -eq 0) { $axisJobRowMiss++ }
+    }
+
+    # (H8) orphan `job:` tokens -- a token written in a row that carries no DECLARED axis.
+    $jobTokenOrphan = 0
+    foreach ($row in $axisRows) {
+        if (-not $row.Contains('job:')) { continue }
+        if ((RowAxisNames $row $axesList).Count -eq 0) { $jobTokenOrphan++ }
+    }
+
+    # (H12) declared axes carrying NO `job:` token (non-CI enforcement / unenforced) -- absence of a
+    # token is the honest notation for "no CI job enforces this", so that path must stay alive.
+    $noJobAxes = 0
+    foreach ($a in $axesList) {
+        if (-not (" $axisJobs ").Contains(" $a=")) { $noJobAxes++ }
+    }
+
+    # (H13) a stale exemption (job deleted or renamed while the declaration lingers) must FAIL.
+    $exemptJobMiss = 0
+    foreach ($j in @($exemptJobs -split ' ' | Where-Object { $_ -ne '' })) {
+        if ((HasAxis $ciJobs $j) -ne 'yes') { $exemptJobMiss++ }
     }
 
     Chk "H1: axis-name extraction positive control (>0)" $(if ($nAxes -gt 0) { 'ok' } else { 'no' }) 'ok'
@@ -876,32 +931,27 @@ try {
     Chk "H3: axis-name sets equal (conventions vs discover README)" $(if ($convAxes -ne '' -and $convAxes -eq $readAxes) { 'yes' } else { 'no' }) 'yes'
     Chk "H4: control -- bogus axis name (bogus-axis) absent in conventions" (HasAxis $convAxes 'bogus-axis') 'no'
     Chk "H5: control -- bogus axis name (bogus-axis) absent in README" (HasAxis $readAxes 'bogus-axis') 'no'
-    # (H10/H11) COVERAGE -- the mapping is not opt-in. If any axis row writes a job name discovered
-    # in the workflow, that axis must be registered in the mapping; otherwise simply staying out of
-    # the mapping buys an exemption from H7/H8 (the side door the M38 review opened by measurement:
+    # (H10/H11) COVERAGE -- registration is not opt-in. Every job DISCOVERED in the workflow must be
+    # registered by some axis row's `job:` token, or declared exempt; otherwise simply staying out of
+    # the table buys an exemption from H7/H8 (the side door the M38 review opened by measurement:
     # an unmapped axis naming a nonexistent job still scored 94/0). Nothing is hardcoded -- both the
     # job names and the axis names are discovered.
     $coverHits = 0
     $coverMiss = 0
     foreach ($j in @($ciJobs -split ' ' | Where-Object { $_ -ne '' })) {
-        $nj = '`' + $j + '`'
-        foreach ($row in @($convLines | Where-Object {
-                    $_.StartsWith('|', [System.StringComparison]::Ordinal) -and $_.Contains($nj) })) {
-            foreach ($a in @($convAxes -split ' ' | Where-Object { $_ -ne '' })) {
-                if ($row.Contains('`' + $a + '`')) {
-                    $coverHits++
-                    if ((HasAxis $axisJobs ($a + '=' + $j)) -ne 'yes') { $coverMiss++ }
-                }
-            }
-        }
+        if ((" $axisJobs ").Contains("=$j ")) { $coverHits++; continue }
+        if ((" $exemptJobs ").Contains(" $j ")) { continue }
+        $coverMiss++
     }
 
-    Chk "H6: axis-to-CI-job mapping extraction positive control (>0)" $(if ($nAxisJobs -gt 0) { 'ok' } else { 'no' }) 'ok'
-    Chk "H7: every mapped CI job exists in the workflow" ([string]$axisJobMiss) '0'
-    Chk "H8: every mapped job name is in that axis's table row" ([string]$axisJobRowMiss) '0'
+    Chk "H6: table job: token extraction positive control (>0)" $(if ($nAxisJobs -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "H7: every job named by the table exists in the workflow" ([string]$axisJobMiss) '0'
+    Chk "H8: every job: token sits in a declared axis row (orphans 0)" ([string]$jobTokenOrphan) '0'
     Chk "H9: control -- bogus job name (bogus-job) absent in workflow" (HasAxis $ciJobs 'bogus-job') 'no'
     Chk "H10: coverage scan positive control (>0)" $(if ($coverHits -gt 0) { 'ok' } else { 'no' }) 'ok'
-    Chk "H11: every CI job named by an axis row is registered in the mapping" ([string]$coverMiss) '0'
+    Chk "H11: every workflow job is registered by an axis row or declared exempt" ([string]$coverMiss) '0'
+    Chk "H12: declared axes without a job: token exist, positive control (>0)" $(if ($noJobAxes -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "H13: every exempt-declared job exists in the workflow" ([string]$exemptJobMiss) '0'
 
     function DeclaredCases() {
         # FIRST match, deliberately -- the sh side now pins the same end (M38 review minor 4: sed's
@@ -943,5 +993,5 @@ if (-not $script:completed) {
     exit 1
 }
 if ($script:fail -ne 0) { exit 1 }
-Write-Host "# discover detection threshold (>=2->hint / <2->none / single-repo->none / hidden-not-counted) + single-source freeze (B1 count / B2 site shell / B3 catalog completeness, canonical=docs/commands.md) + declaration consistency (C1 four statuses x three files + absence control / C2 baseline x three templates / C3 phase roster both lists (writer + non-writer) conventions<->published page set equality, sole enumerator, disjointness, negative control / D cross-branch coverage+number-warn conventions<->skill / E review verification discipline refutation+metrics+rework conventions<->skill<->template plus metrics-line skeleton format plus re-verify declaration plus cross and negative controls / F document self-description = role-anchor extraction, canonical-row presence, consumer propagation plus case-count self-consistency / G cross-reference integrity = citation extraction vs real anchors plus empty-extraction, name-uniqueness and wrapped-citation controls / H execution-environment axis declaration = axis-name extraction, convention table row, set equality, CI-job mapping exists in the workflow and in that axis's row, mapping coverage (a job named by a row must be registered), negative controls -- cells naming no CI job, and the rest of a job-naming cell's prose, are the human review's layer, not asked here) confirmed"
+Write-Host "# discover detection threshold (>=2->hint / <2->none / single-repo->none / hidden-not-counted) + single-source freeze (B1 count / B2 site shell / B3 catalog completeness, canonical=docs/commands.md) + declaration consistency (C1 four statuses x three files + absence control / C2 baseline x three templates / C3 phase roster both lists (writer + non-writer) conventions<->published page set equality, sole enumerator, disjointness, negative control / D cross-branch coverage (committed-diff + uncommitted-scope tokens; conventions<->skill<->canonical catalog)+number-warn conventions<->skill / E review verification discipline refutation+metrics+rework conventions<->skill<->template plus metrics-line skeleton format plus re-verify declaration plus cross and negative controls / F document self-description = role-anchor extraction, canonical-row presence, consumer propagation plus case-count self-consistency / G cross-reference integrity = citation extraction vs real anchors plus empty-extraction, name-uniqueness and wrapped-citation controls / H execution-environment axis declaration = axis-name extraction, convention table row, set equality, table job: tokens exist in the workflow and sit in declared axis rows (orphans 0), coverage (every real job registered or declared exempt), exemption freshness, no-token axis control, negative controls -- cells naming no CI job, and the rest of a job-naming cell's prose, are the human review's layer, not asked here) confirmed"
 exit 0

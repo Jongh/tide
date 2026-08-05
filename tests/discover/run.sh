@@ -344,11 +344,16 @@ chk "C3: 비기록 명단 통제 — 발행 페이지에 phantom-cmd 없음" "$(
 # ASCII 메커니즘 토큰(git 읽기 명령)으로 집행해 ps1의 ASCII-only 원본 규율과도 정합한다.
 # (D1) 릴리즈 커버리지 체크: `git diff --name-only`가 conventions와 release SKILL 둘 다에 등장,
 # (D2) 마일스톤 번호 사전경고: `git log --all`이 conventions와 milestone SKILL 둘 다에 등장.
+# (D3·M39) 커버리지의 **미커밋 범위**: `git status --porcelain`이 conventions와 release SKILL 둘 다에
+# 등장. 이 토큰이 없으면 검사는 커밋된 diff만 보는데 release는 워킹트리를 스테이징해 태그에 실으므로
+# **검사가 본 자리와 실제로 실리는 자리가 갈린다**(M39의 출처가 그 갈림이다). D1과 별도 토큰인 이유는
+# D1만으로는 범위 ⑵가 통째로 빠져도 통과하기 때문이다 — 한 메커니즘의 두 절반을 각각 앵커한다.
 # 단일 원본은 conventions "릴리즈 커버리지 체크" 절 + "마일스톤 문서"의 번호 사전경고 항목.
 
 REL_SKILL="$ROOT/skills/release/SKILL.md"
 MS_SKILL="$ROOT/skills/milestone/SKILL.md"
 COV_TOK='git diff --name-only'
+UNCOMMITTED_TOK='git status --porcelain'
 WARN_TOK='git log --all'
 
 # (D1) 커버리지 체크 메커니즘이 규약과 스킬 둘 다에 선언(한 곳만 있으면 갈라짐 → FAIL).
@@ -359,8 +364,19 @@ chk "D1: release SKILL 이 커버리지 체크 배선"          "$(has_token "$R
 chk "D2: conventions 가 번호 사전경고($WARN_TOK) 선언" "$(has_token "$CONV" "$WARN_TOK")" "yes"
 chk "D2: milestone SKILL 이 번호 사전경고 배선"        "$(has_token "$MS_SKILL" "$WARN_TOK")" "yes"
 
+# (D3) 커버리지의 미커밋 범위가 규약과 스킬 둘 다에 선언(한 곳만 있으면 갈라짐 → FAIL).
+chk "D3: conventions 가 미커밋 범위($UNCOMMITTED_TOK) 선언" "$(has_token "$CONV" "$UNCOMMITTED_TOK")" "yes"
+chk "D3: release SKILL 이 미커밋 범위 배선"                 "$(has_token "$REL_SKILL" "$UNCOMMITTED_TOK")" "yes"
+
+# (D4·M39 리뷰 권장2) 사용자 대면 **캐노니컬 카탈로그**도 같은 범위를 선언한다. M39가 규약·스킬만
+# 고치고 카탈로그를 두는 바람에 공개 페이지(사이트가 이 본문을 인클루드)가 옛 범위로 남았다 —
+# 규약↔스킬 결합(D1·D3)은 그 드리프트를 못 봤다. 소비자 문서를 결합에 넣어 같은 부류를 닫는다
+# (Part F의 역할 앵커 소비자 전파와 같은 취지).
+chk "D4: 캐노니컬 카탈로그가 미커밋 범위 선언" "$(has_token "$CANON_CMD" "$UNCOMMITTED_TOK")" "yes"
+
 # 교차 통제 — 각 메커니즘은 반대 스킬에 없어야 한다(토큰 구별력: 커버리지=release, 경고=milestone).
 chk "D: 통제 — milestone SKILL 에 커버리지 토큰 없음" "$(has_token "$MS_SKILL" "$COV_TOK")" "no"
+chk "D: 통제 — milestone SKILL 에 미커밋 범위 토큰 없음" "$(has_token "$MS_SKILL" "$UNCOMMITTED_TOK")" "no"
 chk "D: 통제 — release SKILL 에 번호경고 토큰 없음"   "$(has_token "$REL_SKILL" "$WARN_TOK")" "no"
 
 # 음성 통제 — 존재하지 않는 가짜 메커니즘 토큰은 규약에 없어야 한다(가드 구별력 입증, B1의 N+1종 부재와 동형).
@@ -631,17 +647,26 @@ chk "G3: 인용 줄 따옴표 종결(줄바꿈 인용 0)"       "$(odd_quote_lin
 # "실행 환경 축" 절) 축마다 집행처를 적는다. 이 파트가 무는 것은 **정확히 다섯**이다:
 # ⑴ 선언된 각 축 이름이 **규약 표의 행**에 실재하는지 ⑵ 축 이름 **집합**이 규약과
 # `tests/discover/README.md`에서 **일치**하는지(Part C의 집합 일치 기법과 동형)
-# ⑶ `env-axis-ci-jobs:` 매핑이 가리킨 CI 잡이 `.github/workflows/tests.yml`에 **잡 키로 실재**하는지
-# ⑷ 그 잡 이름이 **해당 축의 표 행**에 적혀 있는지
-# ⑸ 반대로, **선언된** 축의 행이 워크플로에 **실재하는** 잡 이름을 적으면 그 축이 **매핑에 등재**돼
-#    있는지(커버리지 — 매핑은 옵트인이 아니다).
+# ⑶ 표의 각 `job:<이름>` 토큰이 `.github/workflows/tests.yml`에 **잡 키로 실재**하는지
+# ⑷ 그 토큰이 **선언된 축의 행**에 있는지(미선언 행에 적힌 고아 토큰 = FAIL)
+# ⑸ 반대로, 워크플로에 **실재하는** 잡이 어느 축 행의 `job:` 토큰으로든 **등재**돼 있는지
+#    (커버리지 — 매핑은 옵트인이 아니다).
+# (M39) 매핑의 단일 원본이 `env-axis-ci-jobs:` 선언 줄에서 **표의 `job:<이름>` 토큰**으로 옮겨졌다 —
+# 선언처가 둘에서 하나로 줄었다. 그래서 ⑷의 의미도 바뀌었다: 예전에는 "매핑에 적은 잡이 표 행에도
+# 있는가"였지만(표가 단일 원본이 된 지금 그 물음은 **항진명제**라 공허하게 통과한다), 지금은 "표의
+# 잡 토큰이 **선언된 축**의 행에 있는가"를 묻는다.
 # 무는 범위를 이보다 넓게 말하지 않는다 — 묻지 **않는** 것 넷: ⓐ CI 잡을 **지목하지 않는** 집행처
 # (러너 자기 탐침 · "실제 푸시 뿐" · "미집행")가 오늘도 사실인지 ⓑ 잡을 지목한 칸의 **나머지 서술**
-# ("2 OS" 등)이 실제 구성과 맞는지 ⓒ **실재하지 않는 이름을 잡인 것처럼 적은 산문**(⑸는 실재하는 잡
-# 이름을 축 행에서 되찾는 방향으로만 돈다 — 기계는 임의 백틱 토큰이 잡 지목인지 구별할 수 없다)
-# ⓓ **`env-axes:`에 선언되지 않은 표 행**(위 다섯이 전부 선언된 축을 기점으로 돌기 때문 — 선언에
-# 없는 행은 축이 아니라 표 안의 산문이다). 넷 다 **사람의 리뷰가 본다**(규약의 같은 절 "기계가 묻지
-# 않는 것" 고지가 단일 원본이고 M39 후보인 `job:<이름>` 해소 가능 표기도 거기 적혀 있다).
+# ("2 OS" 등)이 실제 구성과 맞는지 ⓒ **집행 칸의 산문이 실재하지 않는 잡을 주장하는 경우**(아래)
+# ⓓ **`job:` 토큰이 아예 없는 미선언 표 행**(순수 산문 — 위 다섯은 선언된 축이나 `job:` 토큰을
+# 기점으로 돈다). 넷 다 **사람의 리뷰가 본다**(규약의 같은 절 "기계가 묻지 않는 것" 고지가 단일
+# 원본이고 남은 자리를 닫을 M40 후보도 거기 적혀 있다).
+# `job:` 표기가 닫은 것과 닫지 않은 것: 예전에는 집행 칸이 산문이라 **실재하지 않는 이름을 잡인 것처럼
+# 적어도** 검사에 닿지 않았다(기계는 임의 백틱 토큰이 잡 지목인지 구별할 수 없었다 — M38 리뷰가
+# `nowhere`로 실증). `job:` 접두사는 그 모호함을 없애 **토큰으로 지목한 참조**를 ⑶이 물게 한다.
+# 그러나 **산문 주장은 그대로 남는다** — M39 리뷰 실측: 토큰을 둔 채 같은 칸에 "CI `nowhere` 잡도
+# 집행"을 덧붙여도 초록, 토큰 없는 축의 칸을 "CI `nowhere` 잡이 집행"으로 바꿔도 초록(양 셸).
+# 정의가 바뀐 것이지 오도 표면이 사라진 것이 아니다 — 그래서 위 ⓒ를 고지에 남긴다.
 # M38 리뷰가 이 자리를 **두 번** 실측으로 반증했다 — ⑶⑷ 이전에는 `posix` 잡을 지우고 표를 그대로
 # 둬도 **90/0 초록**, ⑸ 이전에는 **선언된** 미등재 축이 실재 잡을 지목해도 초록이었다.
 # 축 이름·잡 이름은 전부 **ASCII 병기어**라 ps1의 ASCII 전용 규율과 정합한다(Part F의 역할 앵커와
@@ -671,15 +696,59 @@ has_axis() { # <집합> <이름> → yes|no
 }
 
 # (H6~H9) 표의 **집행 칸**이 CI 잡을 지목하는 축은 그 잡이 실제로 존재하는지까지 문다.
-# 매핑의 단일 원본은 규약의 `env-axis-ci-jobs: <축>=<잡>` 선언 줄이고, 잡 이름 집합은 워크플로의
-# `jobs:` 블록에서 **발견**한다(목록 하드코딩 금지 — 발견형 유지). H8은 그 잡 이름이 해당 축의
-# 표 행에도 적혀 있는지를 봐서 매핑만 고치고 표를 두는 반대 방향의 드리프트도 막는다.
+# (M39) 매핑의 단일 원본은 **규약 표 행의 `job:<이름>` 토큰**이고(별도 선언 줄 없음), 잡 이름 집합은
+# 워크플로의 `jobs:` 블록에서 **발견**한다(목록 하드코딩 금지 — 발견형 유지). H8은 그 토큰이 **선언된
+# 축의 행**에 있는지를 봐서, 미선언 행에 토큰을 숨겨 두는 반대 방향의 드리프트를 막는다.
 WF="$ROOT/.github/workflows/tests.yml"
-env_axis_jobs() { # <file> → 정렬된 `축=잡` 쌍 (선언 줄 `env-axis-ci-jobs: …` 한 줄에서 추출)
-    grep -F 'env-axis-ci-jobs:' "$1" 2>/dev/null | head -1 |
-        sed 's/.*env-axis-ci-jobs://; s/-->.*//' |
-        tr ' \011' '\n\n' | grep -E '^[a-z][a-z-]*=[a-z][a-z0-9-]*$' |
+AXIS_ROWS="$SBX/axisrows.txt"
+grep -E '^\|' "$CONV" 2>/dev/null > "$AXIS_ROWS"
+
+row_job_tokens() { # <행> → 그 행의 잡 이름들 (`job:<이름>` 토큰에서 접두사를 뗀 것)
+    printf '%s\n' "$1" | grep -o 'job:[a-z][a-z0-9-]*' | sed 's/^job://'
+}
+row_axis_names() { # <행> → 그 행에 백틱으로 실재하는 **선언된** 축 이름들
+    for a in $CONV_AXES; do
+        na=$(printf '`%s`' "$a")
+        case "$1" in *"$na"*) printf '%s\n' "$a" ;; esac
+    done
+}
+env_axis_jobs() { # <file> → 정렬된 `축=잡` 쌍 (규약 표 행의 `job:<이름>` 토큰이 단일 원본)
+    while IFS= read -r row; do
+        case "$row" in *'job:'*) : ;; *) continue ;; esac
+        for j in $(row_job_tokens "$row"); do
+            for a in $(row_axis_names "$row"); do
+                printf '%s=%s\n' "$a" "$j"
+            done
+        done
+    done < "$AXIS_ROWS" | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ *$//'
+}
+job_token_orphan() { # 선언된 축이 없는 행에 적힌 `job:` 토큰 수 (미선언 행에 숨겨 통과하는 것을 막는다)
+    m=0
+    while IFS= read -r row; do
+        case "$row" in *'job:'*) : ;; *) continue ;; esac
+        if [ -z "$(row_axis_names "$row")" ]; then m=$((m + 1)); fi
+    done < "$AXIS_ROWS"
+    echo "$m"
+}
+env_exempt_jobs() { # <file> → 정렬된 면제 잡 이름 (선언 줄 `env-axis-exempt-jobs: …` 한 줄에서 추출)
+    grep -F 'env-axis-exempt-jobs:' "$1" 2>/dev/null | head -1 |
+        sed 's/.*env-axis-exempt-jobs://; s/-->.*//' |
+        tr ' \011' '\n\n' | grep -E '^[a-z][a-z0-9-]*$' |
         LC_ALL=C sort | tr '\n' ' ' | sed 's/ *$//'
+}
+exempt_job_miss() { # 면제 목록이 가리킨 잡이 워크플로에 실재하지 않는 건수 (낡은 면제 방지)
+    m=0
+    for j in $EXEMPT_JOBS; do
+        case " $CI_JOBS " in *" $j "*) : ;; *) m=$((m + 1)) ;; esac
+    done
+    echo "$m"
+}
+no_job_axes() { # `job:` 토큰이 없는 **선언된** 축의 수 (미집행·비-CI 집행 축이 정상임을 보이는 통제)
+    m=0
+    for a in $CONV_AXES; do
+        case " $AXIS_JOBS " in *" $a="*) : ;; *) m=$((m + 1)) ;; esac
+    done
+    echo "$m"
 }
 ci_job_names() { # <workflow> → 정렬된 잡 키 (`jobs:` 블록의 2칸 들여쓰기 키만 — `on:` 아래 키 제외)
     awk '/^jobs:/{f=1;next} f&&/^[A-Za-z]/{f=0} f&&/^  [a-z][a-z0-9-]*:[ \011]*$/{gsub(/[ \011:]/,"");print}' \
@@ -687,6 +756,7 @@ ci_job_names() { # <workflow> → 정렬된 잡 키 (`jobs:` 블록의 2칸 들�
 }
 AXIS_JOBS=$(env_axis_jobs "$CONV")
 CI_JOBS=$(ci_job_names "$WF")
+EXEMPT_JOBS=$(env_exempt_jobs "$CONV")
 NAXJOBS=$(printf '%s\n' "$AXIS_JOBS" | tr ' ' '\n' | grep -c .)
 
 axis_job_miss() { # 매핑이 가리킨 잡이 워크플로에 실재하지 않는 건수
@@ -694,15 +764,6 @@ axis_job_miss() { # 매핑이 가리킨 잡이 워크플로에 실재하지 않�
     for pair in $AXIS_JOBS; do
         j=${pair#*=}
         case " $CI_JOBS " in *" $j "*) : ;; *) m=$((m + 1)) ;; esac
-    done
-    echo "$m"
-}
-axis_job_row_miss() { # 그 잡 이름이 해당 축의 규약 표 행에 적혀 있지 않은 건수
-    m=0
-    for pair in $AXIS_JOBS; do
-        a=${pair%%=*}; j=${pair#*=}
-        na=$(printf '`%s`' "$a"); nj=$(printf '`%s`' "$j")
-        if grep -F -- "$na" "$CONV" | grep -E '^\|' | grep -qF -- "$nj"; then : ; else m=$((m + 1)); fi
     done
     echo "$m"
 }
@@ -715,29 +776,20 @@ chk "H2: 선언된 축마다 규약 표 행 실재"            "$(axis_row_miss)
 chk "H3: 축 이름 집합 일치(규약 ↔ discover README)" "$([ -n "$CONV_AXES" ] && [ "$CONV_AXES" = "$READ_AXES" ] && echo yes || echo no)" "yes"
 chk "H4: 통제 — 가짜 축 이름(bogus-axis) 규약 부재" "$(has_axis "$CONV_AXES" bogus-axis)" "no"
 chk "H5: 통제 — 가짜 축 이름(bogus-axis) README 부재" "$(has_axis "$READ_AXES" bogus-axis)" "no"
-# (H10·H11) **커버리지** — 매핑은 옵트인이 아니다. 워크플로에서 발견한 잡 이름을 어떤 축 행이
-# 적고 있으면 그 축은 매핑에 `축=잡`으로 등재돼 있어야 한다. 없으면 매핑에 올리지 않는 것만으로
-# H7·H8을 피해 갈 수 있다 — M38 리뷰가 그 옆문을 실측으로 열어 보였다(미등재 축의 집행 칸에 없는
-# 잡 이름을 적어도 94/0 초록). 발견형이라 잡 목록도 축 목록도 하드코딩하지 않는다.
-axis_job_cover() { # → "<대조 성사 수> <미등재 수>"
+# (H10·H11) **커버리지** — 등재는 옵트인이 아니다. 워크플로에서 **발견한** 잡은 어느 축 행의
+# `job:` 토큰으로든 등재돼 있어야 한다. 없으면 표에 올리지 않는 것만으로 H7·H8을 피해 갈 수 있다 —
+# M38 리뷰가 그 옆문을 실측으로 열어 보였다(미등재 축의 집행 칸에 없는 잡 이름을 적어도 94/0 초록).
+# 발견형이라 잡 목록도 축 목록도 하드코딩하지 않는다.
+axis_job_cover() { # → "<등재된 잡 수> <미등재·미면제 잡 수>"
     n=0; m=0
     for j in $CI_JOBS; do
-        nj=$(printf '`%s`' "$j")
-        grep -F -- "$nj" "$CONV" 2>/dev/null | grep -E '^\|' > "$SBX/jobrows.txt"
-        while IFS= read -r row; do
-            for a in $CONV_AXES; do
-                na=$(printf '`%s`' "$a")
-                case "$row" in
-                    *"$na"*)
-                        n=$((n + 1))
-                        case " $AXIS_JOBS " in
-                            *" $a=$j "*) : ;;
-                            *) m=$((m + 1)) ;;
-                        esac
-                        ;;
-                esac
-            done
-        done < "$SBX/jobrows.txt"
+        case " $AXIS_JOBS " in
+            *"=$j "*) n=$((n + 1)); continue ;;
+        esac
+        case " $EXEMPT_JOBS " in
+            *" $j "*) continue ;;
+            *) m=$((m + 1)) ;;
+        esac
     done
     echo "$n $m"
 }
@@ -745,12 +797,17 @@ COVER=$(axis_job_cover)
 COVER_HITS=${COVER% *}
 COVER_MISS=${COVER#* }
 
-chk "H6: 축→CI 잡 매핑 추출 positive-control(>0)"  "$([ "$NAXJOBS" -gt 0 ] && echo ok || echo no)" "ok"
-chk "H7: 매핑된 CI 잡이 워크플로에 실재"           "$(axis_job_miss)" "0"
-chk "H8: 매핑된 잡 이름이 해당 축 표 행에 실재"    "$(axis_job_row_miss)" "0"
+chk "H6: 표의 job: 토큰 추출 positive-control(>0)"  "$([ "$NAXJOBS" -gt 0 ] && echo ok || echo no)" "ok"
+chk "H7: 표가 적은 CI 잡이 워크플로에 실재"        "$(axis_job_miss)" "0"
+chk "H8: job: 토큰이 선언된 축 행에 있음(고아 0)"  "$(job_token_orphan)" "0"
 chk "H9: 통제 — 가짜 잡 이름(bogus-job) 워크플로 부재" "$(has_job "$CI_JOBS" bogus-job)" "no"
 chk "H10: 커버리지 대조 positive-control(>0)"      "$([ "$COVER_HITS" -gt 0 ] && echo ok || echo no)" "ok"
-chk "H11: 축 행이 적은 CI 잡이 매핑에 등재"        "$COVER_MISS" "0"
+chk "H11: 워크플로의 CI 잡이 축 행 등재 또는 면제 선언" "$COVER_MISS" "0"
+# (H12) 통제 — `job:` 토큰이 **없는** 선언 축(비-CI 집행·미집행)이 실재하고, 그것이 FAIL을 만들지
+# 않음을 보인다. 토큰 부재가 곧 "CI 잡 집행 없음"의 정직한 표기이므로, 이 경로가 살아 있어야 한다.
+chk "H12: 토큰 없는 선언 축 실재 positive-control(>0)" "$([ "$(no_job_axes)" -gt 0 ] && echo ok || echo no)" "ok"
+# (H13) 면제 선언도 드리프트한다 — 잡을 지우거나 이름을 바꾸면서 면제만 남기면 낡은 선언이 된다.
+chk "H13: 면제 선언된 잡이 워크플로에 실재"        "$(exempt_job_miss)" "0"
 
 declared_cases() {
     # **첫 매치 고정** — sed의 선행 `.*`는 탐욕이라 한 줄에 `cases:`가 둘이면 **마지막**을 집는데
@@ -782,4 +839,4 @@ chk "F1: README cases 선언 == 실제 케이스 수" "$(declared_cases)" "$((pa
 echo
 echo "# 결과: PASS=$pass FAIL=$fail (실제 커맨드 스킬 N=$N)"
 [ "$fail" -eq 0 ] || exit 1
-echo "# discover 감지 임계값(≥2→hint·<2→none·단일 레포→none·숨김 미카운트) + 단일 원본 동결(B1 카운트 정합·B2 사이트 셸·B3 카탈로그 완전성, 캐노니컬=docs/commands.md, 실제 ${N}종) + 선언 정합(C1 상태값 네 값×세 파일·부재 통제·C2 기준선×세 템플릿·C3 phase 명단 기록·비기록 두 목록의 규약↔발행 페이지 집합 일치·유일 열거처·서로소·음성 통제·D 브랜치 협업 안전 커버리지·번호경고 규약↔스킬 정합·E 리뷰 검증 규율 반증 시도·판정 계측·재작업 라운드 규약↔스킬↔템플릿 정합 + 계측 줄 골격 형식 정합 + 재검증 선언 + 교차·음성 통제 · F 문서 자기서술 정합 = 역할 앵커 추출·캐노니컬 행 실재·소비자 전파 + 케이스 수 자기 정합 · G 상호참조 무결성 = 인용 추출·앵커 실재 대조 + 추출 0건·이름 유일성·줄바꿈 인용 통제 · H 실행 환경 축 선언 정합 = 축 이름 추출·규약 표 행 실재·집합 일치·CI 잡 매핑의 워크플로 실재와 해당 축 표 행 실재·매핑 커버리지(축 행이 적은 잡의 등재)·음성 통제 — 잡을 지목하지 않는 집행 칸과 잡을 지목한 칸의 나머지 서술은 사람의 리뷰 영역이라 여기서 묻지 않음) 확인됨 (참조 구현 기준)"
+echo "# discover 감지 임계값(≥2→hint·<2→none·단일 레포→none·숨김 미카운트) + 단일 원본 동결(B1 카운트 정합·B2 사이트 셸·B3 카탈로그 완전성, 캐노니컬=docs/commands.md, 실제 ${N}종) + 선언 정합(C1 상태값 네 값×세 파일·부재 통제·C2 기준선×세 템플릿·C3 phase 명단 기록·비기록 두 목록의 규약↔발행 페이지 집합 일치·유일 열거처·서로소·음성 통제·D 브랜치 협업 안전 커버리지(커밋 diff·미커밋 범위 두 토큰 — 규약↔스킬↔캐노니컬 카탈로그)·번호경고 규약↔스킬 정합·E 리뷰 검증 규율 반증 시도·판정 계측·재작업 라운드 규약↔스킬↔템플릿 정합 + 계측 줄 골격 형식 정합 + 재검증 선언 + 교차·음성 통제 · F 문서 자기서술 정합 = 역할 앵커 추출·캐노니컬 행 실재·소비자 전파 + 케이스 수 자기 정합 · G 상호참조 무결성 = 인용 추출·앵커 실재 대조 + 추출 0건·이름 유일성·줄바꿈 인용 통제 · H 실행 환경 축 선언 정합 = 축 이름 추출·규약 표 행 실재·집합 일치·표의 job: 토큰이 가리킨 잡의 워크플로 실재와 선언 축 행 소속(고아 0)·커버리지(실재 잡의 등재 또는 면제 선언)·면제 선언의 실재·무토큰 축 통제·음성 통제 — 잡을 지목하지 않는 집행 칸과 잡을 지목한 칸의 나머지 서술은 사람의 리뷰 영역이라 여기서 묻지 않음) 확인됨 (참조 구현 기준)"
