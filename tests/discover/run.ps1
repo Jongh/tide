@@ -460,9 +460,11 @@ try {
 
     $REL_SKILL = Join-Path $ROOT 'skills\release\SKILL.md'
     $MS_SKILL  = Join-Path $ROOT 'skills\milestone\SKILL.md'
+    $CONV_REL  = Join-Path $ROOT 'docs\conventions-release.md'   # conventions FRAGMENT (M35 split)
     $COV_TOK  = 'git diff --name-only'
     $UNCOMMITTED_TOK = 'git status --porcelain'
     $WARN_TOK = 'git log --all'
+    $PRCI_TOK = 'gh pr checks'
 
     Chk "D1: conventions declares coverage check ($COV_TOK)"      (HasToken $CONV $COV_TOK)      'yes'
     Chk "D1: release SKILL wires coverage check"                  (HasToken $REL_SKILL $COV_TOK) 'yes'
@@ -477,10 +479,18 @@ try {
     # the consumer doc closes that class (same intent as Part F's role-anchor consumer propagation).
     Chk "D4: canonical catalog declares uncommitted scope" (HasToken $CANON_CMD $UNCOMMITTED_TOK) 'yes'
 
+    # (D5/M40 review rec.1) The `workflow-syntax` axis wiring (the `pr` finalize PR-CI lookup) is the
+    # same conventions<->skill class as D1..D4, but M40 added the prose without the binding -- measured:
+    # deleting the wiring from the release skill still scored 107/0 green. The conventions single source
+    # here is a FRAGMENT (conventions-release.md), so only the bound file differs; the technique is D1's.
+    Chk "D5: conventions fragment declares PR CI check ($PRCI_TOK)" (HasToken $CONV_REL $PRCI_TOK)  'yes'
+    Chk "D5: release SKILL wires PR CI check"                       (HasToken $REL_SKILL $PRCI_TOK) 'yes'
+
     # cross control: each mechanism must be ABSENT from the opposite skill (token discriminates).
     Chk "D: control -- milestone SKILL has no coverage token"  (HasToken $MS_SKILL $COV_TOK)  'no'
     Chk "D: control -- milestone SKILL has no uncommitted-scope token" (HasToken $MS_SKILL $UNCOMMITTED_TOK) 'no'
     Chk "D: control -- release SKILL has no number-warn token" (HasToken $REL_SKILL $WARN_TOK) 'no'
+    Chk "D: control -- milestone SKILL has no PR CI token"      (HasToken $MS_SKILL $PRCI_TOK) 'no'
 
     # negative control: a bogus mechanism token must NOT appear in conventions (guard discriminates).
     Chk "D: control -- conventions has no bogus token" (HasToken $CONV 'git diff --bogus-only') 'no'
@@ -765,6 +775,11 @@ try {
 
     # $aset = union over the whole set (bogus-name control); $dset = names appearing in more than one
     # place (uniqueness is a WHOLE-SET rule: a split must not put the same name in two files).
+    # Comparison is ORDINAL here: HashSet[string]'s default comparer is ordinal, i.e. byte-exact.
+    # The .sh twin must say the same thing with `LC_ALL=C` on both `sort` and `uniq` -- without it the
+    # comparison becomes collation-based and the two shells stop meaning the same thing. That was a
+    # real divergence: GNU platforms happened to agree anyway, and the BSD (macOS) leg reported 3
+    # duplicates where every GNU environment reported 0 (M40, caught by this milestone's own new leg).
     $aset = New-Object 'System.Collections.Generic.HashSet[string]'
     $dset = New-Object 'System.Collections.Generic.HashSet[string]'
     foreach ($a in $gAnchors) { if (-not $aset.Add($a)) { [void]$dset.Add($a) } }
@@ -780,6 +795,11 @@ try {
     Chk "G2: citation extraction positive control (>0)" $(if ($gCites.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
     Chk "G2: anchor extraction positive control (>0)"   $(if ($gAnchors.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
     Chk "G2: control -- bogus anchor name (bogus-section) absent" $(if ($aset.Contains('bogus-section')) { 'yes' } else { 'no' }) 'no'
+    # On failure, NAME the duplicates. A counting assertion goes red without saying why -- that is
+    # exactly what stopped M40 from reproducing the BSD divergence locally, and the .sh twin prints
+    # them for the same reason. (A missing/empty anchor file cannot pass vacuously here: the anchor
+    # extraction positive control above fails first.)
+    if ($dset.Count -ne 0) { Write-Host ("  -> duplicate anchors: " + (($dset | Sort-Object) -join ' ')) }
     Chk "G2: anchor names unique after normalization" ([string]$dset.Count) '0'
     Chk "G3: citation lines have balanced quotes (no wrapped citation)" ([string]$gOdd) '0'
 
@@ -797,13 +817,18 @@ try {
     # `job:<name>` tokens -- two declaration sites became one. That changed (4)'s meaning: it used to
     # ask "is the mapped job also in the table row" which, now that the table IS the source, would be
     # a TAUTOLOGY (a vacuous pass); it now asks "is the table's job token in a DECLARED axis row".
-    # It does not claim more. FOUR things are not asked by any machine: (a) whether an enforcement
-    # cell that names NO CI job (the runner's own probe, "only a real push", "unenforced") is still
-    # true; (b) whether the REST of a job-naming cell's prose ("2 OS", "matrix") matches reality;
-    # (c) PROSE in an enforcement cell claiming a job that does not exist (see below); (d) an
-    # undeclared table row carrying NO `job:` token at all (pure prose -- the five checks start
-    # from declared axes or from `job:` tokens). That layer is the human review's; the convention's
-    # "what the machine does not ask" notice is the single source and records the M40 candidate.
+    # It does not claim more. THREE things are not asked by any machine: (a) whether an enforcement
+    # cell that names NO CI job (the runner's own probe, "only a real push" + the `pr` finalize CI
+    # lookup) is still true; (b) whether the REST of a job-naming cell's prose ("3 OS", "matrix")
+    # matches reality; (c) PROSE in an enforcement cell claiming a job that does not exist (below).
+    # That layer is the human review's; the convention's "what the machine does not ask" notice is
+    # the single source.
+    # (M40) The former fourth item -- an UNDECLARED table row -- is closed. The `axis:` notation
+    # (H14..H16) plus DATA ROW COUNT == NOTATION COUNT (H17) lets axes be counted from the TABLE side
+    # too, so the comparison is bidirectional. Before deleting the item, three attacks were measured
+    # in both shells: an undeclared row WITH a notation (H15 fails), a pure-prose row with NO notation
+    # (H17b fails), and a declared axis whose notation is removed (H2/H15/H17b fail). Shrinking the
+    # notice on the strength of "the notation exists" alone would itself be the `vacuous-pass` class.
     # What `job:` closed AND did not close: enforcement cells used to be prose, so a NON-EXISTENT name
     # written as if it were a job never reached the check (no machine can tell whether an arbitrary
     # backticked token is a job reference -- the M38 review measured this with `nowhere`). The `job:`
@@ -832,13 +857,53 @@ try {
     $readAxes = EnvAxes $DISC_README
     $nAxes = @($convAxes -split ' ' | Where-Object { $_ -ne '' }).Count
 
+    # (H14..H16 / M40) `axis:<name>` -- the RESOLVABLE notation for axis names. Before it, every check
+    # started from the `env-axes:` declaration, so a table row NOT in the declaration escaped all of
+    # them (M38 measured it: an undeclared `ghost-axis` row naming a real job stayed green). Counting
+    # axes from the TABLE side too makes the comparison BIDIRECTIONAL -- declared-but-unwritten and
+    # written-but-undeclared both FAIL. Same shape as `job:`, so the extractor is the same shape too.
+    function TableAxisTokens($file) {
+        $raw = ReadUtf8 $file
+        if ($null -eq $raw) { return '' }
+        $rows = @(($raw -split "`r?`n") | Where-Object { $_.StartsWith('|', [System.StringComparison]::Ordinal) })
+        $tok = @()
+        foreach ($row in $rows) {
+            foreach ($m in [regex]::Matches($row, 'axis:[a-z][a-z-]*')) { $tok += $m.Value.Substring(5) }
+        }
+        return ((@($tok | Sort-Object -CaseSensitive -Unique)) -join ' ')
+    }
+    $convAxisTokens = TableAxisTokens $CONV
+    $nAxisTok = @($convAxisTokens -split ' ' | Where-Object { $_ -ne '' }).Count
+
+    # (H17) Set equality alone cannot see a row carrying NO notation -- it contributes nothing to the
+    # set and passes quietly (that is exactly the "prose inside the axis table" seat). So the DATA ROW
+    # COUNT is compared with the NOTATION COUNT. The table's range is anchored on the `env-axes:`
+    # declaration line (the first markdown table after it): anchoring on the Korean header would break
+    # this file's ASCII-only source discipline, so an ASCII declaration line is the anchor instead.
+    function AxisTableDataRows($file) {
+        $raw = ReadUtf8 $file
+        if ($null -eq $raw) { return @() }
+        $out = @(); $f = 0
+        foreach ($line in ($raw -split "`r?`n")) {
+            $isRow = $line.StartsWith('|', [System.StringComparison]::Ordinal)
+            if ($f -eq 0) { if ($line.Contains('env-axes:')) { $f = 1 }; continue }
+            if ($f -eq 1) { if ($isRow) { $f = 2 }; continue }
+            if ($f -eq 2) { if ($isRow) { $f = 3 }; continue }
+            if ($f -eq 3) { if ($isRow) { $out += $line; continue } else { break } }
+        }
+        return $out
+    }
+    $axisDataRows = @(AxisTableDataRows $CONV)
+    $nAxisRows = $axisDataRows.Count
+    $nAxisRowTok = @($axisDataRows | Where-Object { $_ -match 'axis:[a-z]' }).Count
+
     # (H2) every declared axis must occur in a TABLE ROW (line starting with '|') of the convention --
     # declaring an axis without wiring it into the table is the "claims enforcement it does not have"
     # class this milestone exists to remove.
     $axisRowMiss = 0
     $convLines = @((ReadUtf8 $CONV) -split "`r?`n")
     foreach ($a in @($convAxes -split ' ' | Where-Object { $_ -ne '' })) {
-        $needle = '`' + $a + '`'
+        $needle = '`axis:' + $a + '`'
         $hit = @($convLines | Where-Object { $_.StartsWith('|', [System.StringComparison]::Ordinal) -and $_.Contains($needle) }).Count
         if ($hit -eq 0) { $axisRowMiss++ }
     }
@@ -855,7 +920,7 @@ try {
         return @([regex]::Matches($row, 'job:[a-z][a-z0-9-]*') | ForEach-Object { $_.Value.Substring(4) })
     }
     function RowAxisNames($row, $axes) {
-        return @($axes | Where-Object { $row.Contains('`' + $_ + '`') })
+        return @($axes | Where-Object { $row.Contains('`axis:' + $_ + '`') })
     }
     function EnvAxisJobs($rows, $axes) {
         $pairs = @()
@@ -952,6 +1017,16 @@ try {
     Chk "H11: every workflow job is registered by an axis row or declared exempt" ([string]$coverMiss) '0'
     Chk "H12: declared axes without a job: token exist, positive control (>0)" $(if ($noJobAxes -gt 0) { 'ok' } else { 'no' }) 'ok'
     Chk "H13: every exempt-declared job exists in the workflow" ([string]$exemptJobMiss) '0'
+    # (H14..H16 / M40) `axis:` notation -- extraction positive control + BIDIRECTIONAL set equality.
+    # One direction alone is half the job: declared-but-missing-row is already H2's, but a token that
+    # exists WITHOUT a declaration (an undeclared row) is caught here for the first time.
+    Chk "H14: axis: notation extraction positive control (>0)" $(if ($nAxisTok -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "H15: axis: token set == env-axes declaration set" $(if ($convAxisTokens -ne '' -and $convAxisTokens -eq $convAxes) { 'yes' } else { 'no' }) 'yes'
+    Chk "H16: control -- bogus axis notation (bogus-axis) absent in table" (HasAxis $convAxisTokens 'bogus-axis') 'no'
+    # (H17) A data row without a notation is prose inside the table. Row count must equal notation
+    # count; the row-count positive control keeps 0==0 from passing vacuously.
+    Chk "H17a: axis table data-row extraction positive control (>0)" $(if ($nAxisRows -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "H17b: axis table data-row count == axis: notation count" $(if ($nAxisRows -eq $nAxisRowTok) { 'yes' } else { 'no' }) 'yes'
 
     function DeclaredCases() {
         # FIRST match, deliberately -- the sh side now pins the same end (M38 review minor 4: sed's
@@ -993,5 +1068,5 @@ if (-not $script:completed) {
     exit 1
 }
 if ($script:fail -ne 0) { exit 1 }
-Write-Host "# discover detection threshold (>=2->hint / <2->none / single-repo->none / hidden-not-counted) + single-source freeze (B1 count / B2 site shell / B3 catalog completeness, canonical=docs/commands.md) + declaration consistency (C1 four statuses x three files + absence control / C2 baseline x three templates / C3 phase roster both lists (writer + non-writer) conventions<->published page set equality, sole enumerator, disjointness, negative control / D cross-branch coverage (committed-diff + uncommitted-scope tokens; conventions<->skill<->canonical catalog)+number-warn conventions<->skill / E review verification discipline refutation+metrics+rework conventions<->skill<->template plus metrics-line skeleton format plus re-verify declaration plus cross and negative controls / F document self-description = role-anchor extraction, canonical-row presence, consumer propagation plus case-count self-consistency / G cross-reference integrity = citation extraction vs real anchors plus empty-extraction, name-uniqueness and wrapped-citation controls / H execution-environment axis declaration = axis-name extraction, convention table row, set equality, table job: tokens exist in the workflow and sit in declared axis rows (orphans 0), coverage (every real job registered or declared exempt), exemption freshness, no-token axis control, negative controls -- cells naming no CI job, and the rest of a job-naming cell's prose, are the human review's layer, not asked here) confirmed"
+Write-Host "# discover detection threshold (>=2->hint / <2->none / single-repo->none / hidden-not-counted) + single-source freeze (B1 count / B2 site shell / B3 catalog completeness, canonical=docs/commands.md) + declaration consistency (C1 four statuses x three files + absence control / C2 baseline x three templates / C3 phase roster both lists (writer + non-writer) conventions<->published page set equality, sole enumerator, disjointness, negative control / D cross-branch coverage (committed-diff + uncommitted-scope tokens; conventions<->skill<->canonical catalog)+number-warn conventions<->skill + PR-CI-check fragment<->skill / E review verification discipline refutation+metrics+rework conventions<->skill<->template plus metrics-line skeleton format plus re-verify declaration plus cross and negative controls / F document self-description = role-anchor extraction, canonical-row presence, consumer propagation plus case-count self-consistency / G cross-reference integrity = citation extraction vs real anchors plus empty-extraction, name-uniqueness and wrapped-citation controls / H execution-environment axis declaration = axis-name extraction, convention table row, set equality, table job: tokens exist in the workflow and sit in declared axis rows (orphans 0), coverage (every real job registered or declared exempt), exemption freshness, no-token axis control, axis: notation bidirectional equality, data-row count, negative controls -- cells naming no CI job, and the rest of a job-naming cell's prose, are the human review's layer, not asked here) confirmed"
 exit 0

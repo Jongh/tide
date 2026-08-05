@@ -85,12 +85,20 @@ jobs:
           }
           Write-Host "all $($harnesses.Count) harnesses passed"
 
+  # The `external-tool` axis (M40): sed/awk/grep are not one implementation. ubuntu carries GNU tools,
+  # macOS carries BSD ones, and the same script can pass on one and silently differ on the other --
+  # M37's release already caught one place where "ubuntu passed" only because GNU sed happened to
+  # cover for it. The macOS leg is what enforces that axis; it is a matrix leg of THIS job, so the
+  # job key stays `posix` and the axis table needs no new `job:` token.
+  # NOTE (honesty): a leg that is added but allowed to fail (continue-on-error) or that skips cases
+  # would be the `vacuous-pass` class -- a job that runs and is ignored. If a BSD failure cannot be
+  # closed, the leg is REMOVED and the axis goes back to "unenforced" with the measured reason.
   posix:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        os: [windows-latest, ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - name: discover and run every run.sh harness

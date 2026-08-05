@@ -143,7 +143,10 @@ dependents_of() { # <parent> <failed>
         frontier="$next"
     done
     # reached에서 failed 자신 제외, 정렬 출력
-    for x in $reached; do [ "$x" = "$failed" ] || echo "$x"; done | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//'
+    # `LC_ALL=C`는 선택이 아니다 — 이 출력은 **문자열로 비교**되므로 정렬 **순서**가 판정을 바꾼다.
+    # 로케일이 걸리면 collation이 `-` 같은 구두점을 무시해 `svc-a`/`svca` 류의 순서가 갈린다(M40:
+    # 같은 부류의 누락 하나가 discover Part G2에서 GNU 0 ↔ BSD 3으로 실제 판정을 갈랐다).
+    for x in $reached; do [ "$x" = "$failed" ] || echo "$x"; done | LC_ALL=C sort | tr '\n' ' ' | sed 's/[[:space:]]*$//'
 }
 # classify_on_failure: <parent> <failed> <repo> → skip|ok|failed
 classify_on_failure() {
