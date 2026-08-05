@@ -775,6 +775,11 @@ try {
 
     # $aset = union over the whole set (bogus-name control); $dset = names appearing in more than one
     # place (uniqueness is a WHOLE-SET rule: a split must not put the same name in two files).
+    # Comparison is ORDINAL here: HashSet[string]'s default comparer is ordinal, i.e. byte-exact.
+    # The .sh twin must say the same thing with `LC_ALL=C` on both `sort` and `uniq` -- without it the
+    # comparison becomes collation-based and the two shells stop meaning the same thing. That was a
+    # real divergence: GNU platforms happened to agree anyway, and the BSD (macOS) leg reported 3
+    # duplicates where every GNU environment reported 0 (M40, caught by this milestone's own new leg).
     $aset = New-Object 'System.Collections.Generic.HashSet[string]'
     $dset = New-Object 'System.Collections.Generic.HashSet[string]'
     foreach ($a in $gAnchors) { if (-not $aset.Add($a)) { [void]$dset.Add($a) } }
@@ -790,6 +795,11 @@ try {
     Chk "G2: citation extraction positive control (>0)" $(if ($gCites.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
     Chk "G2: anchor extraction positive control (>0)"   $(if ($gAnchors.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
     Chk "G2: control -- bogus anchor name (bogus-section) absent" $(if ($aset.Contains('bogus-section')) { 'yes' } else { 'no' }) 'no'
+    # On failure, NAME the duplicates. A counting assertion goes red without saying why -- that is
+    # exactly what stopped M40 from reproducing the BSD divergence locally, and the .sh twin prints
+    # them for the same reason. (A missing/empty anchor file cannot pass vacuously here: the anchor
+    # extraction positive control above fails first.)
+    if ($dset.Count -ne 0) { Write-Host ("  -> duplicate anchors: " + (($dset | Sort-Object) -join ' ')) }
     Chk "G2: anchor names unique after normalization" ([string]$dset.Count) '0'
     Chk "G3: citation lines have balanced quotes (no wrapped citation)" ([string]$gOdd) '0'
 
