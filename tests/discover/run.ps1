@@ -289,13 +289,23 @@ try {
         }
         return ''
     }
+    # Ordinal sort + dedupe. Sort-Object -CaseSensitive is CULTURE-aware, not ordinal: it orders
+    # 'docs/...' before 'README.md' (letter first, case second) while run.sh's `LC_ALL=C sort` is
+    # byte-ordinal and puts 'README.md' first. The two copies must mean the same thing, so this helper
+    # pins the ps1 side to ordinal -- the same fix M40 applied when a missing LC_ALL=C split the two
+    # shells on BSD. It was latent until C-4 compared a list mixing upper- and lower-case initials.
+    function OrdinalSortUnique($items) {
+        $set = New-Object 'System.Collections.Generic.SortedSet[string]' ([System.StringComparer]::Ordinal)
+        foreach ($it in $items) { [void]$set.Add([string]$it) }
+        return @($set)
+    }
     function RosterSet($file) {
         $ln = RosterLine $file
         if ($ln -eq '') { return '' }
         $names = @()
         foreach ($m in [regex]::Matches($ln, '`([a-z][a-z-]*)`')) { $names += $m.Groups[1].Value }
         if ($names.Count -eq 0) { return '' }
-        return (($names | Sort-Object -Unique -CaseSensitive) -join ' ')
+        return ((OrdinalSortUnique $names) -join ' ')
     }
     function RosterCount($file) {
         $s = RosterSet $file
@@ -359,7 +369,7 @@ try {
             if ((RosterLine $f) -ne '') { $hits += (RelPath $f) }
         }
         if ($hits.Count -eq 0) { return '' }
-        return (($hits | Sort-Object -Unique -CaseSensitive) -join ' ')
+        return ((OrdinalSortUnique $hits) -join ' ')
     }
 
     # Non-writer roster -- shortest window (max 4 consecutive lines) holding all six names. Measured
@@ -392,7 +402,7 @@ try {
         $names = @()
         foreach ($m in [regex]::Matches($win, '`([a-z][a-z-]*)`')) { $names += $m.Groups[1].Value }
         if ($names.Count -eq 0) { return '' }
-        return (($names | Sort-Object -Unique -CaseSensitive) -join ' ')
+        return ((OrdinalSortUnique $names) -join ' ')
     }
     function NonWriterCount($file) {
         $s = NonWriterSet $file
@@ -408,7 +418,7 @@ try {
             if ((NonWriterWindow $f) -ne '') { $hits += (RelPath $f) }
         }
         if ($hits.Count -eq 0) { return '' }
-        return (($hits | Sort-Object -Unique -CaseSensitive) -join ' ')
+        return ((OrdinalSortUnique $hits) -join ' ')
     }
     # Set equality -- BOTH empty must be 'no'. '' -eq '' is true, so the day extraction breaks entirely
     # this assertion would pass vacuously (M37 review minor #4).
@@ -445,6 +455,74 @@ try {
     Chk "C3: roster control -- published page has no 'phantom-cmd'" (RosterHas $CONCEPTS 'phantom-cmd') 'no'
     Chk "C3: non-writer control -- conventions has no 'phantom-cmd'"    (NonWriterHas $CONV 'phantom-cmd')     'no'
     Chk "C3: non-writer control -- published page has no 'phantom-cmd'" (NonWriterHas $CONCEPTS 'phantom-cmd') 'no'
+
+    # (C4) 2.0 stable command ROSTER (M41) -- same class as C-3, so it lives in this part instead of a
+    # new one. The conventions section "2.0 stability" fixes the roster's enumerators at TWO files
+    # (conventions + README); every other living document points at that section instead of restating
+    # the names. This case enforces that declaration.
+    #   "12 commands" and "11 commands" are DIFFERENT FACTS -- the former is the actual count of
+    #   skills/*/SKILL.md files (B1 counts and compares it), the latter is a FROZEN DECLARATION that no
+    #   filesystem can count, so it is only enforceable by roster comparison. That is why this cannot be
+    #   bolted onto B1 and needs its own extractor.
+    #   Extraction unit = window (max 4 lines): the shortest run of consecutive lines holding all eleven
+    #   names. Measured spans are conventions 3 lines / README 1 line; the cap is 4, same as C-3 -- go
+    #   past it and the window is not found, so the count case fails loudly (that cap IS the enforcement
+    #   boundary and run.sh uses the same value).
+    #   Needles include the CLOSING backtick so that `/tide:fleet` cannot match inside
+    #   `/tide:fleet-cycle` (same reason B3 demands boundaries).
+    #   /tide:debug is NOT in the frozen set -- if it drifts into the window the count becomes 12 and
+    #   this fails. Promotion is a major-version decision, and paying for it in conventions + README +
+    #   this runner at the same time is the intended cost.
+    $STABLE_NEEDLES = @('`/tide:kickoff`','`/tide:milestone`','`/tide:impl`','`/tide:review`',
+                        '`/tide:cycle`','`/tide:release`','`/tide:retro`','`/tide:status`',
+                        '`/tide:fleet`','`/tide:fleet-cycle`','`/tide:fleet-verify`')
+    function StableWindow($file) {
+        $raw = ReadUtf8 $file
+        if ($null -eq $raw) { return '' }
+        foreach ($n in $STABLE_NEEDLES) { if (-not $raw.Contains($n)) { return '' } }
+        $L = @($raw -split "`r?`n")
+        $WMAX = 4
+        for ($w = 1; $w -le $WMAX; $w++) {
+            for ($i = 0; ($i + $w) -le $L.Count; $i++) {
+                $s = ($L[$i..($i + $w - 1)] -join "`n")
+                $ok = $true
+                foreach ($n in $STABLE_NEEDLES) { if (-not $s.Contains($n)) { $ok = $false; break } }
+                if ($ok) { return $s }
+            }
+        }
+        return ''
+    }
+    function StableSet($file) {
+        $win = StableWindow $file
+        if ($win -eq '') { return '' }
+        $names = @()
+        foreach ($m in [regex]::Matches($win, '`/tide:([a-z][a-z-]*)`')) { $names += $m.Groups[1].Value }
+        if ($names.Count -eq 0) { return '' }
+        return ((OrdinalSortUnique $names) -join ' ')
+    }
+    function StableCount($file) {
+        $s = StableSet $file
+        if ($s -eq '') { return 0 }
+        return ($s -split ' ').Count
+    }
+    function StableHas($file, $name) {
+        if ((' ' + (StableSet $file) + ' ') -like ('* ' + $name + ' *')) { return 'yes' } else { return 'no' }
+    }
+    function StableFiles {
+        $hits = @()
+        foreach ($f in (RosterScanFiles)) {
+            if ((StableWindow $f) -ne '') { $hits += (RelPath $f) }
+        }
+        if ($hits.Count -eq 0) { return '' }
+        return ((OrdinalSortUnique $hits) -join ' ')
+    }
+
+    Chk "C4: conventions stable roster holds 11 names" (StableCount $CONV)   11
+    Chk "C4: README stable roster holds 11 names"      (StableCount $README) 11
+    Chk "C4: the two stable rosters are identical" (SetsEqual (StableSet $CONV) (StableSet $README)) 'yes'
+    Chk "C4: only conventions + README enumerate the stable roster" (StableFiles) 'README.md docs/conventions.md'
+    Chk "C4: stable control -- conventions has no 'phantom-stable'" (StableHas $CONV 'phantom-stable')   'no'
+    Chk "C4: stable control -- README has no 'phantom-stable'"      (StableHas $README 'phantom-stable') 'no'
 
     # === Part D -- cross-branch collaboration safety (M31) declaration consistency ==========
     # (M31) Same class as Part B/C -- bind the conventions single source and the skill that wires it.
@@ -802,6 +880,83 @@ try {
     if ($dset.Count -ne 0) { Write-Host ("  -> duplicate anchors: " + (($dset | Sort-Object) -join ' ')) }
     Chk "G2: anchor names unique after normalization" ([string]$dset.Count) '0'
     Chk "G3: citation lines have balanced quotes (no wrapped citation)" ([string]$gOdd) '0'
+
+    # (G4) SELF-references inside one file are enforced too (M41). M34 created cross-reference integrity
+    # and left this layer outside the guard ("the skeleton carries no filename -- human review"), and it
+    # stayed there for SIX cycles.
+    # SCOPE IS LivingDocs, the same as G1. Looking only at the conventions set leaves the layer the
+    # convention calls "closed" wide open in skills/, README.md and tests/*/README.md -- that is exactly
+    # what got M41 round 1 blocked (measured: a broken self-reference planted outside conventions stayed
+    # green).
+    # Resolution is against THAT FILE'S OWN anchors -- a self-reference points at its own file by
+    # definition, so comparing against the whole set would pass a reference aimed at another file (round
+    # 1's safe-side choice turns into over-permission once the scope widens).
+    # Four narrowing markers, all chosen from measurement (55 candidates across LivingDocs):
+    #   (1) shaped '"<name>" <jeol>'. WITHOUT this marker it cannot be closed -- drop the trailing word
+    #       and the conventions set alone goes 47 -> 165 candidates, 100+ of them ordinary quoted prose.
+    #   (2) NO backticked file path -- that is a citation to another file, not a self-reference.
+    #   (3) NO conventions filename on the line -- the markdown-link form is G1's job; without this
+    #       marker those 4 lines are misread as self-references and all become false positives (measured).
+    #   (4) NO conventions filename on the PREVIOUS line -- filename on one line, quoted span on the next
+    #       (a WRAPPED citation) produces 3 more false positives (measured). That is precisely the blind
+    #       spot G3 documents.
+    # The window for (4) is ONE line. A filename two or more lines back is NOT seen, so this part treats
+    # the span as a self-reference and resolves it against the file's OWN anchors -- a self-reference and
+    # a WRAPPED citation are indistinguishable in principle (the filename that would tell them apart sits
+    # on another line; that is exactly the blind spot G3 documents). The outcome therefore hinges on
+    # whether the name happens to exist in that file too: if it does the check passes SILENTLY (measured:
+    # site/docs/concepts.md carries anchors named like the convention's sections), if it does not it fails.
+    # WIDENING THE WINDOW DOES NOT CLOSE THIS -- 1 -> 2 -> 3 all yield 46 candidates / 0 unresolved on the
+    # live tree (measured), and with a window of N a filename N+1 lines back is still missed. The boundary
+    # only moves, so the window stays at 1 and the limit is disclosed instead.
+    # Four undetected classes: (1) no trailing-word marker, (2) a backticked path on the same line, (3)
+    # citations to non-conventions files, (4) the wrapped-citation exception above. ALL are outside the
+    # boundary, not violations, and the convention enumerates them on both sides.
+    $JEOL = Uni 0xC808
+    $srPathRe = '`[A-Za-z0-9_./-]+\.(md|sh|ps1|json|yml)`'
+    $srRe = '"([^"]*)"[ \t]*' + $JEOL
+    function HasConvBase($s) {
+        if ($null -eq $s) { return $false }
+        foreach ($b in $gConvBases) { if ($s.Contains($b)) { return $true } }
+        return $false
+    }
+    $gSelf = @()
+    $gSelfMiss = 0
+    foreach ($p in (LivingDocs)) {
+        $raw = ReadUtf8 $p
+        if ($null -eq $raw) { continue }
+        $own = New-Object 'System.Collections.Generic.HashSet[string]'
+        foreach ($a in (AnchorSetOf $p)) { [void]$own.Add($a) }
+        $prev = ''
+        foreach ($line in ($raw -split "`r?`n")) {
+            $skip = ($line -match $srPathRe) -or (HasConvBase $line) -or (HasConvBase $prev)
+            if (-not $skip) {
+                foreach ($m in [regex]::Matches($line, $srRe)) {
+                    $span = ($m.Groups[1].Value -replace ' ', '')
+                    if ($span -ne '' -and $span -notmatch '[{}]') {
+                        $gSelf += $span
+                        # On failure, NAME the file and the span -- a counting assertion goes red without
+                        # saying why (same reason the duplicate-anchor check prints names). The wording
+                        # names BOTH causes on purpose: an unresolved self-reference, or a citation
+                        # wrapped with its filename two or more lines back (see (4) above). A human tells
+                        # them apart by reading that line and the ones before it; either way something
+                        # needs fixing, and naming only one cause would misdiagnose the other.
+                        if (-not $own.Contains($span)) {
+                            $gSelfMiss++
+                            Write-Host ("  -> unresolved self-reference or wrapped citation: " + (RelPath $p) + " -> " + $span)
+                        }
+                    }
+                }
+            }
+            $prev = $line
+        }
+    }
+    $selfSet = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($s in $gSelf) { [void]$selfSet.Add($s) }
+
+    Chk "G4: every self-reference resolves to its own file's anchor" ([string]$gSelfMiss) '0'
+    Chk "G4: self-reference extraction positive control (>0)" $(if ($gSelf.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "G4: control -- bogus name (bogus-section) is not a self-reference" $(if ($selfSet.Contains('bogus-section')) { 'yes' } else { 'no' }) 'no'
 
     # === Part H -- execution-environment axis declaration consistency (M38-T06) =====
     # The convention NAMES each axis of the execution environment (single source: the

@@ -337,6 +337,64 @@ chk "C3: 명단 통제 — 발행 페이지에 phantom-cmd 없음" "$(roster_has
 chk "C3: 비기록 명단 통제 — 규약에 phantom-cmd 없음"        "$(nonwriter_has "$CONV" phantom-cmd)"     "no"
 chk "C3: 비기록 명단 통제 — 발행 페이지에 phantom-cmd 없음" "$(nonwriter_has "$CONCEPTS" phantom-cmd)" "no"
 
+# (C4) 2.0 stable 커맨드 **명단**(M41) — C-3과 **같은 부류**라 새 파트를 만들지 않고 여기 둔다.
+#      규약("2.0 안정성")이 그 명단의 열거처를 **규약과 README 둘**로 정하고, 다른 살아 있는 문서는
+#      명단을 다시 적지 않고 그 절을 가리키게 했다. 이 케이스가 그 선언을 집행한다.
+#      **`12종`과 `11종`은 다른 사실이다** — 전자는 실제 스킬 **파일 수**라 B1이 세어 대조하고,
+#      후자는 **동결 선언**이라 파일 시스템으로 셀 수 없어 명단 대조로만 집행된다. 그래서 이 검사를
+#      B1에 얹을 수 없고 별도 추출기를 둔다.
+#      **추출 단위 = 창(최대 4줄)**: 열한 이름이 모두 드는 가장 짧은 연속 줄 묶음. 실측 스팬은
+#      규약 3줄 · README 1줄이고 상한은 C-3과 같은 4다 — 상한을 넘으면 창을 못 찾아 개수 케이스가
+#      크게 FAIL한다(집행 경계이며 `run.ps1`과 같은 값).
+#      **탐침은 `` `/tide:<이름>` `` 형태로 닫는 백틱까지 포함한다** — 그래야 `` `/tide:fleet` `` 이
+#      `` `/tide:fleet-cycle` `` 안에 우연히 걸리지 않는다(B3의 경계 요구와 같은 이유).
+#      `/tide:debug`는 **동결 집합이 아니므로** 창에 섞여 들면 개수가 12가 되어 FAIL한다 —
+#      승격은 major 사안이고, 그때 규약·README·이 러너를 함께 고치는 것이 의도된 비용이다.
+stable_window() { # <file> → 창 텍스트(없으면 빈 출력)
+    [ -f "$1" ] || return 0
+    awk 'BEGIN { W = 4 }
+        { L[NR] = $0 }
+        END {
+            for (w = 1; w <= W; w++)
+                for (i = 1; i + w - 1 <= NR; i++) {
+                    s = ""
+                    for (k = i; k <= i + w - 1; k++) s = s "\n" L[k]
+                    if (index(s, "`/tide:kickoff`") && index(s, "`/tide:milestone`") &&
+                        index(s, "`/tide:impl`") && index(s, "`/tide:review`") &&
+                        index(s, "`/tide:cycle`") && index(s, "`/tide:release`") &&
+                        index(s, "`/tide:retro`") && index(s, "`/tide:status`") &&
+                        index(s, "`/tide:fleet`") && index(s, "`/tide:fleet-cycle`") &&
+                        index(s, "`/tide:fleet-verify`")) {
+                        print s
+                        exit
+                    }
+                }
+        }' "$1"
+}
+# 공백 구분 문자열로 접는다. `tr`로 개행을 지우는 대신 awk로 잇는 이유는 이식성이다(BSD 환경에서
+# 이 러너가 처음 돌 때 M40이 로케일 비교로 물렸다 — 정렬은 `LC_ALL=C`로 ordinal에 고정한다).
+stable_set() { # <file> → 창의 `/tide:` 토큰 집합(정렬·공백 구분)
+    stable_window "$1" | grep -oE '`/tide:[a-z][a-z-]*`' | sed 's/`//g; s|/tide:||'         | LC_ALL=C sort -u | awk '{ s = s (s == "" ? "" : " ") $0 } END { print s }'
+}
+stable_count() { # <file> → stable 명단 이름 개수
+    stable_set "$1" | tr ' ' '\n' | grep -c '[a-z]'
+}
+stable_has() { # <file> <name> → yes|no
+    case " $(stable_set "$1") " in *" $2 "*) echo yes ;; *) echo no ;; esac
+}
+stable_files() { # → stable 명단 창을 가진 살아 있는 문서(레포 상대 경로)
+    roster_scan_files | while IFS= read -r f; do
+        [ -n "$(stable_window "$f")" ] && printf '%s\n' "${f#"$ROOT"/}"
+    done | LC_ALL=C sort -u | awk '{ s = s (s == "" ? "" : " ") $0 } END { print s }'
+}
+
+chk "C4: 규약 stable 명단 이름 11개"   "$(stable_count "$CONV")"   "11"
+chk "C4: README stable 명단 이름 11개" "$(stable_count "$README")" "11"
+chk "C4: 두 stable 명단 집합 일치" "$(sets_equal "$(stable_set "$CONV")" "$(stable_set "$README")")" "yes"
+chk "C4: stable 열거 파일은 규약·README 둘뿐" "$(stable_files)" "README.md docs/conventions.md"
+chk "C4: stable 명단 통제 — 규약에 phantom-stable 없음"   "$(stable_has "$CONV" phantom-stable)"   "no"
+chk "C4: stable 명단 통제 — README에 phantom-stable 없음" "$(stable_has "$README" phantom-stable)" "no"
+
 # === Part D — 브랜치 간 협업 안전(M31) 선언 정합 =========================
 # (M31) Part B/C와 동형 — 규약(conventions 단일 원본)과 그것을 배선하는 스킬이 같은 메커니즘을
 # 선언하는지 결합한다. 두 검사(릴리즈 커버리지 체크·마일스톤 번호 사전경고)는 프롬프트 규율이라
@@ -663,6 +721,84 @@ G2_NDUP=$(printf '%s\n' "$G2_DUPS" | grep -c .)
 [ "$G2_NDUP" = "0" ] || printf '  ↳ 중복 앵커: %s\n' "$(printf '%s' "$G2_DUPS" | tr '\n' ' ')"
 chk "G2: 앵커 이름 유일성(정규화 후 중복 0)"       "$G2_NDUP" "0"
 chk "G3: 인용 줄 따옴표 종결(줄바꿈 인용 0)"       "$(odd_quote_lines)" "0"
+
+# (G4) 같은 파일 **안의 자기참조**도 집행한다(M41). M34가 상호참조 무결성을 신설하며 "골격에 파일명이
+#      없어 가드 밖 — 사람의 리뷰 영역"으로 남긴 층이고, **여섯 사이클** 동안 그대로였다.
+#      **범위는 G1과 같은 `living_docs`다** — 규약 문서 집합만 보면 규약이 "닫혔다"고 적은 층이
+#      `skills/`·`README.md`·`tests/*/README.md`에서 그대로 열려 있고, 그것이 M41 라운드 1이 차단을
+#      받은 자리다(실측: 규약 밖에 깨진 자기참조를 심어도 초록이었다).
+#      **대조는 그 파일 자신의 앵커 집합**이다 — 자기참조는 정의상 같은 파일을 가리키므로, 집합 전체와
+#      대조하면 다른 파일의 절을 가리켜도 통과해 버린다(라운드 1의 안전 측 선택이 범위를 넓히자
+#      과대 허용으로 바뀐다).
+#      후보를 좁히는 표지 넷 — 실측으로 정했다(living_docs 후보 55건 기준):
+#        ⑴ `"…" 절` 형태일 것. **이 표지 없이는 닫을 수 없다** — 조건을 빼면 규약 문서 집합만으로도
+#           후보가 47 → 165건으로 늘고 그중 100건 넘게 평범한 인용부호 산문이다(`"가능"`·`"확인했다"`).
+#        ⑵ **백틱 파일 경로가 없을 것** — 있으면 자기참조가 아니라 다른 파일로의 인용이다.
+#        ⑶ **줄에 규약 파일명이 없을 것** — 마크다운 링크 형태(`[docs/conventions.md](…)의 "…" 절`)는
+#           G1이 이미 문다. 이 표지가 없으면 그 4건이 자기참조로 오인돼 전부 오탐이 된다(실측).
+#        ⑷ **앞 줄에도 규약 파일명이 없을 것** — 파일명이 앞 줄, 따옴표 구획이 다음 줄인 **줄바꿈 인용**
+#           3건이 같은 이유로 오탐이 된다(실측). G3가 잡지 못한다고 고지한 바로 그 사각이다.
+#      ⑷의 창은 **한 줄**이다. 두 줄 이상 앞의 파일명은 못 보므로, 그때 이 파트는 그 구획을
+#      **자기참조로 취급해 자기 파일 앵커에 대조**한다 — **자기참조와 끊긴 인용은 원리상 구별되지
+#      않는다**(구별에 필요한 파일명이 다른 줄에 있다. G3가 사각으로 고지한 바로 그 성질이다).
+#      그래서 결과가 **이름이 우연히 그 파일에도 있는가**에 갈린다: 있으면 **조용히 통과**하고
+#      (실측 — `site/docs/concepts.md`는 규약과 같은 이름의 앵커를 갖는다), 없으면 붉어진다.
+#      **창을 넓혀도 닫히지 않는다** — 1→2→3에서 후보 46·미해소 0으로 값이 같고(실측) 창이 N이면
+#      N+1줄 앞은 여전히 못 본다. 경계가 옮겨질 뿐이라 창은 1로 두고 이 한계를 고지한다.
+#      남는 미탐지 넷: ⑴ 표지 미사용 ⑵ 백틱 경로 동반 ⑶ 규약이 아닌 파일로의 인용 ⑷ 위의 줄바꿈
+#      인용 예외. **전부 위반이 아니라 경계 밖**이며 규약이 양쪽에서 열거한다.
+SELFREF_JEOL=$(printf '\354\240\210')   # U+C808 — ps1은 Uni(0xC808)로 같은 문자를 만든다(ASCII 원본 규율)
+selfref_of() { # <file> → 그 파일의 자기참조 구획(공백·CR 제거, 한 줄에 하나)
+    awk -v J="$SELFREF_JEOL" -v BASES="$SBX/convbases.txt" '
+        BEGIN { while ((getline b < BASES) > 0) if (b != "") BASE[++NB] = b }
+        function hasbase(s,   i) { for (i = 1; i <= NB; i++) if (index(s, BASE[i])) return 1; return 0 }
+        {
+            cur = $0
+            skip = 0
+            if (cur ~ /`[A-Za-z0-9_.\/-]+\.(md|sh|ps1|json|yml)`/) skip = 1
+            else if (hasbase(cur)) skip = 1
+            else if (hasbase(prev)) skip = 1
+            if (!skip) {
+                line = cur
+                pat = "\"[^\"]*\"[ \t]*" J
+                while (match(line, pat)) {
+                    m = substr(line, RSTART, RLENGTH)
+                    rest = substr(m, 2)
+                    q = index(rest, "\"")
+                    if (q > 1) print substr(rest, 1, q - 1)
+                    line = substr(line, RSTART + RLENGTH)
+                }
+            }
+            prev = cur
+        }' "$1" | grep -v '[{}]' | tr -d ' \r' | grep -v '^$'
+}
+# `--`와 `</dev/null`은 G1과 같은 이유로 둘 다 필요하다(이름이 `-`로 시작하면 grep이 옵션으로 읽고
+# stdin을 삼켜 나머지가 통째로 미검사로 남는다).
+# 실패하면 **어느 파일의 무엇이 안 풀렸는지 이름을 출력한다**(M40의 자기고발 조치와 같은 취지).
+# 진단 문구가 **두 가지를 함께 말한다** — 해소되지 않는 자기참조이거나, 파일명이 두 줄 이상 앞에
+# 있는 끊긴 인용이다(위 ⑷ 참조). 어느 쪽인지는 사람이 그 줄과 앞 줄들을 보고 가르며, 어느 쪽이든
+# 고칠 것이 있다. 한쪽 이름만 찍으면 원인을 잘못 지목하게 된다.
+: > "$SBX/selfrefs.txt"
+SELF_MISS=0
+while IFS= read -r lf; do
+    [ -f "$lf" ] || continue
+    anchor_set "$lf" > "$SBX/ownanchors.txt"
+    selfref_of "$lf" > "$SBX/ownrefs.txt"
+    cat "$SBX/ownrefs.txt" >> "$SBX/selfrefs.txt"
+    while IFS= read -r s; do
+        [ -n "$s" ] || continue
+        grep -qxF -- "$s" "$SBX/ownanchors.txt" </dev/null || {
+            SELF_MISS=$((SELF_MISS + 1))
+            printf '  ↳ 미해소 자기참조 또는 끊긴 인용: %s → %s\n' "${lf#"$ROOT"/}" "$s"
+        }
+    done < "$SBX/ownrefs.txt"
+done < "$SBX/living.txt"
+NSELF=$(grep -c . "$SBX/selfrefs.txt")
+selfref_has() { grep -qxF -- "$1" "$SBX/selfrefs.txt" </dev/null && echo yes || echo no; }
+
+chk "G4: 자기참조가 전부 자기 파일 앵커를 가리킴"   "$SELF_MISS" "0"
+chk "G4: 자기참조 추출 positive-control(>0)"        "$([ "$NSELF" -gt 0 ] && echo ok || echo no)" "ok"
+chk "G4: 통제 — 가짜 이름(bogus-section) 자기참조 부재" "$(selfref_has 'bogus-section')" "no"
 
 # === Part H — 실행 환경 축 선언 정합 (M38-T06) ===========================
 # 규약이 실행 환경의 각 축에 **이름을 붙여 선언**하고(단일 원본: `docs/conventions.md`의
