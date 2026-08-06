@@ -86,9 +86,10 @@ pwsh           -File tests\multi-repo\run.ps1   # PowerShell 7
   `powershell (pwsh)`가 둘 다 초록이었고 그 안에 **시나리오 9(선두 BOM)** 가 들어 있다. 그 케이스가
   통과했다는 것은 BOM이 **가드가 strip하는 형태로 도착했다**는 뜻이고, 그것이 곧 탐침의 통과
   조건이다. 그래도 **첫 실증은 실제 푸시의 CI**다(`pr` 모드로 릴리즈하면 `release/vX.Y.Z` 브랜치의
-  PR CI, 아니면 기본 브랜치 push 이후의 CI). 그 확인은 **사람이 하며 `/tide:release` 절차에 배선돼
-  있지 않다** — 근거와 배선 이월은 규약 "실행 환경 축" 절의 `workflow-syntax` 확인 지점 항목이
-  단일 원본이다.
+  PR CI, 아니면 기본 브랜치 push 이후의 CI). **M40이 그 조회를 `pr` 모드 마무리에 배선했다** —
+  태그 전에 PR 체크를 조회해 사용자 확인을 받는다(게이트가 아니다). push-only·`release` 모드는
+  PR도 머지 전 CI도 없어 그 경로에서는 여전히 닫히지 않으며, 근거와 잔여의 단일 원본은
+  `docs/conventions.md`의 "실행 환경 축" 절이다.
 
 실행 환경 축의 단일 원본은 `docs/conventions.md`의 "실행 환경 축" 절이며 이 절은 그 표의
 **기동 맥락** 행이 가리키는 집행처다.

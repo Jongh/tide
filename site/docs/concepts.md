@@ -43,8 +43,8 @@ impl/review가 남긴 보고서는 다음 `release` 커밋에 함께 포함됩�
   phase를 기록할 때** 닫히며 **호출만으로는 닫히지 않습니다** — 나머지 6종은 쓰지 않고
   (`kickoff`·`status`가 여기 들어갑니다), 기록 시점은 커맨드마다 다르므로 전제조건을 먼저
   검사하는 커맨드가 그 검사에서 중단되면 phase가 기록되지 않아 창이 그대로 열려 있습니다.
-  hook 매처가 `Bash|PowerShell`이라 파일 조작 도구 경로도 훅을 타지 않습니다. 상세와 수용
-  근거는 규약의 tide-guard hook 절에 있습니다.
+  hook 매처가 `Bash|PowerShell`이라 파일 조작 도구 경로도 훅을 타지 않습니다.
+  상세와 수용 근거는 `docs/conventions.md`의 "tide-guard hook" 절에 있습니다.
 - **`idle`에서도 차단됩니다** — tide 도입 후에는 Claude를 통한 git commit/tag/push가
   항상 `/tide:release`로만 일어나는 것이 의도된 동작입니다. tide 사이클 밖에서
   Claude에게 git 작업을 시키려면 `.tide/phase` 파일을 삭제해 가드를 해제합니다.

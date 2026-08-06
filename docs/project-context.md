@@ -15,13 +15,13 @@
 | 경로 | 역할 |
 |---|---|
 | `.claude-plugin/` | `plugin.json`·`marketplace.json` — 플러그인/마켓플레이스 매니페스트 (버전 원본) |
-| `skills/` | 스킬 12종 — `{kickoff,milestone,impl,review,release,status,cycle,retro,debug,fleet,fleet-cycle,fleet-verify}/SKILL.md`. milestone·impl·review·retro·debug는 `template.md` 동봉 (debug는 사이클 밖 발견 우선 진입점, fleet은 읽기 전용 멀티 레포 개요, fleet-cycle은 교차 사이클 자동화, fleet-verify는 통합 검증) |
+| `skills/` | 커맨드 스킬 디렉터리 — 커맨드마다 `{단계}/SKILL.md` 하나씩. milestone·impl·review·retro·debug는 `template.md` 동봉. **커맨드 수·이름·역할의 선언처는 `docs/commands.md`**(카탈로그 단일 원본)이며 여기서 다시 적지 않는다 |
 | `hooks/` | `hooks.json`(PreToolUse 등록) + `tide-guard.sh`(원본 로직)·`tide-guard.ps1`(보조 사본) |
 | `docs/milestones/` | 마일스톤 문서 `M{N}.md` |
 | `docs/reports/` | 완료보고서 `M{N}-impl.md`·리뷰보고서 `M{N}-review.md`·debug 보고서 `debug-{N}.md`(발견 우선 세션 산출물 — 번호는 마일스톤과 무관한 독립 수열)·회고 `retro.md`(최근) + `retro-archive.md`(과거 회고 분리·보존) |
 | `docs/conventions.md` | 단계별 규약 단일 원본 — **규약 문서 집합의 본체**(조각은 `docs/conventions-{주제}.md`, 발견 글롭 `docs/conventions*.md`) |
 | `docs/conventions-release.md` | 규약 조각 — 릴리즈 게시(gh) 모드. 사이트 `conventions-release.md`가 `pymdownx.snippets`로 본문(`[start:body]`) 인클루드 |
-| `docs/commands.md` | 커맨드 카탈로그 단일 원본(12종 역할·인자·산출물·금지). 사이트 `commands.md`가 `pymdownx.snippets`로 본문(`[start:body]`) 인클루드 — `tests/discover` 가드가 카운트·셸·이름 완전성을 집행 |
+| `docs/commands.md` | 커맨드 카탈로그 단일 원본 — 커맨드 **수·역할·인자·산출물·금지**의 선언처. 사이트 `commands.md`가 `pymdownx.snippets`로 본문(`[start:body]`) 인클루드 — `tests/discover` 가드가 카운트·셸·이름 완전성을 집행 |
 | `tests/` | 라이브 실증 하니스 (`multi-repo/`·`site-includes/` 등 — `run.sh`·`run.ps1`, 자동 러너 없는 도그푸딩 검증 수단). 발견·위상정렬·deps 파싱·BOM 제거 참조 구현은 `tests/lib/{encoding,discover,deps,toposort}.{sh,ps1}` 공유 단일 원본을 하니스가 source(트리 내 자기완결; source 순서 encoding→discover→deps→toposort) |
 | `site/` | MkDocs 사이트 (`mkdocs.yml`·`docs/` — 문서 사이트 빌드 입력). `conventions`·`conventions-release`·`orchestration`·`changelog`·`commands`는 저장소 원본을 `pymdownx.snippets`로 인클루드하는 **스니펫 셸**(수기 복제 아님) — `tests/site-includes`가 셸을 **발견**하므로 셸이 늘어도 러너를 고치지 않는다 |
 | `.tide/` | `phase`(로컬 상태 — `.gitignore` 대상, 커밋 안 함) + `debug-session`(열린 debug 세션의 활성 보고서 번호 한 줄 — 로컬 상태, `.gitignore` 대상) + `deps`(의존성 선언 — 커밋함) + `release-mode`(게시 모드 선호도 `pr`/`release` — `deps`와 동급으로 커밋함). gitignore 범위는 `.tide/`가 아니라 `.tide/phase`·`.tide/debug-session` 두 파일만 |
@@ -202,13 +202,14 @@
   `⚠ contract` 경고(연산자·요구·현재 표기, `>=` 위반 = upstream behind). 알 수 없는 연산자·비표준
   버전은 무시하고 경고(안전 측). 위상정렬 순서는 버전 제약과 무관하게 불변 — 경고는 줄 표기일 뿐.
   단일 원본은 `docs/conventions.md`의 "계약 비교 규칙" 절
-- **2.0 안정성·메타 규칙**(v2.0.0~ 재기준): **커맨드 11종**(기존 8종 + `/tide:fleet`·
-  `/tide:fleet-cycle`·`/tide:fleet-verify`) 호출명·역할과 **오케스트레이션 규약**(부수효과 분리
-  불변·`.tide/deps`·계약 비교·`.tide-fleet/integration`)이 2.0부터 안정(stable)으로 동결되고,
-  `.tide/phase`/tide-guard 계약·보고서·마일스톤 형식은 1.0 그대로 유지(불변)된다. 현재 커맨드는
-  **총 12종이며 그중 11종이 2.0 stable**이다 — `/tide:debug`는 **v2.7.0 가산**이라 동결 집합에
-  들지 않는다(다음 major에서 stable 승격 후보). 2.0 동결 집합은 11종 그대로이며, 이는 fleet 3종이
-  v1.x에서 가산된 뒤 2.0에서 동결된 **선례와 동형**이다. 2.0은 동작
+- **2.0 안정성·메타 규칙**(v2.0.0~ 재기준): **2.0 stable 커맨드 집합**의 호출명·역할과
+  **오케스트레이션 규약**(부수효과 분리 불변·`.tide/deps`·계약 비교·`.tide-fleet/integration`)이
+  2.0부터 안정(stable)으로 동결되고, `.tide/phase`/tide-guard 계약·보고서·마일스톤 형식은 1.0 그대로
+  유지(불변)된다. **동결 집합의 크기와 이름 명단, 그리고 현재 커맨드 수는 여기서 적지 않는다** —
+  선언처는 `docs/conventions.md`의 "2.0 안정성" 절과 `README.md` 둘이다(그 절이 열거처를 둘로
+  정하고 집합 일치를 집행한다). `/tide:debug`는 **v2.7.0 가산**이라 동결 집합에 들지 않으며
+  (다음 major에서 stable 승격 후보), 이는 fleet 3종이 v1.x에서 가산된 뒤 2.0에서 동결된
+  **선례와 동형**이다. 2.0은 동작
   파괴 없는 **계약 재기준**(v1.0.0의 "안정 선언" major와 동형)이며, 하위 호환을 깨는 변경은 다음
   major(3.0)에서만 한다(v1.x·v2.x 가산 이력은 보존 표기). 또한 규약·단일 원본을 새로 더하면 그것을
   강제·반영할 실행 수단(스킬 프리플라이트·hook·CI 트리거·빌드)도 같은 사이클에 함께 손본다 —
@@ -247,7 +248,10 @@ M20(에픽 마감)에서 회고 백로그의 이월·견고화 항목을 **각�
 | phase 기록 사실이 다섯 곳에 복제돼 매 라운드가 일부만 고침(M36이 같은 축에서 3회 차단) | M36 리뷰 라운드 3의 **재분해 권고** — "더 정확히 쓰기" 대신 "쓸 곳을 줄이고 남은 것을 기계가 물게 하기" | **fix(M37, rework 4)** — ① phase 명단의 **열거처를 규약과 발행 페이지 둘로 축소**(나머지는 포인터) + 두 목록(기록 6종·비기록 6종)의 집합 일치·유일 열거처·서로소를 `tests/discover` Part C-3이 집행(71 → 85) ② `run.ps1` 6종에 **trap + 완주 플래그**(오류 시 남은 파트를 건너뛰고도 성공 배너 + exit 0이던 것) ③ 러너 결과 줄에 **`[runtime: …]` 각인** — 5.1에서 85 중 34만 돌던 것을 그때까지의 모든 측정이 놓쳤다 ④ **테스트 CI 신설**(`tests.yml` — 런타임 매트릭스·하니스 발견형·0개 발견은 실패). 릴리즈 도중 그 CI가 두 결함을 더 잡았다(워크플로 미컴파일 · dash `\xHH` 비호환) |
 | "우리가 어디서 돌리는가"가 문장 안에 숨음 — 같은 부류로 다섯 라운드를 쓰고 결함은 매번 다른 축 | M37 리뷰(라운드 6) `다음 단계` + v2.11.0 릴리즈 중 CI가 잡은 두 결함 | **fix(M38, rework 2)** — ① 규약에 **실행 환경 축** 절 신설(축마다 이름·두 극·집행처, 집행 없으면 "미집행" 명시) + `tests/discover` **Part H**(11 케이스)가 축 이름 집합 일치·표 행 실재·CI 잡 실재·매핑 커버리지를 집행 ② 하니스 6종 전부에 **케이스 수 대조**(선언을 못 읽어도 FAIL) ③ CI **`pairing` 잡**(양 셸 하니스 발견 집합 비교) ④ `run.ps1`의 문화권 `StartsWith` 8곳을 `Ordinal`로 ⑤ `multi-repo`의 기동 맥락 의존을 **stdin 자기 탐침**으로 처분. 리뷰가 집행 주장을 **두 번 실측 반증**해(잡 삭제해도 초록 / 미등재로 회피) 두 검사가 생겼다 |
 | 커버리지 체크가 보는 집합 ≠ 태그에 실리는 집합(정상 사이클에서 범위가 늘 공집합 · 실제 편승은 검사 밖) · kickoff 산출 규약에 리뷰 규율 미배선 | 외부 프로젝트 `nipa3_cctv_checker` 라이브 도그푸딩 **실측 회수**(2026-08-05) + M38 리뷰 M39 이월 원장 ① | **fix(M39, rework 1)** — ① 커버리지 **대상 범위 = 태그에 실릴 집합**으로 정정(커밋 diff ∪ `git status --porcelain` 미커밋 변경 — release가 프리플라이트 **후에** 스테이징·커밋하므로 미커밋도 태그에 실린다) ② release 스킬의 **스테이징 범위를 세 모드 공통 1곳에 명시**하고 검사 범위와 같은 집합임을 연결 ③ kickoff 산출 규약 요구 항목 5 → **7**(리뷰 검증 규율·차단 등급 판례를 요지 수준 + 상세 단일 원본 = 설치본 명시) ④ 실행 환경 축 집행 칸을 **`job:<이름>` 표기**로 구조화해 매핑 선언 줄을 표로 흡수(선언처 2 → 1) + **면제 선언**(`env-axis-exempt-jobs:`) 신설 ⑤ 집행 = `tests/discover` Part D3 + Part H 재배선(96 → **101**). 판정 로직·프리플라이트 게이트·커맨드 12종·phase·가드 전부 불변(advisory 범위 확장) |
+| 축 표에 "미집행"·"스킬 미배선"이 남아 있음 · 이월 원장이 M36에서 끊김 · `pr` 마무리 정리 경로가 실측과 어긋남 | M38 리뷰 이월 원장 ②③ + M39 리뷰 M40 후보 + v2.13.0 릴리즈 실측 | **fix(M40, rework 0)** — ① `external-tool` 축에 **CI `posix` 잡의 macOS 레그**(BSD sed·awk)를 붙여 집행 ② `workflow-syntax` 확인을 `/tide:release` `pr` 마무리에 **태그 전 PR CI 조회**로 배선(게이트 아님 — 사용자 확인) ③ **`axis:<이름>` 표기** 도입으로 선언되지 않은 표 행을 닫고 **고지 재산정 규율** 신설(*실측 없이 고지를 줄이는 것은 `vacuous-pass`*) ④ 정리 경로를 `git ls-remote --heads` 판정 + `git remote prune`으로 정정 ⑤ 원장 M37·M38·M39 행 보충. 집행 = Part H 13 → **18**(102 → 110). **릴리즈 CI가 한 라운드를 만들었다** — 새 macOS 레그가 첫 실행에서 `LC_ALL=C` 누락(러너에서 유일)을 잡아 release가 `pr` 대기로 멈췄고, 판정이 `불가`가 아닌 재실행이라 rework는 유지 |
 | `site-includes` 완주 플래그 부재 | M38 리뷰 M39 이월 원장 ⑤ | **수용(설계 — M40에서 종결)** — 나머지 5종은 trap + 완주 플래그 두 겹인데 `site-includes`만 trap 단독이다. M37이 그 사유를 이미 적었다: **결과 줄과 종료 로직 사이에 간격이 없어** 플래그를 두면 "플래그가 서면 곧 결과 줄"이라 **자기 공허한 단언**이 된다(공허 통과를 막으려는 장치가 공허해지는 형태). 케이스 수 대조(M38)가 "덜 돌고 초록"을 이미 덮으므로 이 자리의 잔여 위험은 **중단 감지**뿐이고 그것은 trap이 문다. 백로그에서 **종결**(추가 근거가 나오면 재검토) |
+| 규약이 자기 문서에는 면제됨 — 가드 밖 `12종` 복제 3자리 · 무집행 `11종` 명단 · 복제 선언 수 지표 3사이클 미계측 · 무가드 인용 1건 · 6사이클 묵은 자기참조 | 2026-08-06 회고가 두 회고 연속 최대 미반영으로 지목한 *"규약 문서 자신의 구조"* 군집 | **fix(M41, rework 0)** — ① 복제 선언 수 지표에 **발동 조건**(값을 바꾼 사이클만)·**기재 위치·형식**을 부여하고 **스킬 미배선을 분류로 명시**(tide 자신의 기여자 규율 → 라이브 도그푸딩 항목 아님) ② **2.0 stable 명단의 열거처를 규약·`README.md` 둘로 선언**하고 집합 일치·유일 열거처를 `tests/discover` **Part C-4**가 집행(`12종`=파일 수 ↔ `11종`=동결 선언의 구별 명시) ③ `docs/project-context.md`의 현재형 카운트를 **포인터로 전환**(이월 원장 행은 이력 서술 예외로 보존) ④ `site/docs/concepts.md`의 무가드 인용을 정식 골격으로 ⑤ **자기참조를 fix로 닫음** — Part G **G4**. 집행 = Part C 24 → **30** · Part G 6 → **9**(110 → **119**). 커맨드 12종·phase·가드·프리플라이트·스킬 절차·보고서 템플릿 전부 불변 |
+| 가드 측 BOM 견고성(비-UTF-8 콘솔에서 폴백 통과) | M38-impl 후속1 → M40이 M41로 이월 | **환경-이월(M42) — 사유 불변** — `hooks/tide-guard.{sh,ps1}`을 건드리는 **가드 계약 사이클**이고, 훅은 M36의 주석 전용 변경 이후 **일곱 사이클 연속 무접촉**이다. M40이 "축 집행을 세우는 사이클과 가드 계약을 만지는 사이클을 겹치지 않는다"는 사유로 M41에 넘겼고, M41은 **문서 위생 축**이라 같은 사유가 그대로 성립해 M42로 넘긴다. **이월 사유가 바뀌지 않았다는 사실을 함께 적는다** — 사유가 흔들리면 무한 이월이 되므로, 다음 이월은 사유를 재검토하거나 집는다 |
 
 이로써 오케스트레이션 에픽의 잔여 후속은 fix/수용/환경-이월로 전부 종결됐고, **로드맵 항목 미반영은
 0**이다 — 백로그가 닫혔다. M26은 그 뒤 남아 있던 **코드성 잔여 두 건**(`strip_bom` 단일 원본화·mkdocs

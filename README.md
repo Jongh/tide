@@ -126,7 +126,8 @@ tide는 **v2.0.0부터 다음을 안정(stable) 계약으로 재기준(re-baseli
 동결 선언**하는 **계약 재기준**입니다(v1.0.0이 "안정 선언" major였던 것과 동형). 단일 레포·
 미선언·기존 동작은 전부 불변입니다.
 
-- **커맨드 11종의 호출명·역할**: `/tide:kickoff`·`/tide:milestone`·`/tide:impl`·`/tide:review`·`/tide:cycle`·`/tide:release`·`/tide:retro`·`/tide:status`·`/tide:fleet`·`/tide:fleet-cycle`·`/tide:fleet-verify` (위 커맨드 표 참조). 현재 커맨드는 **총 12종**이며 그중 **11종이 2.0 stable**입니다 — `/tide:debug`는 **v2.7.0 가산**으로 2.0 동결 집합에는 들지 않습니다(다음 major에서 stable 승격 후보).
+- **커맨드 11종의 호출명·역할**: `/tide:kickoff`·`/tide:milestone`·`/tide:impl`·`/tide:review`·`/tide:cycle`·`/tide:release`·`/tide:retro`·`/tide:status`·`/tide:fleet`·`/tide:fleet-cycle`·`/tide:fleet-verify` (위 커맨드 표 참조).
+  현재 커맨드는 **총 12종**이며 그중 **11종이 2.0 stable**입니다 — `/tide:debug`는 **v2.7.0 가산**으로 2.0 동결 집합에는 들지 않습니다(다음 major에서 stable 승격 후보).
 - **오케스트레이션 규약**: 부수효과 분리 불변(fleet은 advisory·fleet-cycle은 release 제외·fleet-verify는 verification-only), 의존성 선언·계약 비교(`.tide/deps`)·통합 훅(`.tide-fleet/integration`) 포맷 — `docs/conventions.md`가 단일 원본.
 - **단계별 규약**: 사이클 순서, 부수효과 분리(impl·review는 git 작업 금지·release만 git 조작), 전제조건·프리플라이트 — `docs/conventions.md`가 단일 원본.
 - **`.tide/phase`·tide-guard 계약**: 상태 파일 `.tide/phase`의 의미(단계명 한 줄)와 tide-guard hook의 차단 규칙(release 단계가 아니면 git commit/tag/push 차단, 상태 파일 부재 시 무차단) — 1.0 그대로 유지(불변).
