@@ -43,8 +43,12 @@ trap {
     Write-Host "# INCOMPLETE RUN -- the harness did not reach its result line; treat as FAIL"
     exit 1
 }
+# M42-T03: verdict pinned to ORDINAL -- PowerShell's `-eq` on strings is CULTURE comparison
+# (and `-ceq` is case-sensitive but still culture-aware, so it is no substitute), while the .sh
+# twin's `[ "$got" = "$want" ]` is byte-exact. The [string] casts also stop an ARRAY $got from
+# passing vacuously (`-eq` on an array returns the filtered subarray, which is truthy when non-empty).
 function Chk($desc, $got, $want) {
-    if ($got -eq $want) { $script:pass++; Write-Host ("PASS  {0,-52} ({1})" -f $desc, $got) }
+    if ([string]::Equals([string]$got, [string]$want, [System.StringComparison]::Ordinal)) { $script:pass++; Write-Host ("PASS  {0,-52} ({1})" -f $desc, $got) }
     else { $script:fail++; Write-Host ("FAIL  {0,-52} (got {1}, want {2})" -f $desc, $got, $want) }
 }
 function W($path, $text) { $d = Split-Path $path -Parent; if (-not (Test-Path $d)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }; Set-Content -Path $path -Value $text -Encoding utf8 }
@@ -95,10 +99,19 @@ function DepRequiredConstraint($repoDir, $depName) {
     if (-not (Test-Path $f)) { return '' }
     foreach ($line in (DepLines $f)) {
         $t = $line.Trim()
-        if ($t -eq '' -or $t.StartsWith('#')) { continue }
-        if ((DepName $t) -ne $depName) { continue }
+        # (M42-T03) ordinal StartsWith (culture StartsWith matches through ignorable characters) and
+        # ordinal name match (`-ne` is culture + case-insensitive, so 'auth' would match a dep line
+        # naming 'AUTH' and pick up its constraint -- the .sh twin compares the raw names byte-exact).
+        if ($t -eq '' -or $t.StartsWith('#', [System.StringComparison]::Ordinal)) { continue }
+        if (-not [string]::Equals((DepName $t), $depName, [System.StringComparison]::Ordinal)) { continue }
         $tok = $t -split '\s+'
-        if ($tok.Count -ge 3 -and (@('>=','<=','==','=','>','<') -contains $tok[1])) {
+        # (M42-T03) ordinal whitelist match. $tok[1] is USER data (a `.tide/deps` line), and `-contains`
+        # is culture-aware -- a token carrying a culture-ignorable character (e.g. '>' U+200C '=')
+        # compares EQUAL to '>=' here while the .sh twin's `case "$op" in '>='|...)` does not match it
+        # and takes the "unknown operator -> none" safe-side branch. That is a verdict difference.
+        $opOk = $false
+        foreach ($o in @('>=','<=','==','=','>','<')) { if ([string]::Equals([string]$tok[1], $o, [System.StringComparison]::Ordinal)) { $opOk = $true; break } }
+        if ($tok.Count -ge 3 -and $opOk) {
             return ($tok[1] + ' ' + $tok[2])
         }
         return ''   # name-only or unknown operator -> none
@@ -108,7 +121,8 @@ function DepRequiredConstraint($repoDir, $depName) {
 # back-compat alias: emit version only when the constraint is `>=` (keeps prior callers/expectations)
 function DepRequiredVersion($repoDir, $depName) {
     $c = DepRequiredConstraint $repoDir $depName
-    if ($c -like '>= *') { return $c.Substring(3) }
+    # (M42-T03) ordinal prefix -- the .sh twin is `case "$c" in '>= '*)`, byte-exact.
+    if ($null -ne $c -and $c.StartsWith('>= ', [System.StringComparison]::Ordinal)) { return $c.Substring(3) }
     return ''
 }
 # current version of a repo (package.json "version"); '' if absent
@@ -168,7 +182,9 @@ function CheckContract($parent, $repo, $dep) {
 # index of <name> in a space-joined order string (-1 if absent)
 function IdxOf($orderStr, $name) {
     $arr = @($orderStr -split '\s+' | Where-Object { $_ -ne '' })
-    for ($i = 0; $i -lt $arr.Count; $i++) { if ($arr[$i] -eq $name) { return $i } }
+    # (M42-T03) ordinal -- the topo-order assertions are built on these indexes, and `-eq` on strings
+    # is culture + case-insensitive while the .sh twin's `[ "$x" = "$2" ]` is byte-exact.
+    for ($i = 0; $i -lt $arr.Count; $i++) { if ([string]::Equals($arr[$i], $name, [System.StringComparison]::Ordinal)) { return $i } }
     return -1
 }
 

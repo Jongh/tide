@@ -21,5 +21,10 @@ discover() { # <parent> → 직속 자식 tide 레포 basename 정렬 출력
         base=$(basename "${d%/}")
         case "$base" in .*) continue ;; esac          # 숨김(dot) 디렉터리 무시(.tide-fleet 포함)
         if is_tide_repo "${d%/}"; then echo "$base"; fi
-    done | sort
+    done | LC_ALL=C sort
 }
+# (M42) `LC_ALL=C`는 장식이 아니다 — 이 출력은 fleet 하니스가 **문자열로 통째 비교**하는 판정값이라
+# (`$(discover …) | tr '\n' ','` ↔ 리터럴) 정렬 **순서 자체가 판정에 든다**. ps1 사본은 M42-T03에서
+# `StringComparer::Ordinal`로 고정됐고, 로케일이 걸린 `sort`는 collation 비교라 두 사본의 의미가
+# 갈린다(M40이 `tests/discover/run.sh`에서 같은 누락을 BSD 레그로 발견한 것과 같은 부류 — 그때는
+# 러너 안이었고 이번은 **공유 단일 원본**이다).

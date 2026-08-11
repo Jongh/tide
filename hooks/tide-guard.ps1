@@ -11,15 +11,50 @@
 # 기계적 가드의 전제조건 자체가 프롬프트 규율이다 — 보호는 조건부다. 창·우회 표면은 고지 후 수용이며,
 # 단일 원본 = docs/conventions.md "tide-guard hook" 절, 3.0 후보 등재는 "2.0 안정성" 절.
 
-$inputJson = [Console]::In.ReadToEnd()
+# 입력 읽기 — stdin을 *바이트*로 받아 UTF-8로 직접 디코드한다. [Console]::In의 디코딩은 콘솔 입력
+# 코드페이지를 따르므로(Git Bash에서 띄운 자식은 CP949를 물려받는다) 훅 입력의 UTF-8 바이트가
+# 뭉개진다. 실측: 선두 BOM `EF BB BF`가 CP949에서 EF BB -> U+7664가 되고, 남은 BF가 뒤따르는
+# `{`까지 한 무효 시퀀스로 삼켜 U+003F 하나로 바뀐다 — 즉 **여는 중괄호 자체가 사라진다**.
+# 그래서 선두 형태를 열거하든 첫 '{' 앞을 버리든, 문자열로 디코드된 뒤에는 이 부류를 복구할 수
+# 없다. 바이트에서 UTF-8로 직접 디코드하면 코드페이지 축이 사라져 부류 전체가 닫힌다.
+# 실패 시에는 기존 읽기로 폴백해 어떤 환경에서도 훅이 죽지 않게 한다(판정 규칙은 불변).
+$rawInput = $null
+try {
+    $stdinStream = [Console]::OpenStandardInput()
+    $stdinBuf = New-Object System.IO.MemoryStream
+    $stdinStream.CopyTo($stdinBuf)
+    $rawInput = (New-Object System.Text.UTF8Encoding($false)).GetString($stdinBuf.ToArray())
+} catch { $rawInput = $null }
+if ($null -eq $rawInput) { $rawInput = [Console]::In.ReadToEnd() }
 
-# 입력 견고화 — 선두 UTF-8 BOM 제거. PS 5.1 ConvertFrom-Json은 선두 BOM에서 throw하므로,
-# 일부 환경(`Set-Content -Encoding utf8` 등)이 stdin 선두에 BOM을 붙여도 견디도록 strip한다.
-# UTF-8로 디코드된 BOM(U+FEFF)과 오디코드된 3바이트(U+00EF U+00BB U+00BF) 둘 다 방어. hook은
-# 자기완결이어야 하므로(외부 source 금지) 여기서 최소 strip을 직접 둔다. 판정은 불변(견고화만).
-if ($inputJson) { $inputJson = $inputJson -replace '^(\uFEFF|\u00EF\u00BB\u00BF)', '' }
+# 입력 정규화 — 선두 잡음 관용 파싱. 훅 입력은 항상 최상위 JSON *객체*이므로, 첫 '{' 앞에 붙어
+# 도착한 바이트는 무엇이든 버린다. 형태를 열거하지 않고 부류 전체를 닫는 방식이라, UTF-8로
+# 디코드된 선두 BOM(U+FEFF)이든 UTF-8로 유효하지 않아 U+FFFD가 된 임의의 선두 바이트든 같은 한
+# 자리가 덮는다. 잡음이 없으면 무동작이고(첫 '{'가 인덱스 0), '{'가 아예 없으면 자르지 않고 기존
+# 경로(파싱 실패 -> 보수적 폴백)를 그대로 탄다. 인덱스 비교는 ordinal로 고정한다 —
+# String.IndexOf(string)의 기본값이 문화권 비교라서다. hook은 자기완결이어야 하므로
+# (외부 source 금지) 여기서 최소 정규화를 직접 둔다.
+# 판정 **규칙**은 불변이지만 **판정 자체가 불변인 것은 아니다** — 잡음 때문에 파싱에 실패하던 입력이
+# 이제 성공하므로, 그 입력의 답은 **잡음 없는 같은 입력의 답과 같아진다**(= cwd가 가리킨 레포의
+# phase가 판정을 끈다). 그 방향은 한쪽이 아니다: 폴백이 우연히 더 엄격했던 구성에서는 차단 -> 통과로
+# 움직인다(실측 — CLAUDE_PROJECT_DIR가 비-release인데 cwd 레포가 release인 구성). 옳은 답이 되는
+# 것이 근거이지 방향이 한쪽뿐이라는 것이 근거가 아니다(M42 리뷰가 앞선 판본의 단정을 반례로 무너뜨렸다).
+#
+# **두 사본을 나눠 든다**(M42-T09). $rawInput = 도착한 그대로의 입력, $inputJson = 정규화된 사본.
+#   * $inputJson은 **구조 파싱에만** 쓴다 — 아래 ConvertFrom-Json 한 자리뿐이다.
+#   * 파싱이 실패해 $cmd가 비었을 때 도는 **보수적 부분일치 스캔은 $rawInput을 훑는다.**
+# 정규화한 문자열을 폴백에까지 물리면 첫 '{' 앞의 바이트가 **스캔 범위에서도** 사라진다. 실측:
+# JSON이 아닌 원시 입력 `git commit -m "a{b}"`가 `{b}"`로 잘려 폴백이 git 쓰기를 못 보고 통과했다
+# (수정 전 exit 0 / M42 이전 exit 2 — pwsh·sh 양쪽). 폴백의 존재 이유가 **파싱 불가 입력에서
+# 과소 차단을 막는 것**이므로, 파싱을 돕자고 만든 절단이 그 자리의 시야를 좁혀서는 안 된다.
+$inputJson = $rawInput
+if ($inputJson) {
+    $braceAt = $inputJson.IndexOf('{', [System.StringComparison]::Ordinal)
+    if ($braceAt -gt 0) { $inputJson = $inputJson.Substring($braceAt) }
+}
 
 # $cmd = 추출된 실제 셸 명령(서브커맨드 판정용). 추출 실패면 $null로 남겨 보수적 폴백을 탄다.
+# 구조 파싱의 입력은 **정규화된 $inputJson**이다(폴백 스캔은 $rawInput — 위 정규화 블록 주석 참조).
 $cmd = $null
 $cwd = $null
 try {
@@ -46,7 +81,11 @@ $phaseFile = Join-Path $root ".tide/phase"
 if (-not (Test-Path $phaseFile)) { exit 0 }
 
 $phase = (Get-Content $phaseFile -TotalCount 1).Trim()
-if ($phase -eq "release") { exit 0 }
+# 무차단 탈출 비교는 ordinal로 고정한다. PowerShell의 문자열 -eq는 문화권 비교라서
+# 'rele<U+00AD>ase'(무시 가능 문자 삽입) 같은 값이 "release"와 같다고 판정돼 차단이 통과로
+# 뒤집힐 수 있다(PS 5.1·7 양쪽에서 실측). OrdinalIgnoreCase는 기존의 대소문자 무시는 유지하고
+# 문화권 축만 제거하므로, 이 자리로 판정이 움직이는 방향도 통과 -> 차단뿐이다.
+if ([string]::Equals($phase, "release", [System.StringComparison]::OrdinalIgnoreCase)) { exit 0 }
 
 # ── git 쓰기/읽기 판정 ───────────────────────────────────────────────
 # release가 아닌 phase에서 git *쓰기* 서브커맨드만 차단한다(읽기는 통과). verb는 git 서브커맨드
@@ -94,7 +133,9 @@ if ($cmd) {
         if (Test-GitWriteSegment $seg) { $blocked = $true; break }
     }
 } else {
-    if ($inputJson -match 'git[^&|;]*[^a-zA-Z](commit|tag|push)([^a-zA-Z]|$)') { $blocked = $true }
+    # 보수적 폴백 — **원본**($rawInput)을 훑는다. 정규화 사본을 쓰면 첫 '{' 앞의 git 쓰기가
+    # 스캔 범위 밖으로 나간다(위 정규화 블록의 실측).
+    if ($rawInput -match 'git[^&|;]*[^a-zA-Z](commit|tag|push)([^a-zA-Z]|$)') { $blocked = $true }
 }
 if ($blocked) {
     [Console]::Error.WriteLine($blockMsg)

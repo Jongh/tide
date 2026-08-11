@@ -72,8 +72,15 @@ trap {
     exit 1
 }
 
+# M42-T03: the verdict is pinned to ORDINAL. PowerShell's `-eq` on strings is CULTURE comparison
+# (measured: 'A'+U+030A -eq U+00C5 is True, and so is -ceq -- `-ceq` is case-SENSITIVE but still
+# culture-aware, so it is NOT an ordinal substitute), while the .sh twin's `[ "$got" = "$want" ]` is
+# byte-exact. Every assertion in this file flows through here, so a case-only or
+# canonically-equivalent difference between got and want would pass here and fail there.
+# The [string] casts also close a second hazard: with an ARRAY $got, `-eq` returns the FILTERED
+# SUBARRAY and a non-empty one is truthy -- a vacuous pass.
 function Chk($desc, $got, $want) {
-    if ($got -eq $want) { $script:pass++; Write-Host ("PASS  {0,-56} ({1})" -f $desc, $got) }
+    if ([string]::Equals([string]$got, [string]$want, [System.StringComparison]::Ordinal)) { $script:pass++; Write-Host ("PASS  {0,-56} ({1})" -f $desc, $got) }
     else { $script:fail++; Write-Host ("FAIL  {0,-56} (got {1}, want {2})" -f $desc, $got, $want) }
 }
 function W($path, $text) { $d = Split-Path $path -Parent; if (-not (Test-Path $d)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }; Set-Content -Path $path -Value $text -Encoding utf8 }
@@ -299,6 +306,17 @@ try {
         foreach ($it in $items) { [void]$set.Add([string]$it) }
         return @($set)
     }
+    # (M42-T03) Same ordinal pin, DUPLICATES PRESERVED -- the sibling of the above for the seats whose
+    # .sh twin is `LC_ALL=C sort` WITHOUT `-u` (Part H's env-axes / exempt-jobs / ci-job-names). Folding
+    # those through OrdinalSortUnique instead would silently swallow a duplicated declaration that the
+    # shell twin still reports, i.e. it would make the two shells disagree -- the exact failure this
+    # audit exists to remove. Same List+Ordinal idiom ConvFiles already uses below.
+    function OrdinalSort($items) {
+        $lst = New-Object 'System.Collections.Generic.List[string]'
+        foreach ($it in $items) { [void]$lst.Add([string]$it) }
+        $lst.Sort([System.StringComparer]::Ordinal)
+        return @($lst.ToArray())
+    }
     function RosterSet($file) {
         $ln = RosterLine $file
         if ($ln -eq '') { return '' }
@@ -312,8 +330,12 @@ try {
         if ($s -eq '') { return 0 }
         return ($s -split ' ').Count
     }
+    # M42-T03: membership is pinned to ORDINAL. `-like` is culture-aware AND case-insensitive, while
+    # the .sh twin is `case " $(roster_set) " in *" $2 "*)` -- byte-exact. String.Contains(string) is
+    # ordinal by definition, so it says exactly what the shell twin says. Same change in
+    # NonWriterHas / StableHas / RostersDisjoint below (all four are the same idiom).
     function RosterHas($file, $name) {
-        if ((' ' + (RosterSet $file) + ' ') -like ('* ' + $name + ' *')) { return 'yes' } else { return 'no' }
+        if ((' ' + (RosterSet $file) + ' ').Contains(' ' + $name + ' ')) { return 'yes' } else { return 'no' }
     }
     # C-3's own scan set (living docs + skills + hooks) -- BOTH rosters sweep the SAME range. The name is
     # deliberately NOT 'LivingDocs': Part G defines its own LivingDocs with a DIFFERENT range
@@ -410,7 +432,7 @@ try {
         return ($s -split ' ').Count
     }
     function NonWriterHas($file, $name) {
-        if ((' ' + (NonWriterSet $file) + ' ') -like ('* ' + $name + ' *')) { return 'yes' } else { return 'no' }
+        if ((' ' + (NonWriterSet $file) + ' ').Contains(' ' + $name + ' ')) { return 'yes' } else { return 'no' }
     }
     function NonWriterFiles {
         $hits = @()
@@ -422,8 +444,12 @@ try {
     }
     # Set equality -- BOTH empty must be 'no'. '' -eq '' is true, so the day extraction breaks entirely
     # this assertion would pass vacuously (M37 review minor #4).
+    # (M42-T03) the equality itself is ORDINAL -- culture `-eq` would call two sets equal that the .sh
+    # twin's `[ "$1" = "$2" ]` calls different. The `-ne ''` emptiness guard is left as-is: only a
+    # string made purely of culture-ignorable characters can equal '', and these sets are built from
+    # `[a-z][a-z-]*` tokens joined by spaces, so that class is unreachable here.
     function SetsEqual($a, $b) {
-        if ($a -ne '' -and $a -eq $b) { return 'yes' } else { return 'no' }
+        if ($a -ne '' -and [string]::Equals($a, $b, [System.StringComparison]::Ordinal)) { return 'yes' } else { return 'no' }
     }
     # Writer and non-writer rosters must be DISJOINT -- if either extractor grabs the wrong side, the
     # count and set-equality cases still pass but this one catches it.
@@ -432,7 +458,7 @@ try {
         $b = NonWriterSet $file
         if ($a -eq '' -or $b -eq '') { return 'no' }
         foreach ($n in ($b -split ' ')) {
-            if ((' ' + $a + ' ') -like ('* ' + $n + ' *')) { return 'no' }
+            if ((' ' + $a + ' ').Contains(' ' + $n + ' ')) { return 'no' }
         }
         return 'yes'
     }
@@ -506,7 +532,7 @@ try {
         return ($s -split ' ').Count
     }
     function StableHas($file, $name) {
-        if ((' ' + (StableSet $file) + ' ') -like ('* ' + $name + ' *')) { return 'yes' } else { return 'no' }
+        if ((' ' + (StableSet $file) + ' ').Contains(' ' + $name + ' ')) { return 'yes' } else { return 'no' }
     }
     function StableFiles {
         $hits = @()
@@ -958,6 +984,61 @@ try {
     Chk "G4: self-reference extraction positive control (>0)" $(if ($gSelf.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
     Chk "G4: control -- bogus name (bogus-section) is not a self-reference" $(if ($selfSet.Contains('bogus-section')) { 'yes' } else { 'no' }) 'no'
 
+    # (G5~G7 - M42) citations pointing OUTSIDE the conventions set. G1 compares only against anchors in
+    # docs/conventions*.md, so a citation naming skills/*/SKILL.md or docs/*.md was seen by NO guard --
+    # four cycles unaddressed (M35-impl follow-up 3), and three such citations were actually stale.
+    # Generalization rationale: the skeleton NAMES the file, so resolve against THAT file's own anchors;
+    # name UNIQUENESS stays scoped to the conventions set (widening it would explode on unrelated docs).
+    # The skeleton particle after the path is REQUIRED -- without it a later quoted span on the same line
+    # is not evidence about that path (measured false positive: a line naming a path and then pointing at
+    # its OWN section, which is G4's business). A target that does not exist in the repo is NOT compared:
+    # Part G asks about anchors, not about path existence.
+    $UI = Uni 0xC758
+    $extPathRe = '`([A-Za-z0-9_./-]+\.md)`'
+    function ExtCitesOf($path) {
+        $out = @()
+        $raw = ReadUtf8 $path
+        if ($null -eq $raw) { return $out }
+        foreach ($line in ($raw -split "`r?`n")) {
+            foreach ($m in [regex]::Matches($line, $extPathRe)) {
+                $p = $m.Groups[1].Value
+                if (HasConvBase $p) { continue }
+                $rest = $line.Substring($m.Index + $m.Length)
+                if (-not $rest.StartsWith($UI, [System.StringComparison]::Ordinal)) { continue }
+                $mm = [regex]::Match($rest, $srRe)
+                if (-not $mm.Success) { continue }
+                $a = ($mm.Groups[1].Value -replace ' ', '')
+                if ($a -ne '' -and $a -notmatch '[{}]') { $out += ($p + "`t" + $a) }
+            }
+        }
+        return $out
+    }
+    function ExtMissOf($records) {
+        $miss = @()
+        foreach ($rec in $records) {
+            $parts = $rec -split "`t", 2
+            if ($parts.Count -lt 2) { continue }
+            $p = $parts[0]; $a = $parts[1]
+            if ($a -eq '') { continue }
+            $tgt = Join-Path $ROOT ($p.Replace('/', [string][char]92))
+            if (-not (Test-Path $tgt)) { continue }
+            $set = New-Object 'System.Collections.Generic.HashSet[string]'
+            foreach ($x in (AnchorSetOf $tgt)) { [void]$set.Add($x) }
+            if (-not $set.Contains($a)) { $miss += ($p + ' -> ' + $a) }
+        }
+        return $miss
+    }
+    $gExtCites = @()
+    foreach ($p in (LivingDocs)) { $gExtCites += @(ExtCitesOf $p) }
+    $gExtMiss = @(ExtMissOf $gExtCites)
+    foreach ($m in $gExtMiss) { Write-Host ("  -> broken cross-doc citation: " + $m) }
+    Chk "G5: every cross-doc citation resolves to a real anchor" ([string]$gExtMiss.Count) '0'
+    Chk "G6: cross-doc citation extraction positive control (>0)" $(if ($gExtCites.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # Injection control -- a citation naming a real file but an anchor it does not carry must be caught.
+    $extFx = Join-Path $sbx 'extfx.md'
+    [System.IO.File]::WriteAllText($extFx, ('- `skills/impl/SKILL.md`' + $UI + ' "bogus-cross-anchor" ' + $JEOL + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+    Chk "G7: control -- injected broken cross-doc citation is caught" ([string](@(ExtMissOf (@(ExtCitesOf $extFx)))).Count) '1'
+
     # === Part H -- execution-environment axis declaration consistency (M38-T06) =====
     # The convention NAMES each axis of the execution environment (single source: the
     # execution-environment axis section of docs/conventions.md) and records what enforces it.
@@ -1006,7 +1087,11 @@ try {
         $cut = $tail.IndexOf('-->')
         if ($cut -ge 0) { $tail = $tail.Substring(0, $cut) }
         $names = @($tail -split '\s+' | Where-Object { $_ -match '^[a-z][a-z-]*$' })
-        return (($names | Sort-Object -CaseSensitive) -join ' ')
+        # (M42-T03) `Sort-Object -CaseSensitive` is CULTURE-aware, not ordinal -- the same thing M41
+        # found in Part C. The .sh twin here is `LC_ALL=C sort` (no `-u`), so this is the
+        # duplicate-preserving ordinal helper. This output is string-compared by H3/H15, so the sort
+        # ORDER is part of the verdict.
+        return ((OrdinalSort $names) -join ' ')
     }
     $convAxes = EnvAxes $CONV
     $readAxes = EnvAxes $DISC_README
@@ -1025,7 +1110,7 @@ try {
         foreach ($row in $rows) {
             foreach ($m in [regex]::Matches($row, 'axis:[a-z][a-z-]*')) { $tok += $m.Value.Substring(5) }
         }
-        return ((@($tok | Sort-Object -CaseSensitive -Unique)) -join ' ')
+        return ((OrdinalSortUnique $tok) -join ' ')   # .sh twin: `LC_ALL=C sort -u` (M42-T03)
     }
     $convAxisTokens = TableAxisTokens $CONV
     $nAxisTok = @($convAxisTokens -split ' ' | Where-Object { $_ -ne '' }).Count
@@ -1085,7 +1170,7 @@ try {
                 foreach ($a in (RowAxisNames $row $axes)) { $pairs += ($a + '=' + $j) }
             }
         }
-        return ((@($pairs | Sort-Object -CaseSensitive -Unique)) -join ' ')
+        return ((OrdinalSortUnique $pairs) -join ' ')   # .sh twin: `LC_ALL=C sort -u` (M42-T03)
     }
     function EnvExemptJobs($file) {
         # jobs deliberately declared NOT to be environment axes (e.g. the repo-consistency `pairing`
@@ -1098,7 +1183,7 @@ try {
         $cut = $tail.IndexOf('-->')
         if ($cut -ge 0) { $tail = $tail.Substring(0, $cut) }
         $names = @($tail -split '\s+' | Where-Object { $_ -match '^[a-z][a-z0-9-]*$' })
-        return (($names | Sort-Object -CaseSensitive) -join ' ')
+        return ((OrdinalSort $names) -join ' ')   # .sh twin: `LC_ALL=C sort` (no -u) -- M42-T03
     }
     function CiJobNames($file) {
         # job keys = 2-space-indented keys INSIDE the `jobs:` block (so the keys under `on:` -- push,
@@ -1111,7 +1196,7 @@ try {
             if ($inJobs -and $line -match '^[A-Za-z]') { $inJobs = $false }
             if ($inJobs -and $line -match '^  ([a-z][a-z0-9-]*):[ \t]*$') { $out += $matches[1] }
         }
-        return (($out | Sort-Object -CaseSensitive) -join ' ')
+        return ((OrdinalSort $out) -join ' ')   # .sh twin: `LC_ALL=C sort` (no -u) -- M42-T03
     }
     $WF = Join-Path $ROOT '.github\workflows\tests.yml'
     $axesList = @($convAxes -split ' ' | Where-Object { $_ -ne '' })
@@ -1148,7 +1233,10 @@ try {
 
     Chk "H1: axis-name extraction positive control (>0)" $(if ($nAxes -gt 0) { 'ok' } else { 'no' }) 'ok'
     Chk "H2: every declared axis has a convention table row" ([string]$axisRowMiss) '0'
-    Chk "H3: axis-name sets equal (conventions vs discover README)" $(if ($convAxes -ne '' -and $convAxes -eq $readAxes) { 'yes' } else { 'no' }) 'yes'
+    # (M42-T03) ORDINAL equality, like Part C's SetsEqual -- culture `-eq` would call two axis-name sets
+    # equal that the .sh twin's `[ "$a" = "$b" ]` calls different. The `-ne ''` guard (both-empty must
+    # be 'no') is unchanged.
+    Chk "H3: axis-name sets equal (conventions vs discover README)" $(if ($convAxes -ne '' -and [string]::Equals($convAxes, $readAxes, [System.StringComparison]::Ordinal)) { 'yes' } else { 'no' }) 'yes'
     Chk "H4: control -- bogus axis name (bogus-axis) absent in conventions" (HasAxis $convAxes 'bogus-axis') 'no'
     Chk "H5: control -- bogus axis name (bogus-axis) absent in README" (HasAxis $readAxes 'bogus-axis') 'no'
     # (H10/H11) COVERAGE -- registration is not opt-in. Every job DISCOVERED in the workflow must be
@@ -1176,12 +1264,225 @@ try {
     # One direction alone is half the job: declared-but-missing-row is already H2's, but a token that
     # exists WITHOUT a declaration (an undeclared row) is caught here for the first time.
     Chk "H14: axis: notation extraction positive control (>0)" $(if ($nAxisTok -gt 0) { 'ok' } else { 'no' }) 'ok'
-    Chk "H15: axis: token set == env-axes declaration set" $(if ($convAxisTokens -ne '' -and $convAxisTokens -eq $convAxes) { 'yes' } else { 'no' }) 'yes'
+    Chk "H15: axis: token set == env-axes declaration set" $(if ($convAxisTokens -ne '' -and [string]::Equals($convAxisTokens, $convAxes, [System.StringComparison]::Ordinal)) { 'yes' } else { 'no' }) 'yes'
     Chk "H16: control -- bogus axis notation (bogus-axis) absent in table" (HasAxis $convAxisTokens 'bogus-axis') 'no'
     # (H17) A data row without a notation is prose inside the table. Row count must equal notation
     # count; the row-count positive control keeps 0==0 from passing vacuously.
     Chk "H17a: axis table data-row extraction positive control (>0)" $(if ($nAxisRows -gt 0) { 'ok' } else { 'no' }) 'ok'
     Chk "H17b: axis table data-row count == axis: notation count" $(if ($nAxisRows -eq $nAxisRowTok) { 'yes' } else { 'no' }) 'yes'
+
+    # === Part I -- axis state-claim consistency (M42) ==============================
+    # Bites the place where the TABLE says an axis is enforced and PROSE says the opposite. Counts are
+    # bitten by B1/F1, rosters by C-3/C-4, citations by Part G -- but "two paragraphs assert opposite
+    # facts" had no mechanism, and M41 produced THREE such defects in one cycle (two of them of the
+    # axis-name class, both missed by two reviews). Single source for the rule, markers and boundary is
+    # the axis state-claim consistency section of docs/conventions.md. In short:
+    #   POS = the axis table's `axis:` token set (axes whose enforcement cell is alive) -- Part H's set.
+    #   NEG = a live doc's BULLET BLOCK carrying both an axis name (inherited from the block head) and a
+    #         `state-neg:` marker. Two exclusions: a QUOTED marker (that is the rule being stated, not a
+    #         claim) and any line carrying a `state-past:` marker (history narration, not today's state).
+    # The markers are DECLARED BY THE CONVENTION and only read here -- a data-driven check with no Korean
+    # literal in this script, so the byte>127=0 rule holds (same shape as F2/G4/site-includes).
+    # The SHAPE of a declaration line is the discriminator: a bullet, then IMMEDIATELY the key wrapped
+    # in backticks (- `state-neg:` ...). A prose mention (- **rule**: ... `state-neg:` ...) does not put
+    # the key at the head of the line. Those two lines are exactly what the convention calls the SOLE
+    # declaration site, and both the extraction and the uniqueness check (I7..I9) read the SAME line.
+    # Blank class is [ \t] -- space and tab, nothing else. The .sh twin reaches the same width by NOT
+    # using a character class at all: its decl_lines is an awk LITERAL comparison (walk spaces/tabs, then
+    # '-', then spaces/tabs, then the key). Two earlier revisions of this comment were wrong about that
+    # twin -- first claiming a bare [[:blank:]] matched this "exactly" (it does not: under a UTF-8 locale
+    # glibc's [[:blank:]] also eats U+1680 / U+2003 / U+205F / U+3000, so the same tree split 136/0 here
+    # vs 135/1 there under C.UTF-8, the Ubuntu CI default), then claiming an LC_ALL=C pin on that grep
+    # (the grep is gone). Describe the twin as it is, or do not describe it. (\s / [[:space:]] would
+    # differ again, in both directions.)
+    # `-cmatch`, NOT `-match`: PowerShell's `-match` is CASE-INSENSITIVE by default, so a case variant
+    # of the key (`- ``State-Neg:`` ...`) counted as a declaration line here while the .sh twin's
+    # case-sensitive grep did not -- same tree, 132/0 in sh vs 131/1 here (M42 review issue 4). Every
+    # other comparison on this key is ordinal, so the case-sensitive answer is the correct one.
+    function DeclLines($path, $key) {
+        $raw = ReadUtf8 $path
+        if ($null -eq $raw) { return @() }
+        $re = '^[ \t]*-[ \t]+`' + [regex]::Escape($key) + '`'
+        return @($raw -split "`r?`n" | Where-Object { $_ -cmatch $re })
+    }
+    function DeclCount($path, $key) { return [string](@(DeclLines $path $key)).Count }
+    # The tail after the key on the declaration line -- the ONE place both the marker extraction and
+    # the separator check read, so they can never see different strings. The .sh twin does the same
+    # with awk index()+substr() (literal, no regex on either side).
+    function DeclTail($path, $key) {
+        $line = @(DeclLines $path $key) | Select-Object -First 1
+        if ($null -eq $line) { return $null }
+        $w = '`' + $key + '`'
+        $i = $line.IndexOf($w, [System.StringComparison]::Ordinal)
+        if ($i -lt 0) { return $null }
+        return $line.Substring($i + $w.Length)
+    }
+    # SEPARATOR SET -- every character EITHER shell may treat as whitespace, minus the ASCII space.
+    # .NET \s is [\f\n\r\t\v\x85\p{Z}] and \p{Z} carries NBSP / OGHAM / U+2000-200A / U+2028 / U+2029 /
+    # U+202F / U+205F / U+3000. The .sh twin spells the same set as UTF-8 bytes (octal escapes).
+    $SEP_RE = '[\t\v\f\r\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]'
+    function BadSeps($path, $key) {
+        $tail = DeclTail $path $key
+        if ($null -eq $tail) { return '0' }
+        if ([regex]::IsMatch($tail, $SEP_RE)) { return '1' } else { return '0' }
+    }
+    # FIRST match is pinned by DeclTail above on both sides (sed's greedy leading `.*` used to take the
+    # LAST occurrence while IndexOf takes the FIRST -- M42 review blocker 2).
+    # SPLIT WIDTH is pinned too: a single ASCII space, exactly like the .sh twin's `tr ' ' '\n'`.
+    # This used to be `-split '\s+'`, which made the two shells disagree on TAB and NBSP: one trailing
+    # tab on the declaration line killed the last marker in sh ONLY, and sh then stayed GREEN over a
+    # real contradiction that this runner caught (M42 review blocker 1). Matching the width is not
+    # enough on its own -- a character outside BOTH widths kills the marker in BOTH shells -- so
+    # I10..I13 below forbid every such character outright.
+    function MarkersOf($key) {
+        $tail = DeclTail $CONV $key
+        if ($null -eq $tail) { return @() }
+        return @(($tail -replace '[`*]', '') -split ' ' | Where-Object { $_ -ne '' })
+    }
+    $negMarks = @(MarkersOf 'state-neg:')
+    $pastMarks = @(MarkersOf 'state-past:')
+    # POS set = ONLY axes whose enforcement cell is alive. Using every `axis:` token would turn the
+    # convention's own MANDATED honest notation (an axis with no enforcement is written with a
+    # state-neg marker) into a contradiction, so that axis's own table row would FAIL (measured in
+    # review). Keep the runner exactly as wide as the convention describes.
+    function LiveAxes() {
+        $out = @()
+        $raw = ReadUtf8 $CONV
+        if ($null -eq $raw) { return $out }
+        foreach ($line in ($raw -split "`r?`n")) {
+            if (-not $line.StartsWith('|', [System.StringComparison]::Ordinal)) { continue }
+            $cols = $line -split '\|'
+            if ($cols.Count -lt 5) { continue }
+            $m = [regex]::Match($cols[1], 'axis:([a-z][a-z-]*)')
+            if (-not $m.Success) { continue }
+            $cell = $cols[3] -replace '[ \t\r]', ''
+            if ($cell -eq '') { continue }
+            $dead = $false
+            foreach ($n in $negMarks) { if ($n -ne '' -and $cell.Contains($n)) { $dead = $true; break } }
+            if (-not $dead) { $out += $m.Groups[1].Value }
+        }
+        return @(OrdinalSortUnique $out)   # sh twin is `LC_ALL=C sort -u`; culture sort would split them
+    }
+    $axNames = @(LiveAxes)
+    function ContraOf($path) {
+        $out = @()
+        $raw = ReadUtf8 $path
+        if ($null -eq $raw) { return $out }
+        $cur = New-Object 'System.Collections.Generic.HashSet[string]'
+        $n = 0
+        foreach ($line in ($raw -split "`r?`n")) {
+            $n++
+            $flat = $line -replace '[ \t\r]', ''
+            if ($line.StartsWith('- ', [System.StringComparison]::Ordinal) -or
+                $line.StartsWith('#', [System.StringComparison]::Ordinal) -or
+                $line.StartsWith('|', [System.StringComparison]::Ordinal)) { $cur.Clear() }
+            foreach ($a in $axNames) { if ($a -ne '' -and $flat.Contains($a)) { [void]$cur.Add($a) } }
+            if ($flat.Contains('state-neg:') -or $flat.Contains('state-past:')) { continue }
+            $hit = ''
+            foreach ($m in $negMarks) { if ($m -ne '' -and $flat.Contains($m)) { $hit = $m; break } }
+            if ($hit -eq '') { continue }
+            if ($flat.Contains('"' + $hit + '"')) { continue }
+            $past = $false
+            foreach ($m in $pastMarks) { if ($m -ne '' -and $flat.Contains($m)) { $past = $true; break } }
+            if ($past) { continue }
+            foreach ($a in $cur) { $out += ($a + ':' + $n) }
+        }
+        return $out
+    }
+    # (I1) if the markers cannot be read every assertion below passes 0==0 VACUOUSLY -- bite extraction first.
+    Chk "I1: state-neg marker extraction positive control (>0)" $(if ($negMarks.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # (I1b) the POS set needs its own positive control: if the table layout shifts and the enforcement
+    # cell stops being extracted, POS goes empty and I2 passes VACUOUSLY (0==0). H14 bites the `axis:`
+    # token set, not this derived subset.
+    Chk "I1b: live-enforcement axis extraction positive control (>0)" $(if ($axNames.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # (I2) the real check. On failure NAME the axis, file and line -- a count alone does not say where.
+    $contra = @()
+    foreach ($p in (LivingDocs)) {
+        foreach ($h in (ContraOf $p)) { $contra += $h; Write-Host ("  -> axis-state contradiction: " + $h + " (" + (Split-Path $p -Leaf) + ")") }
+    }
+    Chk "I2: no axis state-claim contradiction in live docs" ([string]$contra.Count) '0'
+    # (I3~I6) controls -- an injected contradiction is caught; the three deliberately excluded shapes are not.
+    $iAx = if ($axNames.Count -gt 0) { $axNames[0] } else { '' }
+    $iNeg = if ($negMarks.Count -gt 0) { $negMarks[0] } else { '' }
+    $iPast = if ($pastMarks.Count -gt 0) { $pastMarks[0] } else { '' }
+    $noBom = New-Object System.Text.UTF8Encoding($false)
+    $fxIn = Join-Path $sbx 'contra-inject.md'
+    $fxQt = Join-Path $sbx 'contra-quoted.md'
+    $fxPa = Join-Path $sbx 'contra-past.md'
+    $fxNt = Join-Path $sbx 'contra-notarget.md'
+    [System.IO.File]::WriteAllText($fxIn, ('- **`' + $iAx + '` axis**: ' + $iNeg + "`n"), $noBom)
+    [System.IO.File]::WriteAllText($fxQt, ('- **`' + $iAx + '` axis**: "' + $iNeg + '"' + "`n"), $noBom)
+    [System.IO.File]::WriteAllText($fxPa, ('- **`' + $iAx + '` axis**: ' + $iNeg + $iPast + "`n"), $noBom)
+    [System.IO.File]::WriteAllText($fxNt, ('- no axis name here: ' + $iNeg + "`n"), $noBom)
+    Chk "I3: control -- injected axis state contradiction is caught" ([string](@(ContraOf $fxIn)).Count) '1'
+    Chk "I4: control -- a QUOTED marker (the rule itself) is not a claim" ([string](@(ContraOf $fxQt)).Count) '0'
+    Chk "I5: control -- history narration (past marker) is not a claim" ([string](@(ContraOf $fxPa)).Count) '0'
+    Chk "I6: control -- a marker with no target axis is not a claim" ([string](@(ContraOf $fxNt)).Count) '0'
+
+    # (I7~I9) DECLARATION-SITE UNIQUENESS -- the convention says "the two lines below are the sole
+    # declaration site of the markers", but until now both runners simply took the FIRST line where the
+    # key appeared, so nothing bit that sentence (M42 review minor 8). Zero lines means the declaration
+    # is gone (extraction goes empty); two or more means the site has SPLIT and which line wins depends
+    # on the runner implementation -- both FAIL. These bite WHICH LINE is read; I10..I13 below bite HOW
+    # THAT LINE IS SPLIT. An earlier revision claimed here that "which edit is loud and which is silent
+    # stops being luck" -- that was FALSE (a trailing tab and an NBSP were still silent, M42 review
+    # blocker 1). What holds now: any character in the separator set below makes BOTH shells red. The
+    # marker alphabet itself (which characters may form a marker) is still NOT bitten.
+    Chk "I7: exactly one state-neg declaration line in the convention" (DeclCount $CONV 'state-neg:') '1'
+    Chk "I8: exactly one state-past declaration line in the convention" (DeclCount $CONV 'state-past:') '1'
+    # control -- a prose mention is not a declaration site. The fixture is ASCII-only and the .sh twin
+    # writes the very same three lines, so it is immediately visible whether both shells count the same.
+    $fxDc = Join-Path $sbx 'contra-decl.md'
+    [System.IO.File]::WriteAllText($fxDc, (
+        '- `state-neg:` alpha beta' + "`n" +
+        '- **rule**: the `state-neg:` marker is declared above and only mentioned here' + "`n" +
+        'a prose line mentioning `state-neg:` in the middle' + "`n"), $noBom)
+    Chk "I9: control -- a prose mention is not a declaration site" (DeclCount $fxDc 'state-neg:') '1'
+
+    # (I10~I13) THE SEPARATOR ON A DECLARATION LINE IS A SINGLE ASCII SPACE (M42 review blocker 1).
+    # Matching the two split widths is not enough: a character outside BOTH widths kills a marker in
+    # BOTH shells and I2 goes back to passing 0==0. So the width is matched (MarkersOf) AND every other
+    # separator is forbidden here. I12/I13 prove the ban is not vacuous. The fixtures are written from
+    # ASCII SOURCE ([char] escapes) and the .sh twin writes the very same bytes via printf octal.
+    Chk "I10: no forbidden separator in the state-neg declaration tail" (BadSeps $CONV 'state-neg:') '0'
+    Chk "I11: no forbidden separator in the state-past declaration tail" (BadSeps $CONV 'state-past:') '0'
+    $fxTab = Join-Path $sbx 'contra-sep-tab.md'
+    $fxNbsp = Join-Path $sbx 'contra-sep-nbsp.md'
+    [System.IO.File]::WriteAllText($fxTab, ('- `state-neg:` alpha' + [char]0x0009 + 'beta' + "`n"), $noBom)
+    [System.IO.File]::WriteAllText($fxNbsp, ('- `state-neg:` alpha' + [char]0x00A0 + 'beta' + "`n"), $noBom)
+    Chk "I12: control -- a TAB separator is caught" (BadSeps $fxTab 'state-neg:') '1'
+    Chk "I13: control -- an NBSP separator is caught" (BadSeps $fxNbsp 'state-neg:') '1'
+
+    # (I14~I15) READ THE SEPARATOR SET FROM THE CONVENTION AND CHECK THIS IMPLEMENTATION AGAINST IT
+    # (M42 rework 3). The set lives in three media -- Korean names in the convention, octal bytes in the
+    # .sh twin, \uXXXX here -- so no string comparison closes it, and "we read it and they matched" was
+    # WRONG THREE ROUNDS RUNNING. Now the convention's `sep-cps:` line is the single source and each
+    # runner builds its own fixture per code point. Crucially this runs the WHOLE extraction pipeline,
+    # not just the pattern: M42 review blocker 1 was a character that sat in the set but was stripped
+    # upstream, so a pattern-only comparison could not see it.
+    function SepHits($cps) {
+        $h = 0
+        $f = Join-Path $sbx 'contra-sep-cp.md'
+        foreach ($x in $cps) {
+            $ch = [char]::ConvertFromUtf32([Convert]::ToInt32($x, 16))
+            [System.IO.File]::WriteAllText($f, ('- `state-neg:` alpha' + $ch + 'beta' + "`n"), $noBom)
+            $h += [int](BadSeps $f 'state-neg:')
+        }
+        return $h
+    }
+    $sepCps = @(MarkersOf 'sep-cps:')
+    $sepOkCps = @(MarkersOf 'sep-ok-cps:')
+    # (I16~I19) THE SAME GUARDS THE OTHER DECLARATION KEYS ALREADY CARRY (M42 review blocker 1).
+    # I14/I15 READ the declaration to check this implementation -- so if the declaration disappears the
+    # set is empty and I14 passes 0 == 0. Measured: deleting the `sep-cps:` line left all four
+    # environments green at 140/0. I1/I1b/G6/F4 all guard against exactly this, and I7/I8 additionally
+    # pin declaration-line uniqueness for the other two keys. Extraction (>0) and uniqueness (exactly 1).
+    Chk "I16: sep-cps extraction positive control (>0)" $(if ($sepCps.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "I17: sep-ok-cps extraction positive control (>0)" $(if ($sepOkCps.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "I18: exactly one sep-cps declaration line in the convention" (DeclCount $CONV 'sep-cps:') '1'
+    Chk "I19: exactly one sep-ok-cps declaration line in the convention" (DeclCount $CONV 'sep-ok-cps:') '1'
+    Chk "I14: every separator the convention declares is caught" ([string](SepHits $sepCps)) ([string]$sepCps.Count)
+    Chk "I15: control -- an allowed character is not caught" ([string](SepHits $sepOkCps)) '0'
 
     function DeclaredCases() {
         # FIRST match, deliberately -- the sh side now pins the same end (M38 review minor 4: sed's
@@ -1207,6 +1508,98 @@ try {
         return [string]$s
     }
     Chk "F1b: per-part breakdown sums to declared total" (PartSum) (DeclaredCases)
+
+    # (F4~F5) MACHINE-BITE THE byte>127 = 0 RULE FOR THIS FILE AND ITS SIBLINGS (M42 rework 3, self-raised).
+    # The convention and this harness's README have long said the rule "holds", but NO case and no CI job
+    # bit it. This round met that fact head-on: a Korean word slipped into a comment in this very file and
+    # all 138 cases stayed green -- a human had to count bytes to find it. A rule that lives only in prose
+    # is not a rule. F4 is the positive control: if discovery returns nothing, F5 passes 0==0 vacuously.
+    # Anchor on $ROOT, never on the caller's cwd -- a relative 'tests' would scan whatever directory the
+    # runner happened to be invoked from and could pass over a clean tree while the copy under test is
+    # broken (measured while wiring this: the .sh twin went 139/1 and this one stayed 140/0).
+    # DISCOVERY SPEC -- THE ONE DEFINITION BOTH COPIES IMPLEMENT: every regular file at any depth under
+    # <dir> whose name ends in '.ps1', where (1) the extension compares CASE-SENSITIVELY ('.PS1' is NOT
+    # discovered), (2) HIDDEN items are included, (3) directories are not counted. This copy used to get
+    # (1) and (2) wrong: -Filter is case-insensitive on Windows and Get-ChildItem skips hidden entries
+    # (and does not descend into hidden directories) without -Force. Same tree, different verdict --
+    # measured in M42 review blocker 1: a non-ASCII 'extra.PS1' went sh 145/0 (green) vs 144/1 on both
+    # PowerShell runtimes, and a hidden 'hid.ps1' went sh 144/1 vs 145/0 (green) on both. The convention's
+    # "execution environment axis" section already rules that path-API semantics are a CODE DEFECT, not an
+    # axis -- there are not two poles, one side is wrong. The .sh twin is canonical here because `find`
+    # does all three by construction; this side matches it with -Force plus an ordinal EndsWith.
+    # F7 bites the spec with a fixture. Taking <dir> as a parameter is what lets F7 run THIS function over
+    # that fixture -- measuring a fixture with different code than the code under test proves nothing.
+    function Ps1FilesIn($dir) {
+        return @(Get-ChildItem -Path $dir -Recurse -Force -File |
+            Where-Object { $_.Name.EndsWith('.ps1', [System.StringComparison]::Ordinal) })
+    }
+    function Ps1Files() { return @(Ps1FilesIn (Join-Path $ROOT 'tests')) }
+    # READ BYTES, NOT LINES. ReadAllLines DECODES and strips a leading UTF-8 BOM, so a BOM -- which is
+    # byte>127 itself, and which PowerShell 5.1's own default writers emit -- was invisible here while the
+    # .sh twin caught it (measured: dash 139/1 vs pwsh 140/0 and PS 5.1 140/0, M42 review blocker 2).
+    # Lines are split on LF over the raw bytes; CR is ignored, matching the twin's `tr -d '\r'`.
+    # WIDTH IS byte>127 ON BOTH SIDES. The twin used to bite the complement of printable-ASCII-plus-tab,
+    # which also caught control bytes (form feed, vertical tab) that this side does not -- same tree,
+    # different verdict (M42 review recommendation 1: a form feed in a .ps1 went sh 144/1 vs 145/0 on
+    # both PowerShell runtimes). The twin was narrowed to an octal byte-range class under LC_ALL=C.
+    # CONSUME THROUGH A SERIALIZED LIST, exactly as the twin does. Iterating the discovery result directly
+    # and then comparing that count against a fresh enumeration is an IDENTITY, not a control: it cannot
+    # go red on any input (M42 review recommendation 3 -- this side was in that state). Round-tripping the
+    # list through a file gives F6 a way to fail on this side for the same reason it can on the twin:
+    # anything that loses a line between discovery and consumption splits the two numbers.
+    function NonAsciiScan() {
+        $list = Join-Path $sbx 'ps1files.txt'
+        [System.IO.File]::WriteAllLines($list, @(Ps1Files | ForEach-Object { $_.FullName }),
+            (New-Object System.Text.UTF8Encoding($false)))
+        $checked = 0; $bad = 0
+        foreach ($p in [System.IO.File]::ReadAllLines($list)) {
+            if ([string]::IsNullOrEmpty($p)) { continue }
+            if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { continue }
+            $checked++
+            $high = $false
+            foreach ($b in [System.IO.File]::ReadAllBytes($p)) {
+                if ($b -eq 10) { if ($high) { $bad++ }; $high = $false; continue }
+                if ($b -eq 13) { continue }
+                if ($b -gt 127) { $high = $true }
+            }
+            if ($high) { $bad++ }
+        }
+        return @($checked, $bad)
+    }
+    $ps1Scan = NonAsciiScan
+    $ps1Found = (Ps1Files).Count
+    Chk "F4: ps1 runner discovery positive control (>0)" $(if ($ps1Found -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "F5: no non-ASCII line in tests/**/*.ps1" ([string]$ps1Scan[1]) '0'
+    # (F6) COMPARE DISCOVERY WITH CONSUMPTION -- F4 only sees "discovery returned nothing", but the failure
+    # that actually happened was "discovery returned everything and consumption dropped it all".
+    Chk "F6: files checked == files discovered" ([string]$ps1Scan[0]) ([string]$ps1Found)
+    # (F7) BITE THE DISCOVERY SPEC WITH A FIXTURE. The three axes above (case, hidden, directories) cannot
+    # be exercised by scanning the real tests/ tree -- no such file exists there, so that scan stays green
+    # forever no matter how wrong the spec is. Build four files plus a decoy directory in the sandbox, run
+    # the SAME function over them, and compare SORTED BASENAMES rather than a count: dropping the hidden
+    # file (-1) while adding the uppercase one (+1) cancels out to the same count, and that is exactly the
+    # pair of defects this side had. On Windows 'hidden' is an attribute, on POSIX it is a leading dot --
+    # the fixture is dot-named on both and additionally attribute-hidden where that exists, so each runtime
+    # meets its own notion. The .sh twin needs no such attribute: `find` has no concept of hidden at all,
+    # which is precisely why this side is the one that had to move.
+    function Ps1DiscFixture() {
+        $d = Join-Path $sbx 'ps1disc'
+        if (Test-Path $d) { Remove-Item $d -Recurse -Force }
+        New-Item -ItemType Directory -Path (Join-Path $d 'sub') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $d 'dir.ps1') -Force | Out-Null
+        foreach ($n in 'a.ps1', 'b.PS1', '.hidden.ps1', 'sub\c.ps1') {
+            [System.IO.File]::WriteAllText((Join-Path $d $n), '', (New-Object System.Text.UTF8Encoding($false)))
+        }
+        try { (Get-Item -LiteralPath (Join-Path $d '.hidden.ps1') -Force).Attributes = 'Hidden' } catch { }
+        return $d
+    }
+    function DiscSpec($dir) {
+        $names = @(Ps1FilesIn $dir | ForEach-Object { $_.Name })
+        [Array]::Sort($names, [System.StringComparer]::Ordinal)
+        return ($names -join '|')
+    }
+    Chk "F7: discovery spec -- case-sensitive, hidden included, directories excluded" `
+        (DiscSpec (Ps1DiscFixture)) '.hidden.ps1|a.ps1|c.ps1'
 
     # (F1) LAST case -- own README declaration ('cases: N') vs actual case count (running total + this one).
     Chk "F1: README cases declaration == actual case count" (DeclaredCases) ([string]($script:pass + $script:fail + 1))
