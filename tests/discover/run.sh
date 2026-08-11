@@ -1150,6 +1150,15 @@ markers_of() { # <키> → 그 키가 선언한 표지 토큰(백틱·강조 제
 NEG_MARKS=$(markers_of 'state-neg:')
 PAST_MARKS=$(markers_of 'state-past:')
 NMARK=$(printf '%s\n' "$NEG_MARKS" | grep -c .)
+# **awk `-v` 전송은 공백으로 한다 — 생 개행은 BSD awk를 죽인다.** one-true-awk(macOS `/usr/bin/awk`)는
+# `-v` 값에 **생 개행**이 들어오면 `awk: newline in string …`으로 죽고 출력이 통째로 빈다. GNU awk와
+# mawk는 통과하므로 **개발 기계도 우분투 CI도 초록이고 macOS 레그에서만 붉다**(debug-1 항목 1의 실측:
+# `live_axes`가 빈 출력을 내 `I1b`가 `got no`, 그 파생으로 `I3`가 `got 0`). 표지는 `markers_of`가
+# **공백으로 쪼개** 만들므로 **공백을 포함할 수 없다** — 개행을 공백으로 바꿔 실어도 무손실이다.
+# 같은 `contra_of`의 `AX`가 이미 이 전송(`split(AX, A, " ")`)을 쓰고 BSD에서 통과한다 — 새 기전을
+# 들이는 것이 아니라 **이미 통과하는 전송으로 나머지 둘을 맞추는** 것이다.
+NEG_MARKS_SP=$(printf '%s' "$NEG_MARKS" | tr '\n' ' ')
+PAST_MARKS_SP=$(printf '%s' "$PAST_MARKS" | tr '\n' ' ')
 
 # POS 집합 = 표에서 **집행 칸이 살아 있는** 축만이다. 전체 `axis:` 토큰을 쓰면 규약이 **의무화한**
 # 정직 표기(집행이 없는 축은 부정 상태어로 명시)가 곧 모순으로 잡혀, 그 축의 표 행 자체가 FAIL을
@@ -1159,8 +1168,8 @@ live_axes() { # → 집행 칸이 살아 있는 축 이름(공백 구분)
     # 표 행의 인식 넓이는 ps1 사본과 **같아야 한다**(M42 리뷰 권장 5의 처분). 이 게이트가 없으면
     # 들여쓴 표 행을 sh만 POS로 집어 두 셸이 같은 트리에 다른 판정을 낸다(실측). `^|`는 ps1의
     # `StartsWith('|')`, `NF >= 5`는 `$cols.Count -ge 5`와 같은 의미다(`| a | b | c |` → NF=5).
-    awk -F'|' -v NEG="$NEG_MARKS" '
-        BEGIN { nn = split(NEG, NG, "\n") }
+    awk -F'|' -v NEG="$NEG_MARKS_SP" '
+        BEGIN { nn = split(NEG, NG, " ") }
         /^\|/ && NF >= 5 && /axis:[a-z][a-z-]*/ {
             name = ""
             if (match($2, /axis:[a-z][a-z-]*/)) name = substr($2, RSTART + 5, RLENGTH - 5)
@@ -1173,8 +1182,8 @@ live_axes() { # → 집행 칸이 살아 있는 축 이름(공백 구분)
 POS_AXES=$(live_axes)
 
 contra_of() { # <file> → "<축>:<줄번호>" (모순 후보, 한 줄에 하나)
-    awk -v AX="$POS_AXES" -v NEG="$NEG_MARKS" -v PAST="$PAST_MARKS" '
-        BEGIN { na=split(AX, A, " "); nn=split(NEG, NG, "\n"); np=split(PAST, PS, "\n") }
+    awk -v AX="$POS_AXES" -v NEG="$NEG_MARKS_SP" -v PAST="$PAST_MARKS_SP" '
+        BEGIN { na=split(AX, A, " "); nn=split(NEG, NG, " "); np=split(PAST, PS, " ") }
         {
             raw = $0
             line = raw; gsub(/[ \t\r]/, "", line)
