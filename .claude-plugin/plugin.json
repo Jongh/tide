@@ -2,7 +2,7 @@
   "name": "tide",
   "displayName": "tide",
   "description": "마일스톤 → 구현 → 리뷰 → 릴리즈 개발 사이클 슬래시 커맨드 + git 작업 가드 hook",
-  "version": "2.14.1",
+  "version": "2.15.0",
   "author": {
     "name": "Jongh"
   },

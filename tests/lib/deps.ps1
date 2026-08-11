@@ -43,7 +43,11 @@ function ReadDeps($repoDir) {
     $out = @()
     foreach ($line in (DepLines $f)) {
         $t = $line.Trim()
-        if ($t -eq '' -or $t.StartsWith('#')) { continue }   # blank / comment
+        # (M42-T03) ordinal StartsWith -- culture StartsWith matches THROUGH ignorable characters
+        # (measured: (U+200D + '#foo').StartsWith('#') is True in culture mode, False in ordinal),
+        # so a line the .sh twin's `case "$t" in \#*)` treats as data would be dropped as a comment
+        # here. M38 pinned this idiom across tests/discover/run.ps1; these were the residue.
+        if ($t -eq '' -or $t.StartsWith('#', [System.StringComparison]::Ordinal)) { continue }   # blank / comment
         $out += (DepName $t)
     }
     return $out

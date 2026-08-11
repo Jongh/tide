@@ -1007,6 +1007,308 @@ chk "H16: 통제 — 가짜 축 표기(bogus-axis) 표 부재"  "$(has_axis "$CO
 chk "H17a: 축 표 데이터 행 추출 positive-control(>0)" "$([ "$NAXIS_ROWS" -gt 0 ] && echo ok || echo no)" "ok"
 chk "H17b: 축 표 데이터 행 수 == axis: 표기 수"       "$([ "$NAXIS_ROWS" = "$NAXIS_ROW_TOK" ] && echo yes || echo no)" "yes"
 
+# (G5~G7 · M42) 규약 문서 집합 **밖**을 가리키는 인용. G1의 대조 집합은 `docs/conventions*.md`의 앵커
+# 뿐이라 `skills/*/SKILL.md`·`docs/*.md`를 가리킨 인용은 **어느 가드도 보지 않았다** — 네 사이클 미반영
+# (M35-impl 후속3)이고, M41이 그 실례를 하나 찾았다(`skills/impl/SKILL.md`의 절 이름이 인용과 어긋남).
+# 일반화의 근거: 인용 골격이 **파일명을 명시**하므로 대조는 **그 파일 자신의 앵커**로 하면 되고, 이름
+# **유일성은 규약 집합에만** 유지한다(살아 있는 문서 전체로 넓히면 무관한 문서 간 이름 충돌이 터진다).
+# 골격은 G4와 같은 표지(`"…" 절`)를 쓴다 — 표지가 없으면 후보가 평범한 인용부호 산문으로 폭발한다.
+# 대상 파일이 레포에 **없으면 대조하지 않는다**(경로 자체가 틀린 경우는 이 파트의 경계 밖 — 규약 고지).
+SKEL_UI=$(printf '\354\235\230')        # U+C758 — 인용 골격의 조사(`…`의 "…" 절). ps1은 Uni(0xC758)
+extdoc_cites_of() { # <file> → "<경로>\t<앵커>" (규약 집합 밖 대상만)
+    awk -v J="$SELFREF_JEOL" -v UI="$SKEL_UI" -v BASES="$SBX/convbases.txt" '
+        BEGIN { while ((getline b < BASES) > 0) if (b != "") BASE[++NB] = b }
+        function isconv(p,   i) { for (i = 1; i <= NB; i++) if (index(p, BASE[i])) return 1; return 0 }
+        {
+            line = $0
+            while (match(line, /`[A-Za-z0-9_.\/-]+\.md`/)) {
+                p = substr(line, RSTART + 1, RLENGTH - 2)
+                rest = substr(line, RSTART + RLENGTH)
+                pat = "\"[^\"]*\"[ \t]*" J
+                # 골격의 조사(`경로`**의** "앵커" 절)를 요구한다 — 이것이 없으면 뒤따르는 인용부호가
+                # 그 경로를 가리킨다는 근거가 없다(실측 오탐: 경로 뒤에 자기 파일의 절을 가리키는
+                # `위 "…" 절`이 오는 줄. 그 자리는 G4가 무는 자기참조다).
+                if (!isconv(p) && index(rest, UI) == 1 && match(rest, pat)) {
+                    m = substr(rest, RSTART, RLENGTH); s = substr(m, 2); q = index(s, "\"")
+                    if (q > 1) {
+                        a = substr(s, 1, q - 1); gsub(/[ \r]/, "", a)
+                        if (a != "" && a !~ /[{}]/) printf "%s\t%s\n", p, a
+                    }
+                }
+                line = rest
+            }
+        }' "$1"
+}
+TAB=$(printf '\t')
+extdoc_misses() { # <레코드 파일> → 미해소 인용(사람이 읽을 형태)
+    while IFS="$TAB" read -r p a; do
+        [ -n "$a" ] || continue
+        [ -f "$ROOT/$p" ] || continue
+        anchor_set "$ROOT/$p" > "$SBX/extanchors.txt"
+        grep -qxF -- "$a" "$SBX/extanchors.txt" </dev/null || printf '%s -> %s\n' "$p" "$a"
+    done < "$1"
+}
+: > "$SBX/extcites.txt"
+while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    extdoc_cites_of "$f" >> "$SBX/extcites.txt"
+done < "$SBX/living.txt"
+NEXTCITE=$(grep -c . "$SBX/extcites.txt")
+EXTMISS=$(extdoc_misses "$SBX/extcites.txt")
+NEXTMISS=$(printf '%s\n' "$EXTMISS" | grep -c .)
+[ "$NEXTMISS" = "0" ] || printf '%s\n' "$EXTMISS" | sed 's/^/  -> broken cross-doc citation: /'
+chk "G5: 규약 밖 인용이 전부 실재 앵커를 가리킴"   "$NEXTMISS" "0"
+chk "G6: 규약 밖 인용 추출 positive-control(>0)"   "$([ "$NEXTCITE" -gt 0 ] && echo ok || echo no)" "ok"
+# 주입 통제 — 실재하는 대상 파일에 없는 앵커를 가리키는 인용을 심으면 잡아야 한다(공허 아님 실증).
+printf -- '- `skills/impl/SKILL.md`%s "bogus-cross-anchor" %s\n' "$SKEL_UI" "$SELFREF_JEOL" > "$SBX/extfx.md"
+extdoc_cites_of "$SBX/extfx.md" > "$SBX/extfx.txt"
+chk "G7: 통제 — 주입한 깨진 규약 밖 인용을 잡는다" "$(extdoc_misses "$SBX/extfx.txt" | grep -c .)" "1"
+
+# === Part I — 축 상태 주장 정합 (M42) ====================================
+# 표가 **집행된다**고 적은 축을 산문이 **반대로** 적는 자리를 문다. 카운트는 B1·F1이, 명단은 C-3·C-4가,
+# 인용은 Part G가 물지만 "두 문단이 반대되는 사실을 말한다"는 층에는 수단이 없었다 — M41 사이클에 이
+# 부류가 **세 건** 나왔고 그중 둘이 축 이름 부류였다(리뷰가 두 번 놓쳤다).
+# 규칙·표지·경계의 단일 원본은 `docs/conventions.md`의 "축 상태 주장 정합" 절이다. 요지:
+#   POS = 축 표의 `axis:` 토큰 집합(집행 칸이 살아 있는 축) — Part H가 이미 추출한 것을 재사용한다.
+#   NEG = 살아 있는 문서의 **불릿 블록**에 축 이름(블록 머리에서 상속)과 `state-neg:` 표지가 공존.
+#   빼는 것 둘 — 인용부호에 싸인 부정어(규칙 서술)·`state-past:` 표지가 든 줄(이력 서술).
+# 표지는 **규약이 단일 선언처**이고 러너는 읽기만 한다 — 스크립트에 한글 리터럴을 두지 않는 데이터
+# 기반 검사라 ps1의 byte>127=0 규율을 유지한다(F2·G4·site-includes 용어 추출과 동형).
+# **선언 줄의 형태**가 판별자다 — 불릿 시작 **직후**에 백틱으로 감싼 키(`` - `state-neg:` … ``).
+# 산문 언급(`` - **규칙**: … `state-neg:` 표지가 … ``)은 키가 줄 앞머리에 오지 않아 걸리지 않는다.
+# 규약이 *"아래 두 줄이 표지의 유일한 선언처다"*라고 적은 그 두 줄이 정확히 이 형태이며, **추출도
+# 유일성 검사(I7~I9)도 같은 줄에서** 한다. 공백류는 **공백·탭 두 문자로만** 본다(ps1의 `[ \t]`와
+# 같은 넓이) — 어떻게 그 넓이를 얻는지는 바로 아래 `decl_lines`가 정한다.
+# 선언 줄 판별은 **정규식도 grep도 쓰지 않는다** — awk의 리터럴 비교로 한다. 이유가 둘이다.
+#   ⑴ **로케일**: `grep -E`의 `[[:blank:]]`는 로케일 의존이라 UTF-8 로케일에서 U+2003·U+1680·
+#      U+205F·U+3000 같은 유니코드 공백까지 먹는다(실측: `LC_ALL=C` 0 ↔ `C.UTF-8` 1 ↔
+#      `en_US.UTF-8` 1). ps1 사본의 `[ \t]`는 그 넓이가 아니라 **개발 기계는 초록, 우분투
+#      CI(`C.UTF-8`)는 붉음**이 된다(M42 리뷰 권장 2).
+#   ⑵ **바이트 충실성**: 이 환경의 `grep`(GNU 3.0/MSYS)은 **줄 가운데 CR을 버린다** — 실측으로
+#      같은 줄이 파일에 홀로 있으면 보존되고 앞에 40줄을 두면 사라졌다(`sed`·`awk`는 둘 다 보존).
+#      그래서 grep을 쓰는 한 sh는 ps1이 보는 것과 **다른 바이트**를 보고, CR 부류의 검사가
+#      환경에 따라 공허해진다(M42 리뷰 차단 1이 이 층이다).
+# 리터럴 비교는 셋을 한꺼번에 없앤다 — 로케일 축·CR 유실·키 이스케이프(M42 리뷰 사소 6, 이제
+# 이스케이프할 정규식 자체가 없다). 의미는 ps1의 `^[ \t]*-[ \t]+<Escape(키)>`와 같다.
+# CR은 **줄 끝 하나만** 벗긴다(CRLF 체크아웃) — ps1의 `-split "\r?\n"`이 소비하는 범위와 같다.
+decl_lines() { # <file> <키> → 선언 줄(0줄 이상)
+    [ -f "$1" ] || return 0
+    awk -v k="\`$2\`" -v cr="$(printf '\r')" '{
+        s = $0
+        if (length(s) > 0 && substr(s, length(s), 1) == cr) s = substr(s, 1, length(s) - 1)
+        i = 1
+        while (i <= length(s) && (substr(s, i, 1) == " " || substr(s, i, 1) == "\t")) i++
+        if (substr(s, i, 1) != "-") next
+        i++
+        n = 0
+        while (i <= length(s) && (substr(s, i, 1) == " " || substr(s, i, 1) == "\t")) { i++; n++ }
+        if (n < 1) next
+        if (substr(s, i, length(k)) != k) next
+        print s
+    }' "$1" 2>/dev/null
+    return 0
+}
+decl_count() { # <file> <키> → 선언 줄 개수
+    decl_lines "$1" "$2" | grep -c .
+}
+# 선언 줄에서 키 **바로 뒤 꼬리**. 표지 추출(`markers_of`)과 구분자 검사(`bad_seps`)가 **같은
+# 문자열**을 보게 하는 단일 자리다. 정규식을 쓰지 않고 `index`+`substr`로 끊어 ps1 사본의
+# `IndexOf`+`Substring`과 **문자 그대로 같은 의미**를 갖는다(키가 리터럴이므로 이스케이프 축이
+# 아예 없어진다). 앞의 `tr -d '\r'`는 CRLF 체크아웃에서 꼬리 끝에 CR이 붙는 것을 막는다 —
+# ps1은 줄을 `\r?\n`으로 쪼개 애초에 CR을 보지 않으므로 여기서 맞춘다.
+decl_tail() { # <file> <키> → 꼬리 1줄(없으면 빈 출력)
+    # 줄 끝 CR은 `decl_lines`가 이미 벗겼고 **줄 가운데 CR은 그대로 넘어온다** — 그래야 `bad_seps`가
+    # 그것을 볼 수 있다. 앞선 판본은 여기서 `tr -d '\r'`로 **통째로 지웠고**, 그러면 ⑴ 양옆 표지가
+    # **한 토큰으로 붙어** 표지를 조용히 잃고 ⑵ CR이 `SEP_RE`에 있어도 도달할 수 없어 금지가
+    # 공허해진다(M42 리뷰 차단 1의 실측: sh만 136/0 초록, ps1은 134/2). **지우는 문자와 금지하는
+    # 문자가 겹치면 금지는 집행되지 않는다.**
+    # 정규식을 쓰지 않는다 — 첫 매치를 `index`로 끊어 ps1의 `IndexOf`+`Substring`과 같은 의미로 둔다.
+    decl_lines "$1" "$2" | head -1 |
+        awk -v k="\`$2\`" '{ i = index($0, k); if (i > 0) print substr($0, i + length(k)) }'
+}
+# **구분자 집합** — 두 셸 중 **어느 하나라도 공백으로 볼 수 있는** 문자 전부(ASCII 공백 0x20은 뺀다).
+# .NET `\s` = `[\f\n\r\t\v\x85\p{Z}]`이고 `\p{Z}`가 NBSP·OGHAM·U+2000~200A·U+2028/2029·U+202F·
+# U+205F·U+3000을 포함한다 — 그 합집합을 **바이트**로 적는다. 8진 이스케이프만 쓴다(dash의 `printf`가
+# `\xHH`를 해석하지 않는다는 M37 실측). 비교는 `LC_ALL=C`로 고정해 바이트 매칭으로 둔다.
+SEP_RE=$(printf '[\t\013\014\r]|\302[\205\240]|\341\232\200|\342\200[\200-\212\250\251\257]|\342\201\237|\343\200\200')
+bad_seps() { # <file> <키> → 꼬리에 금지 구분자가 있으면 1, 없으면 0
+    decl_tail "$1" "$2" | LC_ALL=C grep -Ec "$SEP_RE"
+}
+# **첫 매치 고정**은 이제 `decl_tail`이 `index()`로 한다(위) — 예전 구현은 `sed "s/.*$1//"`이었는데
+# sed의 선행 `.*`는 탐욕이라 한 줄에 키가 둘이면 **마지막**을, ps1의 `IndexOf`는 **첫 번째**를
+# 집었다(M42 리뷰 차단 2의 실측: sh 추출이 통째로 붕괴해도 I1·I3~I6이 자기정합적으로 통과하고
+# **I2가 0==0으로 조용히 통과**했다).
+# **쪼개는 폭도 ps1과 같아야 한다** — 여기는 **ASCII 공백 하나**로만 쪼개고 ps1 사본은 `-split ' '`다.
+# 앞선 판본은 sh가 `tr ' '`, ps1이 `-split '\s+'`이라 **탭·NBSP에서 갈렸고**, 선언 줄 끝의 탭 한
+# 글자에 sh만 마지막 표지를 잃고도 **조용히 초록**이었다(M42 리뷰 차단 1의 실측 — 트레일링 탭·NBSP
+# 둘 다). 폭을 맞추는 것만으로는 그 조용함이 닫히지 않는다 — 폭 밖 문자가 오면 **양 셸이 나란히**
+# 표지를 잃기 때문이다. 그래서 아래 **I10~I13**이 꼬리의 구분자를 ASCII 공백 하나로 못박아 그
+# 부류를 **시끄럽게** 만든다.
+markers_of() { # <키> → 그 키가 선언한 표지 토큰(백틱·강조 제거, 한 줄에 하나)
+    decl_tail "$CONV" "$1" | tr -d '`*' | tr ' ' '\n' | grep -v '^$'
+}
+NEG_MARKS=$(markers_of 'state-neg:')
+PAST_MARKS=$(markers_of 'state-past:')
+NMARK=$(printf '%s\n' "$NEG_MARKS" | grep -c .)
+
+# POS 집합 = 표에서 **집행 칸이 살아 있는** 축만이다. 전체 `axis:` 토큰을 쓰면 규약이 **의무화한**
+# 정직 표기(집행이 없는 축은 부정 상태어로 명시)가 곧 모순으로 잡혀, 그 축의 표 행 자체가 FAIL을
+# 만든다(리뷰 실측: 한 축의 집행 칸을 부정 상태어로 바꾸면 그 행이 `axis-state contradiction`으로
+# 걸렸다). 규약이 서술한 기전과 러너를 같은 넓이로 맞춘다.
+live_axes() { # → 집행 칸이 살아 있는 축 이름(공백 구분)
+    # 표 행의 인식 넓이는 ps1 사본과 **같아야 한다**(M42 리뷰 권장 5의 처분). 이 게이트가 없으면
+    # 들여쓴 표 행을 sh만 POS로 집어 두 셸이 같은 트리에 다른 판정을 낸다(실측). `^|`는 ps1의
+    # `StartsWith('|')`, `NF >= 5`는 `$cols.Count -ge 5`와 같은 의미다(`| a | b | c |` → NF=5).
+    awk -F'|' -v NEG="$NEG_MARKS" '
+        BEGIN { nn = split(NEG, NG, "\n") }
+        /^\|/ && NF >= 5 && /axis:[a-z][a-z-]*/ {
+            name = ""
+            if (match($2, /axis:[a-z][a-z-]*/)) name = substr($2, RSTART + 5, RLENGTH - 5)
+            cell = $4; gsub(/[ \t\r]/, "", cell)
+            dead = 0
+            for (i = 1; i <= nn; i++) if (NG[i] != "" && index(cell, NG[i])) dead = 1
+            if (name != "" && cell != "" && !dead) print name
+        }' "$CONV" | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ *$//'
+}
+POS_AXES=$(live_axes)
+
+contra_of() { # <file> → "<축>:<줄번호>" (모순 후보, 한 줄에 하나)
+    awk -v AX="$POS_AXES" -v NEG="$NEG_MARKS" -v PAST="$PAST_MARKS" '
+        BEGIN { na=split(AX, A, " "); nn=split(NEG, NG, "\n"); np=split(PAST, PS, "\n") }
+        {
+            raw = $0
+            line = raw; gsub(/[ \t\r]/, "", line)
+            # 창 = 불릿 블록. 제목·표 행도 경계로 친다(축 이름이 블록을 넘어 새지 않게).
+            if (raw ~ /^- / || raw ~ /^#/ || raw ~ /^\|/) delete cur
+            for (i = 1; i <= na; i++) if (A[i] != "" && index(line, A[i])) cur[A[i]] = 1
+            # 표지 선언 줄 자신은 대상이 아니다(선언처가 자기 표지에 걸리면 전건 오탐이 된다).
+            if (index(line, "state-neg:") || index(line, "state-past:")) next
+            m = ""
+            for (i = 1; i <= nn; i++) if (NG[i] != "" && index(line, NG[i])) { m = NG[i]; break }
+            if (m == "") next
+            if (index(line, "\"" m "\"")) next                       # 인용된 부정어 = 규칙 서술
+            for (i = 1; i <= np; i++) if (PS[i] != "" && index(line, PS[i])) next   # 이력 서술
+            for (a in cur) print a ":" NR
+        }' "$1"
+}
+contra_count() { # 살아 있는 문서 전체의 후보 수
+    n=0
+    while IFS= read -r f; do
+        [ -f "$f" ] || continue
+        c=$(contra_of "$f" | grep -c .)
+        n=$((n + c))
+    done < "$SBX/living.txt"
+    echo "$n"
+}
+
+# (I1) 표지를 못 읽으면 아래 전부가 0==0으로 **공허 통과**한다 — 추출 자체를 먼저 문다.
+chk "I1: state-neg 표지 추출 positive-control(>0)" "$([ "$NMARK" -gt 0 ] && echo ok || echo no)" "ok"
+# (I1b) POS 집합도 positive-control이 필요하다 — 표 형식이 바뀌어 집행 칸 추출이 어긋나면 POS가 비고
+# I2가 **0==0으로 조용히 통과**한다(H14가 무는 것은 `axis:` 토큰 집합이지 이 파생 집합이 아니다).
+NPOS=$(printf '%s\n' "$POS_AXES" | tr ' ' '\n' | grep -c .)
+chk "I1b: 집행 칸이 살아 있는 축 추출 positive-control(>0)" "$([ "$NPOS" -gt 0 ] && echo ok || echo no)" "ok"
+# (I2) 본 검사 — 살아 있는 문서에 축 상태 모순 0건. 실패하면 **어느 축이 어느 파일 몇 줄에서** 어긋났는지
+# 이름을 찍는다(M40의 자기고발 조치와 같은 취지 — 개수만 보면 원인을 찾는 데 다시 사람이 든다).
+I2=$(contra_count)
+if [ "$I2" != "0" ]; then
+    while IFS= read -r f; do
+        [ -f "$f" ] || continue
+        contra_of "$f" | while IFS= read -r hit; do
+            [ -n "$hit" ] && printf '  -> axis-state contradiction: %s (%s)\n' "$hit" "${f##*/}"
+        done
+    done < "$SBX/living.txt"
+fi
+chk "I2: 살아 있는 문서의 축 상태 모순 0건" "$I2" "0"
+
+# (I3~I6) 통제 — 주입한 모순은 잡고, 규칙이 일부러 뺀 셋은 잡지 않는다. 픽스처는 샌드박스에 만든다
+# (살아 있는 문서를 건드리면 I2가 자기 픽스처를 세게 된다).
+ICON="$SBX/contra"
+mkdir -p "$ICON"
+IAX=$(printf '%s\n' "$POS_AXES" | tr ' ' '\n' | grep -v '^$' | head -1)
+INEG=$(printf '%s\n' "$NEG_MARKS" | head -1)
+IPAST=$(printf '%s\n' "$PAST_MARKS" | head -1)
+printf -- '- **`%s` axis**: %s\n' "$IAX" "$INEG" > "$ICON/inject.md"
+printf -- '- **`%s` axis**: "%s"\n' "$IAX" "$INEG" > "$ICON/quoted.md"
+printf -- '- **`%s` axis**: %s%s\n' "$IAX" "$INEG" "$IPAST" > "$ICON/past.md"
+printf -- '- no axis name here: %s\n' "$INEG" > "$ICON/notarget.md"
+chk "I3: 음성 통제 — 주입한 축 상태 모순을 잡는다"  "$(contra_of "$ICON/inject.md" | grep -c .)"   "1"
+chk "I4: 통제 — 인용된 부정어(규칙 서술)는 미검출"   "$(contra_of "$ICON/quoted.md" | grep -c .)"   "0"
+chk "I5: 통제 — 이력 서술(과거 표지)은 미검출"       "$(contra_of "$ICON/past.md" | grep -c .)"     "0"
+chk "I6: 통제 — 대상(축 이름) 없는 부정어는 미검출"  "$(contra_of "$ICON/notarget.md" | grep -c .)" "0"
+
+# (I7~I9) **선언처 유일성** — 규약은 *"아래 두 줄이 표지의 유일한 선언처다"*라고 적지만, 지금까지
+# 두 러너 모두 키가 **처음 나오는 줄**을 무조건 선언처로 삼아 그 문장을 기계가 물지 않았다
+# (M42 리뷰 사소 8). 0개면 선언이 사라진 것이고(추출이 통째로 빈다), 2개 이상이면 선언처가 갈라져
+# **어느 줄이 이기는지가 러너 구현에 달린다** — 둘 다 FAIL이다. 이 검사는 **어느 줄을 읽는지**를
+# 물고, 아래 I10~I13이 **그 줄을 어떻게 쪼개는지**를 문다. 둘이 함께 있어야 차단 2(첫 매치 대
+# 마지막 매치)와 차단 1(구분자 폭)의 재발이 막힌다 — 앞선 판본은 여기서 *"어느 편집이 시끄럽고
+# 어느 편집이 조용한지가 우연에서 벗어난다"*고 적었으나 **거짓이었다**(M42 리뷰 차단 1: 트레일링
+# 탭·NBSP는 여전히 조용했다). 지금 성립하는 것만 적는다 — **아래 구분자 집합에 든 문자**가 꼬리에
+# 오면 양 셸이 함께 붉어진다. 표지 알파벳 자체(어떤 글자가 표지가 될 수 있는가)는 **묻지 않는다**.
+chk "I7: state-neg 선언 줄이 규약에 정확히 1개"  "$(decl_count "$CONV" 'state-neg:')"  "1"
+chk "I8: state-past 선언 줄이 규약에 정확히 1개" "$(decl_count "$CONV" 'state-past:')" "1"
+# 통제 — 산문 언급은 선언처로 세지 않는다(판별자가 살아 있음의 실증). 픽스처는 **ASCII만** 쓴다:
+# `run.ps1` 사본이 글자 그대로 같은 세 줄을 쓰므로 두 셸이 같은 것을 세는지가 바로 드러난다.
+{
+    printf -- '- `%s` alpha beta\n' 'state-neg:'
+    printf -- '- **rule**: the `%s` marker is declared above and only mentioned here\n' 'state-neg:'
+    printf -- 'a prose line mentioning `%s` in the middle\n' 'state-neg:'
+} > "$ICON/decl.md"
+chk "I9: 통제 — 산문 언급은 선언처로 세지 않는다" "$(decl_count "$ICON/decl.md" 'state-neg:')" "1"
+
+# (I10~I13) **선언 줄 꼬리의 구분자는 ASCII 공백 하나뿐이다**(M42 리뷰 차단 1의 처분). 두 러너의
+# 쪼개는 폭을 맞추는 것만으로는 부족하다 — 폭 밖 문자(탭·NBSP 등)가 오면 양 셸이 **나란히** 표지를
+# 잃고 I2가 다시 0==0으로 조용히 통과하기 때문이다. 그래서 폭을 맞추고(위 `markers_of`) **폭 밖
+# 문자를 금지**해 그 부류를 시끄럽게 만든다. I12·I13은 그 금지가 공허하지 않음의 실증이다 —
+# 픽스처는 **ASCII 소스**로 바이트를 만들고(`printf` 8진), ps1 사본이 같은 바이트를 쓴다.
+chk "I10: state-neg 선언 줄 꼬리에 금지 구분자 0건"  "$(bad_seps "$CONV" 'state-neg:')"  "0"
+chk "I11: state-past 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" 'state-past:')" "0"
+printf -- '- `%s` alpha\tbeta\n'      'state-neg:' > "$ICON/sep-tab.md"
+printf -- '- `%s` alpha\302\240beta\n' 'state-neg:' > "$ICON/sep-nbsp.md"
+chk "I12: 통제 — 탭 구분자를 잡는다"   "$(bad_seps "$ICON/sep-tab.md" 'state-neg:')"  "1"
+chk "I13: 통제 — NBSP 구분자를 잡는다" "$(bad_seps "$ICON/sep-nbsp.md" 'state-neg:')" "1"
+
+# (I14~I15) **구분자 집합을 규약에서 읽어 자기 구현을 검사한다**(M42 재작업 3). 집합이 세 매체
+# (규약의 한글 이름 · 여기 8진 바이트 · ps1의 `\uXXXX`)에 흩어져 문자열 대조로는 닫히지 않았고,
+# *"읽어서 확인했다"* 가 **세 라운드 연속 틀렸다**. 그래서 규약의 `sep-cps:` 선언을 **단일 원본**으로
+# 두고, 각 코드포인트를 UTF-8로 인코딩해 **자기 픽스처를 만들어** 자기 패턴이 실제로 잡는지 센다.
+# 이 검사는 **패턴만 보지 않고 추출 파이프라인 전체를 통과**시킨다 — M42 리뷰 차단 1(CR이 집합에는
+# 있는데 `decl_tail`이 먼저 지워 도달 불가)이 바로 그 차이에서 났다.
+# 인코딩은 awk 정수 연산 + `printf` 8진으로 한다(POSIX — dash의 `\xHH` 비호환 회피, M37 실측).
+utf8_oct() { # <16진 코드포인트> → printf용 8진 이스케이프
+    awk -v h="$1" 'BEGIN{
+        n = 0; s = toupper(h)
+        for (i = 1; i <= length(s); i++) { n = n * 16 + index("0123456789ABCDEF", substr(s, i, 1)) - 1 }
+        if (n < 128) printf "\\%03o", n
+        else if (n < 2048) printf "\\%03o\\%03o", 192 + int(n / 64), 128 + (n % 64)
+        else printf "\\%03o\\%03o\\%03o", 224 + int(n / 4096), 128 + int(n / 64) % 64, 128 + (n % 64)
+    }'
+}
+sep_hits() { # <코드포인트 목록> → 그중 몇 개를 잡는지
+    _h=0
+    for _cp in $1; do
+        printf -- "- \`state-neg:\` alpha$(utf8_oct "$_cp")beta\n" > "$ICON/sep-cp.md"
+        _h=$((_h + $(bad_seps "$ICON/sep-cp.md" 'state-neg:')))
+    done
+    echo "$_h"
+}
+SEP_CPS=$(markers_of 'sep-cps:')
+SEP_OK_CPS=$(markers_of 'sep-ok-cps:')
+NSEP=$(printf '%s\n' "$SEP_CPS" | grep -c .)
+# (I16~I19) **새 선언 키 둘에도 기존 규율을 그대로 건다**(M42 리뷰 차단 1의 처분). I14·I15는 선언을
+# **읽어서** 자기 구현을 검사하는데, 그 선언이 **사라지면 집합이 비어 `0 == 0`으로 통과**한다 — 실측:
+# `sep-cps:` 줄 하나를 지우면 네 환경이 전부 140/0 초록이었다. 이 레포는 같은 함정을 `I1`·`I1b`·`G6`·
+# `F4` 넷에서 이미 막아 왔고, `I7`·`I8`은 다른 두 키에 **선언 줄 유일성**까지 건다. 새 키 둘만 그
+# 규율 밖에 있었다 — 집행을 세우는 라운드가 **그 집행을 무는 통제를 빠뜨리는** 이 사이클의 반복
+# 형태다. 추출(>0)과 유일성(정확히 1개)을 함께 건다.
+NSEPOK=$(printf '%s\n' "$SEP_OK_CPS" | grep -c .)
+chk "I16: sep-cps 추출 positive-control(>0)"    "$([ "$NSEP" -gt 0 ] && echo ok || echo no)"    "ok"
+chk "I17: sep-ok-cps 추출 positive-control(>0)" "$([ "$NSEPOK" -gt 0 ] && echo ok || echo no)" "ok"
+chk "I18: sep-cps 선언 줄이 규약에 정확히 1개"    "$(decl_count "$CONV" 'sep-cps:')"    "1"
+chk "I19: sep-ok-cps 선언 줄이 규약에 정확히 1개" "$(decl_count "$CONV" 'sep-ok-cps:')" "1"
+chk "I14: 규약이 선언한 구분자를 전부 잡는다"   "$(sep_hits "$SEP_CPS")"    "$NSEP"
+chk "I15: 통제 — 허용 문자는 잡지 않는다"       "$(sep_hits "$SEP_OK_CPS")" "0"
+
 declared_cases() {
     # **첫 매치 고정** — sed의 선행 `.*`는 탐욕이라 한 줄에 `cases:`가 둘이면 **마지막**을 집는데
     # ps1의 `[regex]::Match`는 **첫 번째**를 집는다(M38 리뷰 사소 4의 실측: 같은 입력에 sed 7 ↔
@@ -1031,10 +1333,89 @@ part_sum() {
 }
 chk "F1b: 파트별 내역 합 == 총계 선언" "$(part_sum)" "$(declared_cases)"
 
+# (F4~F5) **`run.ps1`의 비-ASCII 0줄 규율을 기계가 문다**(M42 재작업 3 — 자체 발의).
+# 규약과 이 하니스 README가 *"byte>127=0 규율이 유지된다"*고 적어 왔지만 **어느 케이스도, CI의 어느
+# 잡도 그것을 물지 않았다**. 이번 라운드가 그 사실을 실측으로 만났다 — 재작업 중 ps1 주석에 한글이
+# 한 줄 섞였는데 **138 케이스가 전부 초록**이었고 사람이 따로 세어서야 드러났다. 규율이 문서에만
+# 있으면 그것은 규율이 아니라 희망이다.
+# **F4가 positive-control**이다: 발견이 0개면 F5가 `0==0`으로 공허 통과한다.
+# 탐색 기준은 **$ROOT**다 — 호출자의 cwd에 기대면 다른 디렉터리에서 부를 때 엉뚱한 트리를 훑고,
+# 깨진 사본을 두고도 통과할 수 있다(배선 중 실측: ps1 사본이 cwd 기준이라 깨진 트리에서 초록이었다).
+# **발견 명세(두 사본의 단일 기준)**: `<dir>` 아래 **모든 깊이**의 **정규 파일** 중 이름이 `.ps1`로
+# 끝나는 것 — ⑴ 확장자 비교는 **대소문자 구분**(`.PS1`은 발견하지 않는다) ⑵ **숨김 항목도 본다**
+# ⑶ 디렉터리는 세지 않는다. 이 셋이 갈리면 같은 트리에서 두 셸의 판정이 갈린다(M42 리뷰 차단 1의
+# 실측: 비-ASCII가 든 `extra.PS1`에서 sh 145/0 초록 ↔ 양 PowerShell 144/1, 숨김 `hid.ps1`에서
+# sh 144/1 ↔ 양 PowerShell 145/0 초록). 규약 `docs/conventions.md`의 "실행 환경 축"이 **경로 API
+# 의미론은 축이 아니라 코드 결함**이라고 이미 적어 뒀다 — 두 극이 있는 것이 아니라 한쪽이 틀렸다.
+# **sh가 정본이다**: `find`는 셋 다 그대로 하므로 여기서는 `-type f`만 명시하고(디렉터리 제외 — 없으면
+# `foo.ps1` 디렉터리가 발견 수에 들어가 F6이 sh에서만 붉어진다), ps1 사본이 `-Force`와 ordinal
+# `EndsWith`로 이 명세에 맞춘다. **F7이 그 명세를 픽스처로 문다.**
+# 디렉터리를 인자로 받는 것은 F7이 **샌드박스 픽스처**에 같은 함수를 걸기 위해서다 — 검사 대상과
+# 다른 코드로 픽스처를 재면 그 픽스처는 아무것도 증명하지 못한다.
+ps1_files_in() { find "$1" -type f -name '*.ps1' 2>/dev/null; }
+ps1_files() { ps1_files_in "$ROOT/tests"; }
+# **단어 분할로 소비하지 않는다** — 앞 판본은 `for _f in $(ps1_files)`였고, 레포 경로에 **공백이 하나만
+# 있어도** 목록이 조각나 모든 경로가 열리지 않았다. 그러면 파일마다 `grep -c`가 0을 내 **F5가 절대
+# 실패할 수 없게** 된다(M42 리뷰 차단 2의 실측: 공백 든 경로에서 sh 140/0 ↔ ps1 139/1). 목록은 파일로
+# 받아 `while IFS= read -r`로 한 줄씩 소비한다(파이프로 받으면 서브셸이라 카운터가 살아 나오지 않는다).
+# **무는 넓이는 선언된 규율 그대로 `byte>127`이다.** 앞 판본은 `[^ -~<TAB>]`(인쇄 가능 ASCII와 탭의
+# 여집합)이라 **폼피드·수직탭 같은 제어 바이트까지** 물었고, ps1 사본은 `-gt 127`만 보므로 같은 트리에서
+# 판정이 갈렸다(M42 리뷰 권장 1의 실측: `.ps1`에 폼피드 한 글자 → sh 144/1 ↔ pwsh 7·PS 5.1 145/0).
+# 규약과 이 하니스가 적어 온 규율은 **`byte>127=0`**이므로 **넓은 쪽(sh)을 선언에 맞춰 좁힌다** — 8진
+# 이스케이프로 바이트 범위를 만들고 `LC_ALL=C`로 고정해 `SEP_RE`와 같은 idiom을 쓴다(dash의 `printf`가
+# `\xHH`를 해석하지 않는다는 M37 실측 때문에 8진이다). CR은 이 범위에 없으므로 앞의 `tr -d '\r'`는
+# 줄 수에 영향을 주지 않고, ps1이 바이트 13을 건너뛰는 것과 같은 자리에 남는다.
+NONASCII_RE=$(printf '[\200-\377]')
+nonascii_scan() { # → "<검사한 파일 수> <비-ASCII 줄 수>"
+    _list="$SBX/ps1files.txt"
+    ps1_files > "$_list"
+    _n=0; _c=0
+    while IFS= read -r _f; do
+        [ -n "$_f" ] && [ -f "$_f" ] || continue
+        _n=$((_n + 1))
+        _c=$((_c + $(tr -d '\r' < "$_f" | LC_ALL=C grep -c "$NONASCII_RE" 2>/dev/null)))
+    done < "$_list"
+    echo "$_n $_c"
+}
+SCAN=$(nonascii_scan)
+NPS1_FOUND=$(ps1_files | grep -c .)
+NPS1_CHECKED=${SCAN% *}
+NPS1_BAD=${SCAN#* }
+chk "F4: ps1 러너 발견 positive-control(>0)" "$([ "$NPS1_FOUND" -gt 0 ] && echo ok || echo no)" "ok"
+chk "F5: tests/**/*.ps1 비-ASCII 0줄"        "$NPS1_BAD"     "0"
+# (F6) **발견과 소비를 대조한다** — F4는 *"발견이 0"* 만 보는데, 실제로 일어난 실패는 *"발견은 다 하고
+# 소비에서 전부 흘림"* 이었다. positive-control이 **보지 못한 축**이라 통제를 그 축까지 넓힌다.
+# **양 사본이 같은 이유로 붉어질 수 있어야 통제다** — 소비는 **직렬화한 목록을 되읽어** 돌고 이 비교는
+# **새 열거**와 맞춘다. 같은 열거를 두 번 해서 서로 비교하면 그것은 통제가 아니라 항등식이라 **어떤
+# 입력에서도 붉어지지 않는다**(M42 리뷰 권장 3: ps1 사본이 그 상태였다). 목록 왕복에서 한 줄이라도
+# 잃으면 — 인용 없는 단어 분할, 인코딩 손실, 잘린 목록 — 두 수가 갈라진다.
+chk "F6: 검사한 파일 수 == 발견한 파일 수"    "$NPS1_CHECKED" "$NPS1_FOUND"
+# (F7) **발견 명세를 픽스처로 문다.** 위 세 축(대소문자·숨김·디렉터리)은 `tests/` 실물에는 그런 파일이
+# 없어 **실물만 훑어서는 영원히 초록**이다. 샌드박스에 넷을 만들어 `ps1_files_in`을 그대로 걸고 **정렬된
+# basename 목록**을 대조한다 — 수가 아니라 **이름**을 보는 이유는, 숨김을 빠뜨리고(-1) 대문자를
+# 더하면(+1) 개수가 상쇄돼 초록이 되기 때문이다(실제로 그렇게 갈릴 수 있는 조합이다).
+ps1_disc_fixture() { # <dir> 만들고 그 경로를 출력
+    _d="$SBX/ps1disc"
+    rm -rf "$_d" 2>/dev/null
+    mkdir -p "$_d/sub"
+    : > "$_d/a.ps1"          # 평범한 것 — 발견된다
+    : > "$_d/b.PS1"          # 대문자 확장자 — 발견되지 않는다(ordinal 비교)
+    : > "$_d/.hidden.ps1"    # 숨김(POSIX는 점 이름, Windows는 숨김 속성) — 발견된다
+    : > "$_d/sub/c.ps1"      # 하위 깊이 — 발견된다
+    mkdir -p "$_d/dir.ps1"   # 이름만 .ps1인 디렉터리 — 발견되지 않는다
+    echo "$_d"
+}
+disc_spec() { # <dir> → 정렬된 basename을 |로 이어 붙인 한 줄
+    ps1_files_in "$1" | sed 's|.*/||' | LC_ALL=C sort |
+        awk '{ s = (NR == 1 ? $0 : s "|" $0) } END { print s }'
+}
+chk "F7: 발견 명세 — 대소문자 구분·숨김 포함·디렉터리 제외" \
+    "$(disc_spec "$(ps1_disc_fixture)")" ".hidden.ps1|a.ps1|c.ps1"
+
 # (F1) 마지막 케이스 — 자기 README 선언(`cases: N`)과 실제 케이스 수(누계 + 이 케이스) 대조.
 chk "F1: README cases 선언 == 실제 케이스 수" "$(declared_cases)" "$((pass + fail + 1))"
 
 echo
 echo "# 결과: PASS=$pass FAIL=$fail (실제 커맨드 스킬 N=$N)"
 [ "$fail" -eq 0 ] || exit 1
-echo "# discover 감지 임계값(≥2→hint·<2→none·단일 레포→none·숨김 미카운트) + 단일 원본 동결(B1 카운트 정합·B2 사이트 셸·B3 카탈로그 완전성, 캐노니컬=docs/commands.md, 실제 ${N}종) + 선언 정합(C1 상태값 네 값×세 파일·부재 통제·C2 기준선×세 템플릿·C3 phase 명단 기록·비기록 두 목록의 규약↔발행 페이지 집합 일치·유일 열거처·서로소·음성 통제·D 브랜치 협업 안전 커버리지(커밋 diff·미커밋 범위 두 토큰 — 규약↔스킬↔캐노니컬 카탈로그)·번호경고 규약↔스킬 정합·PR CI 확인 규약조각↔스킬 정합·E 리뷰 검증 규율 반증 시도·판정 계측·재작업 라운드 규약↔스킬↔템플릿 정합 + 계측 줄 골격 형식 정합 + 재검증 선언 + 교차·음성 통제 · F 문서 자기서술 정합 = 역할 앵커 추출·캐노니컬 행 실재·소비자 전파 + 케이스 수 자기 정합 · G 상호참조 무결성 = 인용 추출·앵커 실재 대조 + 추출 0건·이름 유일성·줄바꿈 인용 통제 · H 실행 환경 축 선언 정합 = 축 이름 추출·규약 표 행 실재·집합 일치·표의 job: 토큰이 가리킨 잡의 워크플로 실재와 선언 축 행 소속(고아 0)·커버리지(실재 잡의 등재 또는 면제 선언)·면제 선언의 실재·무토큰 축 통제·axis: 표기 양방향 정합·데이터 행 수 대조·음성 통제 — 잡을 지목하지 않는 집행 칸과 잡을 지목한 칸의 나머지 서술은 사람의 리뷰 영역이라 여기서 묻지 않음) 확인됨 (참조 구현 기준)"
+echo "# discover 감지 임계값(≥2→hint·<2→none·단일 레포→none·숨김 미카운트) + 단일 원본 동결(B1 카운트 정합·B2 사이트 셸·B3 카탈로그 완전성, 캐노니컬=docs/commands.md, 실제 ${N}종) + 선언 정합(C1 상태값 네 값×세 파일·부재 통제·C2 기준선×세 템플릿·C3 phase 명단 기록·비기록 두 목록의 규약↔발행 페이지 집합 일치·유일 열거처·서로소·음성 통제·D 브랜치 협업 안전 커버리지(커밋 diff·미커밋 범위 두 토큰 — 규약↔스킬↔캐노니컬 카탈로그)·번호경고 규약↔스킬 정합·PR CI 확인 규약조각↔스킬 정합·E 리뷰 검증 규율 반증 시도·판정 계측·재작업 라운드 규약↔스킬↔템플릿 정합 + 계측 줄 골격 형식 정합 + 재검증 선언 + 교차·음성 통제 · F 문서 자기서술 정합 = 역할 앵커 추출·캐노니컬 행 실재·소비자 전파 + 케이스 수 자기 정합 · G 상호참조 무결성 = 인용 추출·앵커 실재 대조 + 추출 0건·이름 유일성·줄바꿈 인용 통제 + 규약 집합 밖 대상 인용의 파일별 앵커 대조(골격 조사 요구·주입 통제 — 대상 파일 부재는 경계 밖) · I 축 상태 주장 정합 = 표가 집행된다고 적은 축을 산문이 반대로 적는 자리(표지는 규약이 단일 선언처, 창=불릿 블록, 인용·이력 서술·무대상 세 통제 — 축 이름이 아닌 대상의 모순과 반대 방향은 경계 밖) · H 실행 환경 축 선언 정합 = 축 이름 추출·규약 표 행 실재·집합 일치·표의 job: 토큰이 가리킨 잡의 워크플로 실재와 선언 축 행 소속(고아 0)·커버리지(실재 잡의 등재 또는 면제 선언)·면제 선언의 실재·무토큰 축 통제·axis: 표기 양방향 정합·데이터 행 수 대조·음성 통제 — 잡을 지목하지 않는 집행 칸과 잡을 지목한 칸의 나머지 서술은 사람의 리뷰 영역이라 여기서 묻지 않음) 확인됨 (참조 구현 기준)"

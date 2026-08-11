@@ -41,8 +41,12 @@ trap {
     Write-Host "# INCOMPLETE RUN -- the harness did not reach its result line; treat as FAIL"
     exit 1
 }
+# M42-T03: verdict pinned to ORDINAL -- PowerShell's `-eq` on strings is CULTURE comparison
+# (and `-ceq` is case-sensitive but still culture-aware, so it is no substitute), while the .sh
+# twin's `[ "$got" = "$want" ]` is byte-exact. The [string] casts also stop an ARRAY $got from
+# passing vacuously (`-eq` on an array returns the filtered subarray, which is truthy when non-empty).
 function Chk($desc, $got, $want) {
-    if ($got -eq $want) { $script:pass++; Write-Host ("PASS  {0,-56} ({1})" -f $desc, $got) }
+    if ([string]::Equals([string]$got, [string]$want, [System.StringComparison]::Ordinal)) { $script:pass++; Write-Host ("PASS  {0,-56} ({1})" -f $desc, $got) }
     else { $script:fail++; Write-Host ("FAIL  {0,-56} (got {1}, want {2})" -f $desc, $got, $want) }
 }
 function W($path, $text) { $d = Split-Path $path -Parent; if (-not (Test-Path $d)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }; Set-Content -Path $path -Value $text -Encoding utf8 }
@@ -58,8 +62,11 @@ function DepRequiredVersion($repoDir, $depName) {
     if (-not (Test-Path $f)) { return '' }
     foreach ($line in (DepLines $f)) {
         $t = $line.Trim()
-        if ($t -eq '' -or $t.StartsWith('#')) { continue }
-        if ((DepName $t) -ne $depName) { continue }
+        # (M42-T03) ordinal StartsWith + ordinal name match -- see tests/lib/deps.ps1 for the measured
+        # reason (culture StartsWith matches through ignorable characters; `-ne` on strings is culture
+        # AND case-insensitive, so 'auth' would pick up a line naming 'AUTH').
+        if ($t -eq '' -or $t.StartsWith('#', [System.StringComparison]::Ordinal)) { continue }
+        if (-not [string]::Equals((DepName $t), $depName, [System.StringComparison]::Ordinal)) { continue }
         $m = [regex]::Match($t, '>=\s*(\S+)')
         if ($m.Success) { return $m.Groups[1].Value }
         return ''
@@ -95,7 +102,8 @@ function CheckContract($parent, $repo, $dep) {
 # TopoSort moved to tests\lib\toposort.ps1 (single source; ReadDeps from tests\lib\deps.ps1); dot-sourced at top.
 function IdxOf($orderStr, $name) {
     $arr = @($orderStr -split '\s+' | Where-Object { $_ -ne '' })
-    for ($i = 0; $i -lt $arr.Count; $i++) { if ($arr[$i] -eq $name) { return $i } }
+    # (M42-T03) ordinal -- see tests/fleet/run.ps1's IdxOf; the order assertions ride on these indexes.
+    for ($i = 0; $i -lt $arr.Count; $i++) { if ([string]::Equals($arr[$i], $name, [System.StringComparison]::Ordinal)) { return $i } }
     return -1
 }
 
@@ -121,6 +129,15 @@ function HandoffClass($parent, $repo, $dep) {
 }
 
 # --- (3) downstream skip on failure reference: transitive dependents (reverse reachability) ---
+# (M42-T03) Every name comparison in the reverse-reachability walk is pinned to ORDINAL, and so is
+# the final sort. `-contains` / `-ne` on strings are culture-aware AND case-insensitive, and
+# `Sort-Object` is culture collation -- but the .sh twin walks the same set with byte-exact `=` and
+# folds it with `LC_ALL=C sort` (its own comment says so: "LC_ALL=C is not optional here -- this
+# output is compared AS A STRING, so the sort ORDER changes the verdict"). Repo names are filesystem
+# names and are byte-distinct on POSIX, so a case-insensitive walk could reach a node the shell twin
+# does not, and the downstream-skip verdict would differ between the two copies.
+function OrdEq($a, $b) { return [string]::Equals([string]$a, [string]$b, [System.StringComparison]::Ordinal) }
+function OrdIn($items, $v) { foreach ($i in $items) { if (OrdEq $i $v) { return $true } } return $false }
 function DependentsOf($parent, $failed) {
     $nodes = @(Discover $parent)
     $reached = New-Object System.Collections.ArrayList
@@ -129,20 +146,22 @@ function DependentsOf($parent, $failed) {
     while ($frontier.Count -gt 0) {
         $nextArr = New-Object System.Collections.ArrayList
         foreach ($r in $nodes) {
-            if ($reached -contains $r) { continue }
+            if (OrdIn $reached $r) { continue }
             foreach ($dep in (ReadDeps (Join-Path $parent $r))) {
-                if ($frontier -contains $dep) { [void]$reached.Add($r); [void]$nextArr.Add($r); break }
+                if (OrdIn $frontier $dep) { [void]$reached.Add($r); [void]$nextArr.Add($r); break }
             }
         }
         $frontier = @($nextArr.ToArray())
     }
-    $res = @($reached | Where-Object { $_ -ne $failed } | Sort-Object)
-    return ($res -join ' ')
+    $kept = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($x in $reached) { if (-not (OrdEq $x $failed)) { [void]$kept.Add([string]$x) } }
+    $kept.Sort([System.StringComparer]::Ordinal)
+    return (@($kept.ToArray()) -join ' ')
 }
 function ClassifyOnFailure($parent, $failed, $repo) {
-    if ($repo -eq $failed) { return 'failed' }
+    if (OrdEq $repo $failed) { return 'failed' }
     $deps = @((DependentsOf $parent $failed) -split '\s+' | Where-Object { $_ -ne '' })
-    if ($deps -contains $repo) { return 'skip' }
+    if (OrdIn $deps $repo) { return 'skip' }
     return 'ok'
 }
 
@@ -183,8 +202,12 @@ try {
     # ASCII substrings only (keeps this source ASCII; the skill carries the Korean).
     $skillFile = Join-Path (Split-Path (Split-Path $PSScriptRoot)) 'skills\fleet-cycle\SKILL.md'
     $skillText = Get-Content $skillFile -Raw
-    Chk "release-excl(skill-coupled): forbidden-list prose present" $(if ($skillText -like '*release / git commit / git tag / git push / cross-repo git*') { 'yes' } else { 'no' }) 'yes'
-    Chk "release-excl(skill-coupled): phase=release backstop/pre-scan prose present" $(if ($skillText -like '*phase=release*') { 'yes' } else { 'no' }) 'yes'
+    # (M42-T03) ordinal substring, not `-like`: the .sh twin is `grep -qF`, which is byte-exact and
+    # case-SENSITIVE, while `-like` is culture-aware and case-INsensitive. As `-like` this assertion
+    # would stay green on a skill whose prose had been re-cased or re-normalized -- i.e. it would pass
+    # for text the shell twin calls a regression. String.Contains(string) is ordinal by definition.
+    Chk "release-excl(skill-coupled): forbidden-list prose present" $(if ($skillText.Contains('release / git commit / git tag / git push / cross-repo git')) { 'yes' } else { 'no' }) 'yes'
+    Chk "release-excl(skill-coupled): phase=release backstop/pre-scan prose present" $(if ($skillText.Contains('phase=release')) { 'yes' } else { 'no' }) 'yes'
 
     # --- (3) contract-blocked: upstream-behind dep -> held in handoff ---
     # auth(0.2.0) <- orders(auth >= v0.3.0 -> upstream behind) / gateway(auth >= v0.2.0 -> satisfied)

@@ -20,7 +20,23 @@ function IsTideRepo($d) {
     }
     return $false
 }
+# (M42-T03) Both comparisons here are pinned to ORDINAL.
+#   - Sort-Object is CULTURE collation, not byte order (M41 measured it: culture puts 'docs' before
+#     'README.md', byte order puts 'README.md' first). This output is compared AS A STRING by the
+#     fleet harnesses -- `(Discover $P) -join ','` against a literal 'repo-a,repo-b,repo-c,...' -- so
+#     the sort ORDER is part of the verdict, not presentation.
+#   - `-notlike '.*'` is culture-aware AND case-insensitive; the hidden-dir test is pinned with the
+#     same ordinal StartsWith M38 applied throughout tests/discover/run.ps1.
+# NOTE for the .sh twin: tests/lib/discover.sh ends this function with a BARE `sort`. Every other
+# sort in the .sh harnesses carries `LC_ALL=C` (M40 added the last missing one after a BSD leg
+# diverged); this one does not, so under a non-C locale the two copies can order differently. Not
+# changed here -- reporting only, per this task's scope.
 function Discover($parent) {
-    Get-ChildItem -Directory $parent -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -notlike '.*' -and (IsTideRepo $_.FullName) } | ForEach-Object { $_.Name } | Sort-Object
+    $names = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($e in (Get-ChildItem -Directory $parent -ErrorAction SilentlyContinue)) {
+        if ($e.Name.StartsWith('.', [System.StringComparison]::Ordinal)) { continue }
+        if (IsTideRepo $e.FullName) { [void]$names.Add([string]$e.Name) }
+    }
+    $names.Sort([System.StringComparer]::Ordinal)
+    return @($names.ToArray())
 }

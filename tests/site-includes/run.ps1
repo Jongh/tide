@@ -50,8 +50,12 @@ trap {
     Write-Host "# INCOMPLETE RUN -- the harness did not reach its result line; treat as FAIL"
     exit 1
 }
+# M42-T03: verdict pinned to ORDINAL -- PowerShell's `-eq` on strings is CULTURE comparison
+# (and `-ceq` is case-sensitive but still culture-aware, so it is no substitute), while the .sh
+# twin's `[ "$got" = "$want" ]` is byte-exact. The [string] casts also stop an ARRAY $got from
+# passing vacuously (`-eq` on an array returns the filtered subarray, which is truthy when non-empty).
 function Chk($desc, $got, $want) {
-    if ($got -eq $want) { $script:pass++; Write-Host ("PASS  {0,-60} ({1})" -f $desc, $got) }
+    if ([string]::Equals([string]$got, [string]$want, [System.StringComparison]::Ordinal)) { $script:pass++; Write-Host ("PASS  {0,-60} ({1})" -f $desc, $got) }
     else { $script:fail++; Write-Host ("FAIL  {0,-60} (got {1}, want {2})" -f $desc, $got, $want) }
 }
 
@@ -94,7 +98,12 @@ foreach ($src in @((Join-Path $ROOT 'README.md'), (Join-Path $ROOT 'docs\convent
     $t = ExtractTerm $src
     if (-not $t) { continue }
     $MASTHEAD = $MASTHEAD + "`n" + (MastheadRegion $src)
-    if ($TERMS -notcontains $t) { $TERMS += $t }
+    # (M42-T03) ordinal dedupe -- `-notcontains` is culture-aware AND case-insensitive, so two excluded
+    # terms differing only in case would collapse into one and the body scan would stop looking for the
+    # dropped one. The .sh twin dedupes with `case " $TERMS " in *" $t "*)`, which is byte-exact.
+    $dup = $false
+    foreach ($x in $TERMS) { if ([string]::Equals([string]$x, [string]$t, [System.StringComparison]::Ordinal)) { $dup = $true; break } }
+    if (-not $dup) { $TERMS += $t }
 }
 
 # Sanity: at least one excluded term derived, else the term scan would be vacuous.

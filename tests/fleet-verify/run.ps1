@@ -39,8 +39,12 @@ trap {
     Write-Host "# INCOMPLETE RUN -- the harness did not reach its result line; treat as FAIL"
     exit 1
 }
+# M42-T03: verdict pinned to ORDINAL -- PowerShell's `-eq` on strings is CULTURE comparison
+# (and `-ceq` is case-sensitive but still culture-aware, so it is no substitute), while the .sh
+# twin's `[ "$got" = "$want" ]` is byte-exact. The [string] casts also stop an ARRAY $got from
+# passing vacuously (`-eq` on an array returns the filtered subarray, which is truthy when non-empty).
 function Chk($desc, $got, $want) {
-    if ($got -eq $want) { $script:pass++; Write-Host ("PASS  {0,-56} ({1})" -f $desc, $got) }
+    if ([string]::Equals([string]$got, [string]$want, [System.StringComparison]::Ordinal)) { $script:pass++; Write-Host ("PASS  {0,-56} ({1})" -f $desc, $got) }
     else { $script:fail++; Write-Host ("FAIL  {0,-56} (got {1}, want {2})" -f $desc, $got, $want) }
 }
 function W($path, $text) { $d = Split-Path $path -Parent; if (-not (Test-Path $d)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }; Set-Content -Path $path -Value $text -Encoding utf8 }
@@ -58,7 +62,9 @@ function ReadHook($parent) {
     $out = @()
     foreach ($line in $lines) {
         $t = $line.Trim()
-        if ($t -eq '' -or $t.StartsWith('#')) { continue }
+        # (M42-T03) ordinal StartsWith -- culture StartsWith matches through ignorable characters, so a
+        # hook line the .sh twin treats as a command would be dropped as a comment here.
+        if ($t -eq '' -or $t.StartsWith('#', [System.StringComparison]::Ordinal)) { continue }
         $out += $t
     }
     return $out
@@ -108,7 +114,9 @@ function HookGuardrail($parent) {
 # release/git stage (side-effect separation invariant; tide-guard blocks git at phase != release).
 function PlanStages { return @('discover', 'hook', 'report') }
 function PlanHas($stages, $needle) {
-    foreach ($s in $stages) { if ($s -eq $needle) { return 'yes' } }
+    # (M42-T03) ordinal -- the .sh twin's `[ "$s" = "$2" ]` is byte-exact; this is the assertion that
+    # says the automated plan carries no release/git stage, so it must not be case-blind.
+    foreach ($s in $stages) { if ([string]::Equals([string]$s, [string]$needle, [System.StringComparison]::Ordinal)) { return 'yes' } }
     return 'no'
 }
 
@@ -161,8 +169,11 @@ try {
     # ASCII substrings only (keeps this source ASCII; the skill carries the Korean).
     $skillFile = Join-Path (Split-Path (Split-Path $PSScriptRoot)) 'skills\fleet-verify\SKILL.md'
     $skillText = if (Test-Path $skillFile) { Get-Content $skillFile -Raw } else { '' }
-    Chk "verification-only(skill-coupled): forbidden-list prose present" $(if ($skillText -like '*release / git commit / git tag / git push / cross-repo git*') { 'yes' } else { 'no' }) 'yes'
-    Chk "verification-only(skill-coupled): verification-only prose present" $(if ($skillText -like '*verification-only*') { 'yes' } else { 'no' }) 'yes'
+    # (M42-T03) ordinal substring, not `-like`: the .sh twin is `grep -qF` (byte-exact, case-sensitive)
+    # while `-like` is culture-aware and case-insensitive -- as `-like` this would stay green on prose
+    # the shell twin calls a regression. String.Contains(string) is ordinal by definition.
+    Chk "verification-only(skill-coupled): forbidden-list prose present" $(if ($skillText.Contains('release / git commit / git tag / git push / cross-repo git')) { 'yes' } else { 'no' }) 'yes'
+    Chk "verification-only(skill-coupled): verification-only prose present" $(if ($skillText.Contains('verification-only')) { 'yes' } else { 'no' }) 'yes'
 
     # --- (4c) integration-hook git-verb guardrail (M20 advisory): git/release -> warn, clean -> ok ---
     # The git tokens inside hook commands are FIXTURE strings, never executed (guardrail = pre-run check).
@@ -201,7 +212,10 @@ try {
     MkRepo (Join-Path $DS '.tide-fleet')
     $disc = ((Discover $DS) -join ' ')
     $discCount = @(Discover $DS).Count
-    $hasFleet = if ((@(Discover $DS) | Where-Object { $_ -like '*tide-fleet*' }).Count -gt 0) { 'yes' } else { 'no' }
+    # (M42-T03) ordinal substring -- `-like` is culture-aware and case-insensitive, so this negative
+    # control would also fire on a '.TIDE-FLEET' directory that the .sh twin's `case`/`grep` would not
+    # see. Making the control ordinal keeps the two copies asserting the same thing.
+    $hasFleet = if ((@(Discover $DS) | Where-Object { ([string]$_).Contains('tide-fleet') }).Count -gt 0) { 'yes' } else { 'no' }
     Chk "discovery-ignore: children only = auth orders" $disc 'auth orders'
     Chk "discovery-ignore: .tide-fleet not included" $hasFleet 'no'
     Chk "discovery-ignore: 2 nodes (hidden excluded)" "$discCount" '2'

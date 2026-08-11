@@ -78,20 +78,21 @@ function Test-StdinChannel {
     [System.IO.File]::WriteAllBytes($probeIn,
         ([byte[]](0xEF, 0xBB, 0xBF) + [System.Text.Encoding]::ASCII.GetBytes('{}')))
     $probePs = Join-Path $sbx 'probe-stdin.ps1'
-    # ok = after removing whatever the leading BOM became, the payload is intact '{}'. Three shapes
-    # are acceptable because all three leave the guard able to parse:
-    #   * nothing left of it   -- the UTF-8 decoder absorbed the preamble (CP 65001 hosts)
-    #   * one U+FEFF           -- decoded as the BOM character
-    #   * U+00EF U+00BB U+00BF -- byte-preserving single-byte page; the guard strips this form too
-    # Anything else (e.g. CP 949 turning EF BB into one U+7664) means the channel mangles bytes.
-    # The probe compares CODE POINTS, never a literal BOM: this file stays ASCII-only (0 bytes > 127).
+    # (M42) The probe now reads stdin THE WAY THE GUARD DOES -- raw bytes, no console decoding. That
+    # is the whole point of the M42 guard change: [Console]::In made the guard's view of its input
+    # depend on the console input code page, and the fix removed that dependency. So the question this
+    # probe asks changed with it: not "did the BOM survive DECODING into a form the guard strips" but
+    # "did the BYTES arrive intact". ok = optional 3-byte BOM followed by exactly '{' '}' (0x7B 0x7D).
+    # Anything else means this channel does not deliver bytes and the harness cannot speak here.
+    # The probe compares BYTES, never a literal BOM: this file stays ASCII-only (0 bytes > 127).
     $probeBody = @'
-$s = [Console]::In.ReadToEnd()
-$c = @($s.ToCharArray())
+$stdin = [Console]::OpenStandardInput()
+$buf = New-Object System.IO.MemoryStream
+$stdin.CopyTo($buf)
+$b = @($buf.ToArray())
 $i = 0
-if ($c.Count -ge 1 -and [int]$c[0] -eq 0xFEFF) { $i = 1 }
-elseif ($c.Count -ge 3 -and [int]$c[0] -eq 0xEF -and [int]$c[1] -eq 0xBB -and [int]$c[2] -eq 0xBF) { $i = 3 }
-if ($c.Count -eq ($i + 2) -and $c[$i] -eq '{' -and $c[$i + 1] -eq '}') {
+if ($b.Count -ge 3 -and $b[0] -eq 0xEF -and $b[1] -eq 0xBB -and $b[2] -eq 0xBF) { $i = 3 }
+if ($b.Count -eq ($i + 2) -and $b[$i] -eq 0x7B -and $b[$i + 1] -eq 0x7D) {
     Write-Output 'ok'
 } else {
     Write-Output 'mangled'
@@ -111,11 +112,10 @@ $channel = Test-StdinChannel
 if ($channel -ne 'ok') {
     Write-Host "# UNSUPPORTED LAUNCH CONTEXT -- stdin byte channel is mangled (probe: '$channel')"
     Write-Host "# console input code page: $([Console]::InputEncoding.CodePage) ($([Console]::InputEncoding.WebName))"
-    Write-Host "# This harness feeds hooks\tide-guard.ps1 through stdin, and the guard decodes stdin with"
-    Write-Host "# the CONSOLE INPUT code page inherited from the launching host. On a non-UTF-8 page the"
-    Write-Host "# BOM regression case (scenario 9) silently flips instead of failing, so this runner"
-    Write-Host "# refuses to produce a verdict here. Launch it from a native PowerShell/pwsh host"
-    Write-Host "# (see tests/multi-repo/README.md, 'supported launch context'), not from Git Bash."
+    Write-Host "# This harness feeds hooks\tide-guard.ps1 through stdin and the guard reads that stdin as"
+    Write-Host "# RAW BYTES (M42). A channel that does not deliver the bytes intact makes every verdict"
+    Write-Host "# here meaningless, so the runner refuses instead of reporting one."
+    Write-Host "# (see tests/multi-repo/README.md, 'supported launch context')"
     Remove-Item -Recurse -Force $sbx -ErrorAction SilentlyContinue
     exit 1
 }
@@ -130,10 +130,23 @@ function Invoke-Guard($cpd, $cwd, $cmd, $bom = $false) {
     # 4 scenarios (sn2). The guard reads this fixture raw via [Console]::In (not Get-Content,
     # so no auto BOM-strip), so the fixture must be clean. When $bom is set we DELIBERATELY
     # prepend a BOM to regression-test the guard's own BOM tolerance (T03 strip).
-    $json = $obj | ConvertTo-Json -Compress -Depth 5
-    [System.IO.File]::WriteAllText($fixture, $json, (New-Object System.Text.UTF8Encoding($false)))
-    if ($bom) {
-        $bytes = [byte[]](0xEF, 0xBB, 0xBF) + [System.IO.File]::ReadAllBytes($fixture)
+    # $bom selects the FIXTURE SHAPE. Empty/$false = a plain JSON fixture.
+    #   $true / 'bom' = the JSON with a well-formed UTF-8 BOM prepended
+    #   'noise'       = the JSON with leading bytes matching NONE of the shapes the guard used to
+    #                   enumerate (the mangled-BOM class, M42)
+    #   'raw'         = NO JSON WRAPPER AT ALL -- the $cmd string itself is the whole input (M42-T09).
+    # The first two are leading-noise modes and must not change the verdict; 'raw' deliberately builds
+    # an UNPARSEABLE input so the guard takes its conservative fallback scan (that path's own fixture,
+    # so $cwd is unused there).
+    if ("$bom" -eq 'raw') {
+        [System.IO.File]::WriteAllText($fixture, $cmd, (New-Object System.Text.UTF8Encoding($false)))
+    } else {
+        $json = $obj | ConvertTo-Json -Compress -Depth 5
+        [System.IO.File]::WriteAllText($fixture, $json, (New-Object System.Text.UTF8Encoding($false)))
+    }
+    if ($bom -and "$bom" -ne 'raw') {
+        $lead = if ("$bom" -eq 'noise') { [byte[]](0xEF, 0xBB, 0x3F) } else { [byte[]](0xEF, 0xBB, 0xBF) }
+        $bytes = $lead + [System.IO.File]::ReadAllBytes($fixture)
         [System.IO.File]::WriteAllBytes($fixture, $bytes)
     }
     $out = Join-Path $sbx 'out.txt'; $err = Join-Path $sbx 'err.txt'
@@ -174,6 +187,9 @@ try {
     $BLOCK = 'git commit -m x'
     $TAG = 'git tag v1.0.0'
     $SAFE = 'git status'
+    # Raw (unparseable) fixture for M42-T09: not JSON, and its first '{' sits in the MIDDLE of the
+    # command string.
+    $RAWBLOCK = 'git commit -m "a{b}"'
 
     # 1: non-release child blocks
     'impl' | Set-Content $Aphase -Encoding utf8
@@ -211,6 +227,46 @@ try {
     Check "A(impl) blocks commit [BOM input -> cwd, not CPD]" $sbx $A $BLOCK 2 $true
     'release' | Set-Content $Aphase -Encoding utf8
     Check "A(release) allows commit [BOM input -> cwd, not CPD]" $sbx $A $BLOCK 0 $true
+
+    # 9b: MANGLED BOM -- leading bytes matching NONE of the shapes the guard used to enumerate (M42).
+    # This is the class that actually flipped: measured (M38-T05), a Git Bash host hands the child
+    # console input CP 949, EF BB decodes to one U+7664 and the trailing BF swallows the '{' itself,
+    # so the guard saw no opening brace at all, left $cwd null, fell back to CLAUDE_PROJECT_DIR (no
+    # phase) and ALLOWED a commit it had to block. M42 removed the decoding axis (the guard now reads
+    # stdin as raw bytes) and made both copies drop whatever precedes the first '{'. Same
+    # discriminating setup as scenario 9: if leading noise breaks cwd extraction the verdict flips.
+    'impl' | Set-Content $Aphase -Encoding utf8
+    Check "A(impl) blocks commit [mangled-BOM leading noise]" $sbx $A $BLOCK 2 'noise'
+    'release' | Set-Content $Aphase -Encoding utf8
+    Check "A(release) allows commit [mangled-BOM leading noise]" $sbx $A $BLOCK 0 'noise'
+
+    # 9c: CONSERVATIVE FALLBACK ON UNPARSEABLE INPUT (M42-T09 regression) -- normalization must not
+    # narrow what the fallback SEES. When command extraction fails the guard falls back to a substring
+    # scan, precisely so unparseable input cannot under-block. Feeding that fallback the M42-normalized
+    # string ("drop everything before the first '{'") takes the git write OUT OF SCAN RANGE whenever the
+    # first '{' sits inside the command. Measured: raw input `git commit -m "a{b}"` was truncated to
+    # `{b}"` and the verdict flipped 2 -> 0 in BOTH shells (pre-M42: 2 / pre-T09: 0 / post-T09: 2).
+    # T09 restored it by keeping the normalized copy for STRUCTURAL PARSING ONLY and letting the
+    # fallback scan the untouched original. Discriminating setup: the fallback root (CPD) must carry a
+    # phase for this path to be reachable -- there is no JSON, so no cwd can be extracted at all.
+    # The second case is the negative control: the same raw-fixture path still ALLOWS a read, pinning
+    # that the fallback actually looks at the verb rather than blocking everything it cannot parse.
+    'impl' | Set-Content $Aphase -Encoding utf8
+    Check "raw unparseable input with brace blocks commit" $A $null $RAWBLOCK 2 'raw'
+    Check "raw unparseable input allows git status [negative control]" $A $null $SAFE 0 'raw'
+
+    # 9d: FALLBACK ROOT CARRIES A PHASE (M42-T09) -- cwd beats the fallback.
+    # The noise cases above (9 / 9b) all leave CPD without a phase, so they only ever walk the one
+    # direction "broken cwd extraction => allow". Here CPD=A(impl) keeps the fallback LIVE: if leading
+    # noise broke cwd extraction the guard would pick up A(impl) and the verdict would flip
+    # allow -> block. The expectation was MEASURED, not assumed (exit 0 in both shells): the phase of
+    # the repo that cwd points at drives the verdict -- that is the multi-repo isolation contract -- so
+    # with cwd=B(release) allowing is correct regardless of CPD's phase. The noise-free case is the
+    # control; the two must agree for "noise cannot change the verdict" to hold.
+    'impl' | Set-Content $Aphase -Encoding utf8
+    'release' | Set-Content $Bphase -Encoding utf8
+    Check "cwd=B(release) allows [CPD=A(impl) fallback live]" $A $B $BLOCK 0
+    Check "cwd=B(release) allows [same setup + mangled-BOM noise]" $A $B $BLOCK 0 'noise'
 
     # 10: read/write discrimination (M28) -- non-release blocks git *writes* only; *reads* pass.
     # Same impl phase asserts reads-allow AND writes-block together, pinning "guard is alive yet
@@ -266,7 +322,11 @@ try {
     }
     $ccDesc = 'case-count: README cases declaration == actual'
     $ccWant = [string]($script:pass + $script:fail + 1)
-    if ($ccGot -eq $ccWant) {
+    # M42-T03: this one IS a string comparison (README declaration text vs the running count), so it
+    # is pinned to ORDINAL like `tests/discover`'s F1. PowerShell's `-eq` on strings is culture
+    # comparison; the .sh twin compares byte-exact. (`Check` above stays `-eq` on purpose -- both of
+    # its operands are process EXIT CODES, i.e. integers, so there is no string axis there.)
+    if ([string]::Equals([string]$ccGot, [string]$ccWant, [System.StringComparison]::Ordinal)) {
         $script:pass++; Write-Host ("PASS  {0,-50} ({1})" -f $ccDesc, $ccGot)
     } else {
         $script:fail++; Write-Host ("FAIL  {0,-50} (got {1}, want {2})" -f $ccDesc, $ccGot, $ccWant)
