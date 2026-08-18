@@ -514,6 +514,24 @@ chk "E6: 판례 부류($VACUOUS_TOK) 규약↔review SKILL 정합" "$(in_both "$
 # 있어야 실제로 남는다. 템플릿에서만 지워도 이 단언이 물어야 한다(E2·E5와 같은 3곳 결합).
 chk "E7: 부인 기록($WAIVER_TOK) 세 파일 전부에 등장" "$(in_all_three "$WAIVER_TOK" "$CONV" "$REV_SKILL" "$REV_TPL")" "yes"
 
+# (E8·E9 · M44) M43이 이 절에 더한 두 규칙에는 **ASCII 병기어가 없었다** — 그래서 Part E가 결합할
+# 대상이 없었고, 종료 조건을 **무조건으로 부정하는 재서술 세 자리**가 트리 그대로 통과했다(M43 리뷰
+# 이슈 1). M44-T01이 그 기전을 실측하고 병기어를 붙였으므로 여기서 결합한다. 결합 층위는 기존 판정과
+# 같은 원칙이다 — 템플릿에 **기록 슬롯이 필요한 규칙**은 3곳, 기준+절차뿐인 규칙은 2곳.
+RESIDUAL_TOK='residual-risk-acceptance'
+REACH_TOK='reachability-weighting'
+
+# (E8) 종료 조건은 리뷰 **보고서에 수용 근거 블록**을 남기므로 규약·스킬·템플릿 3곳 결합이다
+# (E7 `precedent-waiver`와 같은 층위 — 템플릿에서만 지워도 이 단언이 물어야 한다).
+chk "E8: 종료 조건($RESIDUAL_TOK) 세 파일 전부에 등장" "$(in_all_three "$RESIDUAL_TOK" "$CONV" "$REV_SKILL" "$REV_TPL")" "yes"
+
+# (E9) 도달 가능성 가중은 **등급 판단의 근거**라 기준(규약)과 절차(스킬) 2곳 결합이다(E6과 같은 층위 —
+# 보고서 템플릿에 슬롯을 두면 복제 선언을 불필요하게 늘린다).
+chk "E9: 도달 가능성($REACH_TOK) 규약↔review SKILL 정합" "$(in_both "$REACH_TOK" "$CONV" "$REV_SKILL")" "yes"
+
+# 음성 통제 — 가짜 종료 조건 토큰은 규약에 없어야 한다(아래 판례 토큰 통제와 동형, 구별력 입증).
+chk "E: 통제 — conventions에 가짜 종료조건 토큰 없음" "$(has_token "$CONV" "${RESIDUAL_TOK}-bogus")" "no"
+
 # 음성 통제 — 가짜 판례 토큰은 규약에 없어야 한다(E의 `refutation-bogus` 통제와 동형, 구별력 입증).
 chk "E: 통제 — conventions에 가짜 판례 토큰 없음" "$(has_token "$CONV" "${VACUOUS_TOK}-bogus")" "no"
 
@@ -1063,6 +1081,62 @@ chk "G6: 규약 밖 인용 추출 positive-control(>0)"   "$([ "$NEXTCITE" -gt 0
 printf -- '- `skills/impl/SKILL.md`%s "bogus-cross-anchor" %s\n' "$SKEL_UI" "$SELFREF_JEOL" > "$SBX/extfx.md"
 extdoc_cites_of "$SBX/extfx.md" > "$SBX/extfx.txt"
 chk "G7: 통제 — 주입한 깨진 규약 밖 인용을 잡는다" "$(extdoc_misses "$SBX/extfx.txt" | grep -c .)" "1"
+
+# (G8 · M44) 절 **안의 항목**을 열거 번호로 가리키는 인용을 금지한다. M43 리뷰 이슈 5가 그 부류다 —
+# 원장의 인용이 `묻지 않는 것 ⑷`를 가리켰는데 그 번호는 M40이 닫아 없앤 항목이었고, 인용을 옮긴
+# 편집이 하류를 함께 고치지 않아 생겼다. Part G의 나머지는 **절 앵커까지만** 대조하므로 하위 인덱스는
+# 어느 케이스도 보지 않았다. 단일 원본은 `docs/conventions.md`의 "상호참조 무결성" 절.
+#   판별: 인용 줄(백틱 `.md` 경로 + 따옴표)에서 `절` 표지 **뒤에** 열거 번호가 오면 위반.
+#   집합: **U+2460~U+2487**(40자). 두 러너가 같은 집합을 쓰는지 각자 단언한다 — ps1은 ASCII-only
+#         규율 때문에 코드포인트로 조립하고, 이 사본도 **같은 방식으로 조립**해(리터럴을 두지 않는다)
+#         집합이 구성상 일치한다. `SELFREF_JEOL`(U+C808)이 이미 같은 방식으로 만들어져 있다.
+#   왜 금지형인가: 살아 있는 사이트가 **0건**이라 추출형으로 세우면 "추출 0 = FAIL" 규율에 걸려
+#         정상 트리가 붉어진다. 그래서 **금지형 + 픽스처 통제**로 세운다 — 픽스처가 공허를 막는다.
+#   경계(규약에 함께 적혀 있다): 번호가 `절` **앞**에 오는 산문 열거 참조는 대상이 아니다(실측 1건이
+#         그 형태이며 정당하다) · 이름으로 가리킨 항목의 **실재**는 대조하지 않는다 · 인용과 번호가
+#         다른 줄로 갈리면 빠진다(줄 단위 추출의 알려진 한계).
+circ_list() {   # U+2460..U+2487 을 한 줄에 한 자씩 — 코드포인트 조립(ASCII 원본 규율)
+    _n=160; while [ "$_n" -le 191 ]; do printf "\342\221$(printf '\\%o' "$_n")\n"; _n=$((_n + 1)); done
+    _n=128; while [ "$_n" -le 135 ]; do printf "\342\222$(printf '\\%o' "$_n")\n"; _n=$((_n + 1)); done
+}
+circ_list > "$SBX/circ.txt"
+NCIRC=$(grep -c . "$SBX/circ.txt")
+CIRCBYTES=$(LC_ALL=C wc -c < "$SBX/circ.txt" | tr -d ' ')
+
+cite_lines_of() { # <문서> → 인용 줄(경로:줄번호:본문)
+    grep -n '`[A-Za-z0-9_./-]*\.md`' "$1" 2>/dev/null | grep '"' | sed "s|^|$1:|"
+}
+g8_hits() { # <인용 줄 파일> → 위반 줄 수 (절 표지 뒤 열거 번호)
+    : > "$1.hits"
+    while IFS= read -r _c; do
+        [ -n "$_c" ] || continue
+        LC_ALL=C grep -E "$SELFREF_JEOL.*$_c" "$1" >> "$1.hits" 2>/dev/null
+    done < "$SBX/circ.txt"
+    # `LC_ALL=C sort`: 로케일이 걸리면 비교가 바이트 동등이 아니라 collation 동등이 되어 **중복 제거
+    # 결과가 두 셸에서 갈린다**(M40이 `tests/discover`에서, M42가 `tests/lib`에서 같은 부류를 잡았다).
+    # ps1은 ordinal 비교이므로 이쪽도 바이트 동등으로 고정해야 의미가 같다.
+    LC_ALL=C sort -u "$1.hits" | grep -c .
+}
+
+: > "$SBX/g8cites.txt"
+while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    cite_lines_of "$f" >> "$SBX/g8cites.txt"
+done < "$SBX/living.txt"
+
+NG8=$(g8_hits "$SBX/g8cites.txt")
+NG8CITES=$(grep -c . "$SBX/g8cites.txt")
+[ "$NG8" = "0" ] || LC_ALL=C sort -u "$SBX/g8cites.txt.hits" | sed 's/^/  -> ordinal sub-index citation: /'
+chk "G8a: 열거 번호 집합 40자·160바이트(줄바꿈 포함)" "$NCIRC/$CIRCBYTES" "40/160"
+# 추출 positive-control — **금지형이어도 훑을 대상이 비면 공허하다**. 위 `cite_lines_of`의 정규식이나
+# `living.txt` 범위가 망가지면 G8b가 `0 == 0`으로 조용히 통과하므로, 인용 줄 자체가 하나라도 잡히는지를
+# 단언한다(체크리스트 ⑴ — G2·G6·G4의 추출 통제와 동형. 이 자리가 M44 리뷰의 in-review 수정이다).
+chk "G8b0: 인용 줄 추출 positive-control(>0)"        "$([ "$NG8CITES" -gt 0 ] && echo ok || echo no)" "ok"
+chk "G8b: 절 표지 뒤 열거 번호 인용 0건"              "$NG8" "0"
+# 픽스처 통제 — 위반 한 줄을 주입하면 잡아야 한다(살아 있는 사이트가 0건이라 이것이 공허를 막는다).
+{ printf -- '- `docs/conventions.md`%s "%s" %s ' "$SKEL_UI" "bogus-anchor" "$SELFREF_JEOL"
+  sed -n '24p' "$SBX/circ.txt"; } > "$SBX/g8fx.txt"
+chk "G8c: 통제 — 주입한 열거 번호 인용을 잡는다"      "$(g8_hits "$SBX/g8fx.txt")" "1"
 
 # === Part I — 축 상태 주장 정합 (M42) ====================================
 # 표가 **집행된다**고 적은 축을 산문이 **반대로** 적는 자리를 문다. 카운트는 B1·F1이, 명단은 C-3·C-4가,
