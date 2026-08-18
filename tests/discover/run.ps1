@@ -1598,8 +1598,25 @@ try {
         [Array]::Sort($names, [System.StringComparer]::Ordinal)
         return ($names -join '|')
     }
+    $discFix = Ps1DiscFixture
     Chk "F7: discovery spec -- case-sensitive, hidden included, directories excluded" `
-        (DiscSpec (Ps1DiscFixture)) '.hidden.ps1|a.ps1|c.ps1'
+        (DiscSpec $discFix) '.hidden.ps1|a.ps1|c.ps1'
+    # (F8) BITE F7's HIDDEN-AXIS PRECONDITION (M43 -- disposition of M42 review recommendation 1).
+    # For F7 to prove "hidden files are discovered", the fixture's hidden file must ACTUALLY be hidden.
+    # Setting the attribute lives in a try/catch here, and if that step fails quietly the hidden axis
+    # disappears while the runner says nothing -- measured in the M42 review: disable only the attribute
+    # step and a live -Force defect still leaves both PowerShell runtimes at 146/0 green. So assert the
+    # precondition: an enumeration that does NOT include hidden entries must not see that file. The test
+    # holds on both platforms through each one's own notion of hidden -- a leading dot on POSIX (globs
+    # skip it), the Hidden attribute on Windows (-Force-less enumeration skips it). What this case bites
+    # on THIS side is whether the attribute was really set; on the .sh side it is the dot-name convention,
+    # since that shell has no attribute concept. Same invariant, each side's expression of it.
+    function DiscVisibleCount($dir) {
+        return [string]@(Get-ChildItem -Path $dir -File |
+            Where-Object { $_.Name.EndsWith('.ps1', [System.StringComparison]::Ordinal) }).Count
+    }
+    Chk "F8: hidden fixture stays hidden to a non-Force enumeration (F7 precondition)" `
+        (DiscVisibleCount $discFix) '1'
 
     # (F1) LAST case -- own README declaration ('cases: N') vs actual case count (running total + this one).
     Chk "F1: README cases declaration == actual case count" (DeclaredCases) ([string]($script:pass + $script:fail + 1))
