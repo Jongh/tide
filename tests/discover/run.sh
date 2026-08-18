@@ -1418,8 +1418,27 @@ disc_spec() { # <dir> → 정렬된 basename을 |로 이어 붙인 한 줄
     ps1_files_in "$1" | sed 's|.*/||' | LC_ALL=C sort |
         awk '{ s = (NR == 1 ? $0 : s "|" $0) } END { print s }'
 }
+DISC_FIX=$(ps1_disc_fixture)
 chk "F7: 발견 명세 — 대소문자 구분·숨김 포함·디렉터리 제외" \
-    "$(disc_spec "$(ps1_disc_fixture)")" ".hidden.ps1|a.ps1|c.ps1"
+    "$(disc_spec "$DISC_FIX")" ".hidden.ps1|a.ps1|c.ps1"
+# (F8) **`F7`의 숨김 축 전제조건을 문다**(M43 — M42 리뷰 반환 권장 1의 처분). `F7`이 "숨김도 본다"를
+# 증명하려면 픽스처의 그 파일이 **실제로 숨김이어야** 한다. ps1 사본은 속성 설정을 `try/catch`로
+# 감싸는데, 그 단계가 조용히 실패하면 **숨김 축이 통째로 사라지고 러너는 아무 말도 하지 않는다**
+# (M42 리뷰 실측: 속성 단계만 무력화하면 `-Force` 결함을 그대로 두고도 양 PowerShell이 146/0 초록).
+# 전제조건을 케이스로 승격한다 — **숨김을 포함하지 않는 열거에서 그 파일이 보이지 않아야 한다.**
+# 이 판별은 두 플랫폼에서 **각자의 숨김 표기로 성립**한다: POSIX는 점 이름(글로브가 매치하지 않는다),
+# Windows는 숨김 속성(`-Force` 없는 열거가 건너뛴다). sh 사본에서 이 케이스가 무는 것은 **점 이름
+# 규약**이고(그 셸엔 속성 개념이 없다), ps1 사본에서 무는 것은 **속성 설정의 성공 여부**다 —
+# 같은 불변의 양쪽 표현이라 케이스 집합의 동형이 유지된다.
+disc_visible_count() { # <dir> → 숨김 미포함·최상위·정규 파일 중 `.ps1`로 끝나는 것의 수
+    _n=0
+    for _p in "$1"/*.ps1; do
+        [ -f "$_p" ] || continue   # `dir.ps1`(디렉터리)을 제외 — ps1의 `-File`과 같은 넓이
+        _n=$((_n + 1))
+    done
+    echo "$_n"
+}
+chk "F8: 숨김 픽스처가 숨김 미포함 열거에서 감춰진다(F7 전제조건)" "$(disc_visible_count "$DISC_FIX")" "1"
 
 # (F1) 마지막 케이스 — 자기 README 선언(`cases: N`)과 실제 케이스 수(누계 + 이 케이스) 대조.
 chk "F1: README cases 선언 == 실제 케이스 수" "$(declared_cases)" "$((pass + fail + 1))"
