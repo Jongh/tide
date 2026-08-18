@@ -666,6 +666,26 @@ try {
     # from the template ALONE must bite here (same three-way bind as E2/E5).
     Chk "E7: precedent waiver ($WAIVER_TOK) in all three files" (InAllThree $WAIVER_TOK $CONV $REV_SKILL $REV_TPL) 'yes'
 
+    # (E8/E9 -- M44) The two rules M43 added to this section carried NO ASCII gloss, so this part had
+    # nothing to bind and the three restatements that flatly CONTRADICTED the exit condition stayed green
+    # (M43 review issue 1). M44-T01 measured that mechanism; the glosses now exist, so bind them. Layer
+    # choice follows the existing rule: a rule that needs a RECORD SLOT in the report binds three files,
+    # one that is only criterion+procedure binds two.
+    $RESIDUAL_TOK = 'residual-risk-acceptance'
+    $REACH_TOK = 'reachability-weighting'
+
+    # (E8) the exit condition leaves an acceptance-rationale block in the review REPORT -> three-way bind
+    # (same layer as E7: deleting it from the template ALONE must bite here).
+    Chk "E8: exit condition ($RESIDUAL_TOK) in all three files" (InAllThree $RESIDUAL_TOK $CONV $REV_SKILL $REV_TPL) 'yes'
+
+    # (E9) reachability weighting is grading RATIONALE -> criterion (conventions) + procedure (skill) only.
+    # A template slot would add a duplicate declaration for nothing (same reasoning as E6).
+    Chk "E9: reachability weighting ($REACH_TOK) conventions <-> review SKILL" (InBoth $REACH_TOK $CONV $REV_SKILL) 'yes'
+
+    # negative control: a bogus exit-condition token must NOT appear in conventions (same shape as the
+    # bogus precedent token control below -- proves this new bind discriminates).
+    Chk "E: control -- conventions has no bogus exit-condition token" (HasToken $CONV "$RESIDUAL_TOK-bogus") 'no'
+
     # negative control: a bogus precedent token must NOT appear in conventions (same shape as the bogus
     # refutation token control -- proves this guard discriminates rather than passing vacuously).
     Chk "E: control -- conventions has no bogus precedent token" (HasToken $CONV "$VACUOUS_TOK-bogus") 'no'
@@ -1038,6 +1058,55 @@ try {
     $extFx = Join-Path $sbx 'extfx.md'
     [System.IO.File]::WriteAllText($extFx, ('- `skills/impl/SKILL.md`' + $UI + ' "bogus-cross-anchor" ' + $JEOL + "`n"), (New-Object System.Text.UTF8Encoding($false)))
     Chk "G7: control -- injected broken cross-doc citation is caught" ([string](@(ExtMissOf (@(ExtCitesOf $extFx)))).Count) '1'
+
+    # (G8 -- M44) Sub-items of a section are cited BY NAME, never by ordinal. Everything else in Part G
+    # compares only as far as the SECTION ANCHOR, so a sub-index was seen by no case at all. M43 review
+    # issue 5 is that class: the ledger cited an ordinal (U+2477) inside a named enumeration while that
+    # ordinal was an item M40 had closed and removed -- produced by an edit that moved the item without
+    # fixing its downstream pointers.
+    # Single source: the cross-reference integrity section of docs/conventions.md.
+    #   Rule: on a citation line (backticked `.md` path + a quote), an ordinal AFTER the section
+    #         marker (U+C808) = violation.
+    #   Set spec: U+2460..U+2487 (40 chars). BOTH runners assert the set themselves -- this copy asserts
+    #   40 elements, run.sh asserts 40 lines / 160 bytes. Both BUILD the chars from codepoints (no literal),
+    #   so the sets agree by construction; without the self-assertion one side could silently narrow.
+    #   Why a PROHIBITION and not an extraction: live sites are 0, so an extraction-based case would trip
+    #   the "extraction 0 = FAIL" rule and redden a clean tree. The injected fixture is what keeps this
+    #   prohibition from being vacuous.
+    #   Boundaries (the convention states the same three): an ordinal BEFORE the section marker is out of scope
+    #   (1 live line is that shape and is legitimate) / whether a name-cited item really EXISTS is not
+    #   compared (5 live sites, 0 observed defects) / a citation split across lines is missed.
+    $ORD_SET = @(0x2460..0x2487 | ForEach-Object { [char]$_ })
+    function CiteLinesOf($path) {   # citation lines of one doc: backticked .md path AND a quote
+        if (-not (Test-Path -LiteralPath $path)) { return @() }
+        return @([System.IO.File]::ReadAllLines($path) |
+            Where-Object { $_ -match '`[A-Za-z0-9_./-]*\.md`' -and $_.Contains('"') })
+    }
+    function OrdinalAfterJeol($lines) {   # lines carrying an ordinal AFTER the section marker (U+C808)
+        $hits = @()
+        foreach ($l in $lines) {
+            $j = $l.IndexOf($JEOL)          # ordinal comparison (String.IndexOf(String) is ordinal)
+            if ($j -lt 0) { continue }
+            foreach ($c in $ORD_SET) {
+                $k = $l.IndexOf($c)
+                if ($k -gt $j) { $hits += $l; break }
+            }
+        }
+        return $hits
+    }
+    $g8Cites = @()
+    foreach ($p in (LivingDocs)) { $g8Cites += @(CiteLinesOf $p) }
+    $g8Hits = @(OrdinalAfterJeol $g8Cites)
+    foreach ($h in $g8Hits) { Write-Host ("  -> ordinal sub-index citation: " + $h) }
+    Chk "G8a: ordinal set is 40 chars (U+2460-U+2487)" ([string]$ORD_SET.Count) '40'
+    # Extraction positive control -- a PROHIBITION is still vacuous if there is nothing to scan. If the
+    # CiteLinesOf pattern or the LivingDocs range breaks, G8b passes as 0 == 0. Assert the corpus is
+    # non-empty (checklist item 1 -- same shape as the G2/G6/G4 extraction controls). Added by the M44 review.
+    Chk "G8b0: citation-line extraction positive control (>0)" $(if ($g8Cites.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "G8b: no ordinal sub-index citation after the section marker" ([string]$g8Hits.Count) '0'
+    # Fixture control -- inject one violation in M43 issue 5's actual shape (U+2477) and it must be caught.
+    $g8Fx = @('- `docs/conventions.md`' + $UI + ' "bogus-anchor" ' + $JEOL + ' ' + [char]0x2477)
+    Chk "G8c: control -- injected ordinal sub-index citation is caught" ([string](@(OrdinalAfterJeol $g8Fx)).Count) '1'
 
     # === Part H -- execution-environment axis declaration consistency (M38-T06) =====
     # The convention NAMES each axis of the execution environment (single source: the
