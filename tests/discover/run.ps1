@@ -590,11 +590,32 @@ try {
     Chk "D5: conventions fragment declares PR CI check ($PRCI_TOK)" (HasToken $CONV_REL $PRCI_TOK)  'yes'
     Chk "D5: release SKILL wires PR CI check"                       (HasToken $REL_SKILL $PRCI_TOK) 'yes'
 
+    # (D6/D7/M46) The two MATCHING axes of the coverage check, bound conventions<->skill. D1 (scope 1)
+    # and D3 (scope 2) anchor WHAT IS COLLECTED; these anchor HOW THE COLLECTED SET IS COMPARED --
+    # fixing only one side makes the check narrower or wider than the conventions, and D1/D3 cannot see
+    # that split because both only look at collection tokens.
+    # (D6) brace expansion: without it a legitimately declared file shows up as uncovered (M46 measured:
+    # all 7 uncovered entries in the v2.18.0 range were this form; 0 after expanding).
+    # (D7) reverse declared-set check: files the impl report's change-file table declares but that were
+    # not actually changed. The boundary (do NOT widen to report-wide prose) lives in the same section
+    # (M46 measured 90% false positives for the prose axis).
+    # Single source: conventions "release coverage check" section. Tokens are ASCII, matching this
+    # runner's ASCII-only rule.
+    $BRACE_TOK = 'brace-expansion'
+    $DECL_TOK  = 'declared-change-set'
+
+    Chk "D6: conventions declares brace expansion ($BRACE_TOK)" (HasToken $CONV $BRACE_TOK)      'yes'
+    Chk "D6: release SKILL wires brace expansion"               (HasToken $REL_SKILL $BRACE_TOK) 'yes'
+    Chk "D7: conventions declares reverse check ($DECL_TOK)"    (HasToken $CONV $DECL_TOK)       'yes'
+    Chk "D7: release SKILL wires reverse check"                 (HasToken $REL_SKILL $DECL_TOK)  'yes'
+
     # cross control: each mechanism must be ABSENT from the opposite skill (token discriminates).
     Chk "D: control -- milestone SKILL has no coverage token"  (HasToken $MS_SKILL $COV_TOK)  'no'
     Chk "D: control -- milestone SKILL has no uncommitted-scope token" (HasToken $MS_SKILL $UNCOMMITTED_TOK) 'no'
     Chk "D: control -- release SKILL has no number-warn token" (HasToken $REL_SKILL $WARN_TOK) 'no'
     Chk "D: control -- milestone SKILL has no PR CI token"      (HasToken $MS_SKILL $PRCI_TOK) 'no'
+    Chk "D: control -- milestone SKILL has no brace-expansion token" (HasToken $MS_SKILL $BRACE_TOK) 'no'
+    Chk "D: control -- milestone SKILL has no declared-set token"    (HasToken $MS_SKILL $DECL_TOK)  'no'
 
     # negative control: a bogus mechanism token must NOT appear in conventions (guard discriminates).
     Chk "D: control -- conventions has no bogus token" (HasToken $CONV 'git diff --bogus-only') 'no'
@@ -682,6 +703,16 @@ try {
     # A template slot would add a duplicate declaration for nothing (same reasoning as E6).
     Chk "E9: reachability weighting ($REACH_TOK) conventions <-> review SKILL" (InBoth $REACH_TOK $CONV $REV_SKILL) 'yes'
 
+    # (E10 / M46) consecutive-fallback metric. The value is a SLOT written into the review report's
+    # metrics line, so it binds in three places like E8/E3 (conventions = definition, skill = procedure,
+    # template = recording slot). Without an ASCII term the field could be deleted and stay green, so
+    # this follows the binding rule M44 established. E4 already guards the metrics-line skeleton itself;
+    # E10 guards the presence of the NEW FIELD.
+    $STREAK_TOK = 'fallback-streak'
+    Chk "E10: fallback streak ($STREAK_TOK) present in all three files" (InAllThree $STREAK_TOK $CONV $REV_SKILL $REV_TPL) 'yes'
+    Chk "E10: metrics-line skeleton carries streak field (conventions)" (SameLine $CONV $MEAS_TOK "($STREAK_TOK)") 'yes'
+    Chk "E10: metrics-line skeleton carries streak field (template)"    (SameLine $REV_TPL $MEAS_TOK "($STREAK_TOK)") 'yes'
+
     # negative control: a bogus exit-condition token must NOT appear in conventions (same shape as the
     # bogus precedent token control below -- proves this new bind discriminates).
     Chk "E: control -- conventions has no bogus exit-condition token" (HasToken $CONV "$RESIDUAL_TOK-bogus") 'no'
@@ -695,6 +726,9 @@ try {
 
     # cross control: the metrics line is a review asset -> the impl template carries only the rework value.
     Chk "E: control -- impl template has no metrics-line skeleton" (SameLine $IMPL_TPL $MEAS_TOK "($REWORK_TOK)") 'no'
+
+    # negative control: a bogus streak token must NOT appear in conventions (same shape as E8's control).
+    Chk "E: control -- conventions has no bogus streak token" (HasToken $CONV "$STREAK_TOK-bogus") 'no'
 
     # negative control: a bogus token must NOT appear in conventions (same intent as B1's N+1 absence).
     Chk "E: control -- conventions has no bogus refutation token" (HasToken $CONV "$REFUT_TOK-bogus") 'no'
@@ -1770,6 +1804,47 @@ try {
     Chk "F13: control -- an injected unpinned ps1 site is caught" ([string](@(LocaleScanIn $locFxPs1 $LOCALE_SITE_RE_PS1)).Count) '1'
 
     # (F1) LAST case -- own README declaration ('cases: N') vs actual case count (running total + this one).
+    # === F14..F16 (M46) -- entry-point document line cap ==================
+    # The conventions state a line cap for CLAUDE.md while also saying "machines do not check this".
+    # M46-T05 measured that it CAN be closed: (1) the cap value now has a single declaration site in the
+    # conventions (project-context also carried it, breaking declaration uniqueness) and (2) line
+    # counting is fixed to be IDENTICAL in both runners.
+    # HOW WE COUNT DECIDES THE VERDICT: `wc -l` counts NEWLINES, so a file whose last line lacks one
+    # counts 1 short, while `grep -c ""` matches ReadAllLines here (measured: 3-line file with no
+    # trailing newline -> wc=2, the other two =3). This copy uses ReadAllLines; the sh copy uses
+    # `grep -c ""`. The declaration line is Korean prose, so the pattern is assembled from codepoints
+    # (this runner is ASCII-only at source level).
+    $CAP_LABEL = Uni 0xC0C1,0xD55C                    # sang-han = cap
+    $CAP_UNIT  = [string][char]0xC904                 # jul      = line(s)
+    $CAP_RE    = '^- \*\*' + $CAP_LABEL + '\*\*: \*\*[0-9]+' + $CAP_UNIT + '\*\*'
+    $capLines  = @([IO.File]::ReadAllLines($CONV) | Where-Object { $_ -match $CAP_RE })
+    $ENTRY_CAP = if ($capLines.Count -ge 1) { [int]([regex]::Match($capLines[0],'([0-9]+)' + $CAP_UNIT).Groups[1].Value) } else { 0 }
+    $ENTRY_DOC = Join-Path $ROOT 'CLAUDE.md'
+
+    # THE VERDICT LIVES IN ONE FUNCTION -- F15 (real file) and F16 (fixture) both call it. This is what
+    # rework 1 fixed: the first version had F16 re-implement the comparison inline, so it never invoked
+    # F15's verdict at all, and replacing that verdict outright still scored 172/0 green in BOTH copies
+    # (review attack A1 -- a tautological case). Now, if the verdict breaks, the fixture stops reporting
+    # 'over' and F16 goes red.
+    function EntryCapVerdict([string]$path, [int]$cap) {   # -> ok | over(n/cap) | nocap | nofile
+        if ($cap -le 0) { return 'nocap' }
+        if (-not (Test-Path $path)) { return 'nofile' }
+        $n = ([IO.File]::ReadAllLines($path)).Count
+        if ($n -le $cap) { return 'ok' } else { return "over($n/$cap)" }
+    }
+
+    # (F14) extraction positive-control + declaration uniqueness -- if the regex or the conventions
+    # wording breaks, the cap becomes empty and the verdict below passes vacuously.
+    Chk "F14: cap declaration extraction positive-control (unique)" ([string]$capLines.Count) '1'
+    # (F15) the actual verdict.
+    Chk "F15: CLAUDE.md line count <= conventions cap" (EntryCapVerdict $ENTRY_DOC $ENTRY_CAP) 'ok'
+    # (F16) fixture control -- feed an over-cap fixture to the SAME verdict function and require 'over'
+    # (same shape as F12/F13 running `locale_scan_in` on a fixture). If this case is red, the verdict died.
+    $overPath = Join-Path $SBX 'entryover.md'
+    [IO.File]::WriteAllLines($overPath, @(1..($ENTRY_CAP + 1) | ForEach-Object { 'x' }))
+    $entryFixR = if ((EntryCapVerdict $overPath $ENTRY_CAP) -like 'over*') { 'caught' } else { 'missed' }
+    Chk "F16: control -- verdict function catches the over-cap fixture" $entryFixR 'caught'
+
     Chk "F1: README cases declaration == actual case count" (DeclaredCases) ([string]($script:pass + $script:fail + 1))
 
     Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) (actual command skills N=$N) [runtime: PowerShell $($PSVersionTable.PSVersion) $($PSVersionTable.PSEdition)]"
