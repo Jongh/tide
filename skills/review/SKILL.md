@@ -78,7 +78,7 @@ docs/reports/M{N}-review.md (대상 마일스톤 번호 M{N}에 맞춤):
 - 릴리즈 가능이면 /tide:release vX.Y.Z 구체 버전을, 불가면 보완 태스크 또는
   /tide:milestone 후속 계획을 다음 단계에 제시
 - `## 릴리즈 판정` 섹션의 판정 줄 **아래**에 계측 줄을 **필수**로 남긴다. 고정 형식(문자 그대로):
-  `계측: in-review 수정 차단 {n}/권장 {n}/사소 {n} · 반증 시도 {수행|폴백} 성립 {n}건 · 재작업 라운드(rework) {n}`
+  `계측: in-review 수정 차단 {n}/권장 {n}/사소 {n} · 반증 시도 {수행|폴백} 성립 {n}건 · 연속 폴백(fallback-streak) {n} · 재작업 라운드(rework) {n}`
   판정 표기(`**가능**`/`**불가**`)와 `추천 버전`의 형식·위치는 **바꾸지 않는다**(프리플라이트·
   /tide:status·fleet 계열의 판정 읽기 불변).
 - **재작업 라운드(rework) 산정**: 대상 마일스톤의 impl 보고서 docs/reports/M{N}-impl.md 개요에

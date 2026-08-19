@@ -441,11 +441,29 @@ chk "D4: 캐노니컬 카탈로그가 미커밋 범위 선언" "$(has_token "$CA
 chk "D5: 규약 조각이 PR CI 확인($PRCI_TOK) 선언" "$(has_token "$CONV_REL" "$PRCI_TOK")" "yes"
 chk "D5: release SKILL 이 PR CI 확인 배선"        "$(has_token "$REL_SKILL" "$PRCI_TOK")" "yes"
 
+# (D6·D7·M46) 커버리지 체크의 두 축이 규약↔스킬 양쪽에 선언되는지 결합한다. D1(범위 ⑴)·D3(범위 ⑵)이
+# **무엇을 모으는가**를 앵커한다면 이 둘은 **모은 것을 어떻게 대조하는가**를 앵커한다 — 한쪽만 고치면
+# 검사가 규약보다 좁거나 넓어지는데 D1·D3은 그 갈림을 보지 못한다(둘 다 수집 토큰만 본다).
+# (D6) 중괄호 확장 정규화: 펼치지 않으면 정당한 선언이 미상으로 뜬다(M46 실측 — v2.18.0 구간의
+# 미상 7건이 전부 이 형태였고 펼친 뒤 0건).
+# (D7) 역방향 선언 대조: impl 보고서의 `변경 파일 요약` 표가 선언했는데 실제로 안 바뀐 파일을 드러낸다.
+# 산문 전역으로 넓히지 않는 경계도 같은 절에 있다(M46 실측 — 산문 축은 위양성 90%).
+# 단일 원본은 conventions "릴리즈 커버리지 체크" 절. 토큰은 ASCII 병기어라 ps1 사본과 정합한다.
+BRACE_TOK='brace-expansion'
+DECL_TOK='declared-change-set'
+
+chk "D6: conventions 가 중괄호 확장($BRACE_TOK) 선언" "$(has_token "$CONV" "$BRACE_TOK")" "yes"
+chk "D6: release SKILL 이 중괄호 확장 배선"           "$(has_token "$REL_SKILL" "$BRACE_TOK")" "yes"
+chk "D7: conventions 가 역방향 대조($DECL_TOK) 선언"  "$(has_token "$CONV" "$DECL_TOK")" "yes"
+chk "D7: release SKILL 이 역방향 대조 배선"           "$(has_token "$REL_SKILL" "$DECL_TOK")" "yes"
+
 # 교차 통제 — 각 메커니즘은 반대 스킬에 없어야 한다(토큰 구별력: 커버리지=release, 경고=milestone).
 chk "D: 통제 — milestone SKILL 에 커버리지 토큰 없음" "$(has_token "$MS_SKILL" "$COV_TOK")" "no"
 chk "D: 통제 — milestone SKILL 에 미커밋 범위 토큰 없음" "$(has_token "$MS_SKILL" "$UNCOMMITTED_TOK")" "no"
 chk "D: 통제 — release SKILL 에 번호경고 토큰 없음"   "$(has_token "$REL_SKILL" "$WARN_TOK")" "no"
 chk "D: 통제 — milestone SKILL 에 PR CI 토큰 없음"   "$(has_token "$MS_SKILL" "$PRCI_TOK")" "no"
+chk "D: 통제 — milestone SKILL 에 중괄호 확장 토큰 없음" "$(has_token "$MS_SKILL" "$BRACE_TOK")" "no"
+chk "D: 통제 — milestone SKILL 에 역방향 대조 토큰 없음" "$(has_token "$MS_SKILL" "$DECL_TOK")" "no"
 
 # 음성 통제 — 존재하지 않는 가짜 메커니즘 토큰은 규약에 없어야 한다(가드 구별력 입증, B1의 N+1종 부재와 동형).
 chk "D: 통제 — conventions에 가짜 토큰 없음" "$(has_token "$CONV" "git diff --bogus-only")" "no"
@@ -529,6 +547,15 @@ chk "E8: 종료 조건($RESIDUAL_TOK) 세 파일 전부에 등장" "$(in_all_thr
 # 보고서 템플릿에 슬롯을 두면 복제 선언을 불필요하게 늘린다).
 chk "E9: 도달 가능성($REACH_TOK) 규약↔review SKILL 정합" "$(in_both "$REACH_TOK" "$CONV" "$REV_SKILL")" "yes"
 
+# (E10 · M46) 연속 폴백 계측. 값은 **리뷰 보고서 계측 줄에 적히는 슬롯**이므로 E8·E3과 같은 3곳 결합이다
+# (규약 = 정의, 스킬 = 절차, 템플릿 = 기록 슬롯). 병기어가 없으면 이 필드를 지워도 초록이라 M44가 세운
+# 결합 규율을 그대로 따른다. 계측 줄 자체의 골격은 E4가 이미 문다 — E10은 **새 필드의 존재**를 문다.
+STREAK_TOK='fallback-streak'
+chk "E10: 연속 폴백($STREAK_TOK) 세 파일 전부에 등장" "$(in_all_three "$STREAK_TOK" "$CONV" "$REV_SKILL" "$REV_TPL")" "yes"
+# 계측 줄 골격 안에 새 필드가 실제로 들어갔는지(같은 줄) — 규약·템플릿 두 자리.
+chk "E10: 계측 줄 골격에 연속 폴백 필드(규약)"   "$(same_line "$CONV" "$MEAS_TOK" "($STREAK_TOK)")" "yes"
+chk "E10: 계측 줄 골격에 연속 폴백 필드(템플릿)" "$(same_line "$REV_TPL" "$MEAS_TOK" "($STREAK_TOK)")" "yes"
+
 # 음성 통제 — 가짜 종료 조건 토큰은 규약에 없어야 한다(아래 판례 토큰 통제와 동형, 구별력 입증).
 chk "E: 통제 — conventions에 가짜 종료조건 토큰 없음" "$(has_token "$CONV" "${RESIDUAL_TOK}-bogus")" "no"
 
@@ -540,6 +567,9 @@ chk "E: 통제 — impl 템플릿에 반증 토큰 없음" "$(has_token "$IMPL_T
 
 # 교차 통제 — 계측 줄은 review 자산이라 impl 템플릿엔 골격이 없어야 한다(개요엔 rework 값만 적는다).
 chk "E: 통제 — impl 템플릿에 계측 줄 골격 없음" "$(same_line "$IMPL_TPL" "$MEAS_TOK" "($REWORK_TOK)")" "no"
+
+# 음성 통제 — 가짜 연속 폴백 토큰은 규약에 없어야 한다(E8 통제와 동형, 구별력 입증).
+chk "E: 통제 — conventions에 가짜 연속폴백 토큰 없음" "$(has_token "$CONV" "${STREAK_TOK}-bogus")" "no"
 
 # 음성 통제 — 존재하지 않는 가짜 토큰은 규약에 없어야 한다(B1의 N+1종 부재·Part D 가짜 토큰과 동형).
 chk "E: 통제 — conventions에 가짜 반증 토큰 없음" "$(has_token "$CONV" "${REFUT_TOK}-bogus")" "no"
@@ -1594,6 +1624,44 @@ printf '$s = @(1,2) | Sort-Object\n' > "$SBX/locfx.ps1"   # locale-exempt: fixtu
 chk "F13: 통제 — 주입한 미고정 ps1 사이트를 잡는다" "$(locale_scan_in "$SBX/locfx.ps1" "$LOCALE_SITE_RE_PS1" | grep -c .)" "1"
 
 # (F1) 마지막 케이스 — 자기 README 선언(`cases: N`)과 실제 케이스 수(누계 + 이 케이스) 대조.
+# === F14~F16 (M46) — 진입점 문서 줄 수 상한 =============================
+# 규약이 `CLAUDE.md`에 줄 수 상한을 적으면서 *"기계가 묻지 않는다"* 고 함께 적고 있었다. M46-T05가
+# 닫을 수 있음을 실측했다 — ⑴ 상한 값의 선언처를 규약 한 곳으로 모으고(그 전엔 project-context에도
+# 있어 선언 줄 유일성 위반이었다) ⑵ 줄 수 세기를 두 러너 **동형**으로 고정했다.
+# **세는 방법이 판정을 가른다**: `wc -l`은 개행 **개수**라 마지막 줄에 개행이 없으면 1 적게 세지만
+# `grep -c ""`는 ps1의 `ReadAllLines`와 같은 수를 낸다(실측: 개행 없는 3줄 파일에서 wc=2 · 나머지 둘=3).
+# 그래서 상한 판정에는 `grep -c ""`만 쓴다.
+ENTRY_DOC="$ROOT/CLAUDE.md"
+# 추출 실패 시 **0으로 고정**한다 — 빈 값이면 아래 산술 비교가 sh에서 에러가 되어 ps1(정수 0)과
+# 결과가 갈린다. 실측: 선언 줄을 지우면 sh 169/3 · pwsh 170/2로 갈렸고, 0 고정 후 양쪽 170/2다.
+ENTRY_CAP=$(LC_ALL=C grep -E '^- \*\*상한\*\*: \*\*[0-9]+줄\*\*' "$CONV" | LC_ALL=C sed -E 's/.*\*\*([0-9]+)줄\*\*.*/\1/' | head -1)
+[ -n "$ENTRY_CAP" ] || ENTRY_CAP=0
+ENTRY_CAP_DECLS=$(LC_ALL=C grep -cE '^- \*\*상한\*\*: \*\*[0-9]+줄\*\*' "$CONV")
+# **판정은 함수 하나에만 있다** — F15(실물)와 F16(픽스처)이 **같은 함수**를 부른다. 재작업 1이 고친
+# 자리가 여기다: 첫 판본은 F16이 비교를 인라인으로 재구현해 F15의 판정을 한 번도 호출하지 않았고,
+# 그래서 **F15의 판정식을 통째로 무력화해도 양 사본이 172/0 초록**이었다(리뷰 A1 실측 — 동어반복
+# 케이스). 이제 판정이 망가지면 픽스처가 `over`를 잃어 F16이 붉어진다.
+entry_cap_verdict() { # <파일> <상한> → ok | over(n/cap) | nocap | nofile
+    [ -n "$2" ] && [ "$2" -gt 0 ] || { echo nocap; return; }
+    [ -f "$1" ] || { echo nofile; return; }
+    _n=$(grep -c "" "$1")
+    if [ "$_n" -le "$2" ]; then echo ok; else echo "over($_n/$2)"; fi
+}
+# (F14) 추출 positive-control + 선언 유일성 — 정규식이나 규약 문구가 망가지면 상한이 빈 값이 되어
+# 아래 판정이 공허해진다(체크리스트 ⑴⑵ — G8b0·I7~I9와 동형).
+chk "F14: 상한 선언 추출 positive-control(유일)" "$ENTRY_CAP_DECLS" "1"
+# (F15) 실제 판정 — 진입점 문서가 상한 이하인가.
+chk "F15: CLAUDE.md 줄 수 <= 규약의 상한" "$(entry_cap_verdict "$ENTRY_DOC" "$ENTRY_CAP")" "ok"
+# (F16) 픽스처 통제 — **같은 판정 함수**에 상한 초과 픽스처를 먹여 `over`가 나오는지 본다
+# (F12·F13이 `locale_scan_in`을 픽스처에 돌리는 형태와 동형). 이 케이스가 붉으면 판정 자체가 죽은 것이다.
+: > "$SBX/entryover.md"
+_i=0; while [ "$_i" -le "$ENTRY_CAP" ]; do echo "x" >> "$SBX/entryover.md"; _i=$((_i + 1)); done
+case "$(entry_cap_verdict "$SBX/entryover.md" "$ENTRY_CAP")" in
+    over*) ENTRY_FIX_R=caught ;;
+    *)     ENTRY_FIX_R=missed ;;
+esac
+chk "F16: 통제 — 판정 함수가 상한 초과 픽스처를 잡는다" "$ENTRY_FIX_R" "caught"
+
 chk "F1: README cases 선언 == 실제 케이스 수" "$(declared_cases)" "$((pass + fail + 1))"
 
 echo

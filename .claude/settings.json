@@ -1,5 +1,10 @@
 {
   "enabledPlugins": {
     "tide@tide": true
+  },
+  "permissions": {
+    "allow": [
+      "Bash(command -v *)"
+    ]
   }
 }
