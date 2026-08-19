@@ -105,6 +105,10 @@ DECL_CASES=$(LC_ALL=C sed -n 's/.*cases: *\([0-9][0-9]*\).*/\1/p' "$README" | he
 chk "X4: README cases 선언 == 실제 케이스 수" "${DECL_CASES:-none}" "$((pass + fail + 1))"
 
 echo
-echo "# 결과: PASS=$pass FAIL=$fail (뮤테이션 $NANN건 · 대상 $TARGET_REL)"
+# **변수 뒤에 다중바이트 문자가 오면 반드시 `${...}`로 이름 경계를 명시한다.** `$NANN건`은 이 기계의
+# bash 5.2·dash에서는 이름이 `NANN`에서 끊겨 정상이지만, macOS가 `sh`로 쓰는 **bash 3.2는 뒤따르는
+# 바이트를 이름에 포함**해 `set -u`가 `unbound variable`로 죽인다(v2.19.1 릴리즈 PR의
+# `posix (macos-latest)` 실측 — 로컬 네 환경과 우분투는 전부 초록이었다).
+echo "# 결과: PASS=$pass FAIL=$fail (뮤테이션 ${NANN}건 · 대상 $TARGET_REL)"
 [ "$fail" -eq 0 ] || exit 1
 echo "# mutation: 선언 토큰을 깨면 지목한 케이스가 붉어지는지 확인함 — 동어반복 케이스 검출 (참조 구현 기준)"
