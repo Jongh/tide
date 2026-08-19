@@ -1861,3 +1861,11 @@ if (-not $script:completed) {
 if ($script:fail -ne 0) { exit 1 }
 Write-Host "# discover detection threshold (>=2->hint / <2->none / single-repo->none / hidden-not-counted) + single-source freeze (B1 count / B2 site shell / B3 catalog completeness, canonical=docs/commands.md) + declaration consistency (C1 four statuses x three files + absence control / C2 baseline x three templates / C3 phase roster both lists (writer + non-writer) conventions<->published page set equality, sole enumerator, disjointness, negative control / D cross-branch coverage (committed-diff + uncommitted-scope tokens; conventions<->skill<->canonical catalog)+number-warn conventions<->skill + PR-CI-check fragment<->skill / E review verification discipline refutation+metrics+rework conventions<->skill<->template plus metrics-line skeleton format plus re-verify declaration plus cross and negative controls / F document self-description = role-anchor extraction, canonical-row presence, consumer propagation plus case-count self-consistency / G cross-reference integrity = citation extraction vs real anchors plus empty-extraction, name-uniqueness and wrapped-citation controls / H execution-environment axis declaration = axis-name extraction, convention table row, set equality, table job: tokens exist in the workflow and sit in declared axis rows (orphans 0), coverage (every real job registered or declared exempt), exemption freshness, no-token axis control, axis: notation bidirectional equality, data-row count, negative controls -- cells naming no CI job, and the rest of a job-naming cell's prose, are the human review's layer, not asked here) confirmed"
 exit 0
+
+    # --- mutation declarations (M47) -- read by `tests/mutation` ------------
+    # form: `# mutates: <file> :: <token> :: <stable case-label prefix> :: <caught|missed>`
+    # Tokens are alphanumeric+hyphen only (no delimiter clash). The label is the prefix up to the
+    # first interpolation and is unique among this copy's 161 labels (measured in M47-T01).
+    # The sh copy carries the same declarations against its own (Korean) labels.
+# mutates: docs/conventions.md :: declared-change-set :: D7: conventions declares :: caught
+# mutates: docs/conventions.md :: mutation-negative-control-sentinel :: D7: conventions declares :: missed
