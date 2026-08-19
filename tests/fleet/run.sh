@@ -38,7 +38,7 @@ chk() { # <desc> <got> <want>
 # --- 분류(참조 구현): /tide:status 다음 커맨드 판단 규칙 (5 position, ASCII 라벨) ---
 classify() { # <repo> → 라벨
     r="$1"
-    ms=$(ls "$r"/docs/milestones/M*.md 2>/dev/null | sort -V | tail -1)
+    ms=$(ls "$r"/docs/milestones/M*.md 2>/dev/null | sort -V | tail -1)   # locale-exempt: version-sort (M40 결정 — macOS 레그 통과가 BSD 지원의 실측)
     [ -n "$ms" ] || { echo "milestone-needed"; return; }       # milestone 필요
     n=$(basename "$ms" .md)
     [ -f "$r/docs/reports/${n}-impl.md" ]   || { echo "impl-inprogress"; return; }  # impl 진행
@@ -197,7 +197,7 @@ MD="$SBX/multidigit"; mkdir -p "$MD/docs/milestones" "$MD/docs/reports"; git -C 
 printf '# M2\n'  > "$MD/docs/milestones/M2.md"
 printf '# M9\n'  > "$MD/docs/milestones/M9.md"
 printf '# M10\n' > "$MD/docs/milestones/M10.md"
-latest=$(ls "$MD"/docs/milestones/M*.md 2>/dev/null | sort -V | tail -1)
+latest=$(ls "$MD"/docs/milestones/M*.md 2>/dev/null | sort -V | tail -1)   # locale-exempt: version-sort (같은 결정)
 chk "다중 자리: 최신 마일스톤 = M10 (M9 아님)" "$(basename "$latest" .md)" "M10"
 # 분류도 최신(M10)을 기준으로 한다: M10-impl만 있고 M10-review 없음 → review 대기.
 printf '# M10 impl\n' > "$MD/docs/reports/M10-impl.md"

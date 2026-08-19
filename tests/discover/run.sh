@@ -1514,6 +1514,85 @@ disc_visible_count() { # <dir> → 숨김 미포함·최상위·정규 파일 �
 }
 chk "F8: 숨김 픽스처가 숨김 미포함 열거에서 감춰진다(F7 전제조건)" "$(disc_visible_count "$DISC_FIX")" "1"
 
+# (F9~F12 · M45) **로케일 고정 규율** — F5(비-ASCII 0줄)와 같은 층위다: 문서가 아니라 **러너 소스**의
+# 규율을 문다. 네 사이클 연속 같은 부류가 사람 손에 잡혔다 — M41(`Sort-Object`·`StartsWith` 6곳) ·
+# M42(세 표면 전수 감사 + `tests/lib/discover.sh`의 누락) · M44 리뷰 이슈 4(`sort -u`의 누락, 구현이
+# 놓치고 리뷰가 잡았다). 이 부류는 **두 셸의 의미를 갈라 BSD에서만 터진 전례가 둘**이다.
+#   무는 것(명세): ⑴ `.sh` 쪽은 **명령 위치**의 `sort`·`uniq`만 — 줄 선두·파이프·`;`·`&`·`(`·`$(` 뒤에
+#         오는 것. 함수 이름 부분 문자열(`toposort`)과 주석은 대상이 아니다(M45-T01 실측: 원시 46줄 →
+#         명령 위치 22 사이트). ⑵ `.ps1` 쪽은 **인자 없는 `Sort-Object`** 만 — 키를 지정한
+#         `Sort-Object { … }`는 문화권과 무관하고(실측 2건), 광범위 API(`-eq`·`-match`·`IndexOf`)는
+#         오탐이 폭발해 대상 밖이다.
+#   고정으로 보는 형태: `.sh`는 같은 줄의 `LC_ALL=C`, `.ps1`은 ordinal 전용 헬퍼 경유.
+#   예외는 **선언**한다: 같은 줄에 `locale-exempt: <사유>` 주석. 살아 있는 예외는 셋이고 사유가 둘이다 —
+#         `version-sort`(`sort -V` 두 곳 · M40이 *"macOS 레그 통과가 BSD 지원의 실측"*이라 유지 결정) ·
+#         `diagnostic-only`(진단 출력의 표시 순서라 판정에 쓰이지 않는다 · M41 후속 11이 같은 사실을
+#         이미 기록했다).
+#   경계(규약이 함께 적는다): 판정은 **줄 단위**라 `LC_ALL=C sort … | uniq`처럼 **파이프 뒤 두 번째
+#         명령의 개별 고정**은 묻지 않는다 · 변수 경유 호출·`eval`·다른 로케일 민감 도구(`join`·`comm`)는
+#         대상 밖 · `.ps1`의 광범위 비교 API는 위 ⑵의 이유로 대상 밖이다.
+LOCALE_EXEMPT_TOK='locale-exempt:'
+# **판정은 줄 자체로 한다(M45 재작업 1)** — 첫 판본은 사이트를 `파일:줄번호:본문`으로 이어 붙인 뒤
+# 콜론으로 다시 쪼갰고, **경로에 드라이브 콜론이 있는 ps1 사본에서 그 쪼개기가 어긋나** 주석 제외가
+# 죽었다(리뷰 차단 1 — 같은 트리에서 bash는 스킵, pwsh는 오탐). 이제 **파일별 스캔 안에서 줄 자체를
+# 보고** 판정하고 경로는 보고용으로만 앞에 붙인다 — 콜론 파싱이 사라져 그 부류가 구조적으로 닫힌다.
+# **사이트의 종결 문자도 명세다(재작업 1)** — 명령 뒤에 공백·`)`·`;`·`|`·`#`가 오거나 줄이 끝나면
+# 사이트다. 첫 판본은 공백·줄끝만 봐서 `$(cat x | sort)`·`| Sort-Object  # 주석` 형태를 **놓쳤다**
+# (리뷰 차단 2의 실제 기전 — `Ordinal` 탈출구와 별개의 검출 누락이었다).
+# 공백 집합도 양 사본을 **ASCII 공백·탭**으로 고정했다(sh `[[:blank:]]` @ `LC_ALL=C` ↔ ps1 `[ 	]`) —
+# `[[:space:]]`와 `\s`는 무는 폭이 달라 그 자체가 두 셸 갈림의 씨앗이다(리뷰 반환 2).
+LOCALE_SITE_RE_SH='(^|[|;&(]|\$\()[[:blank:]]*(LC_ALL=C[[:blank:]]+)?(sort|uniq)([[:blank:]);|#]|$)'   # locale-exempt: detector-pattern
+LOCALE_SITE_RE_PS1='Sort-Object[[:blank:]]*(\||\)|#|$)'
+locale_scan_in() { # <파일> <정규식> [report-only] → 미고정·미선언 줄("파일:줄번호:본문")
+    [ -f "$1" ] || return 0
+    LC_ALL=C grep -nE "$2" "$1" 2>/dev/null | while IFS= read -r _nl; do
+        _lno=${_nl%%:*}
+        _body=${_nl#*:}                                   # grep -n 의 첫 콜론까지만 — 경로가 섞이지 않는다
+        case "$_body" in *"$LOCALE_EXEMPT_TOK"*) continue ;; esac                              # 예외 선언
+        case "$(printf '%s' "$_body" | sed 's/^[[:blank:]]*//')" in '#'*) continue ;; esac      # 주석
+        case "$_body" in *'LC_ALL=C '*) continue ;; esac                                        # .sh 의 고정 형태
+        printf '%s:%s:%s\n' "$1" "$_lno" "$_body"
+    done
+}
+locale_sites_in() { # <파일> <정규식> → 사이트 수 세기용(필터 없음). **항상 숫자를 낸다** —
+    # 빈 문자열을 내면 호출부의 `$((N + $(...)))`가 산술 오류로 죽어 **결과 줄조차 못 낸다**(글롭이
+    # 0개 매치하는 경우. M45 리뷰 2회차가 dash·bash에서 실측했다). 설계된 신호는 `F11`의 추출
+    # positive-control이므로 러너는 살아서 그 케이스를 붉혀야 한다.
+    [ -f "$1" ] || { echo 0; return 0; }
+    LC_ALL=C grep -cE "$2" "$1" 2>/dev/null   # grep -c 는 미매치에도 `0`을 찍는다(중복 출력 금지)
+}
+# **`Ordinal` 탈출구를 없앴다(재작업 1 — 리뷰 차단 2)**: 첫 판본은 같은 줄에 `Ordinal` 문자열이 있으면
+# 고정으로 봤는데, 문서는 *"ordinal 전용 헬퍼 경유"*라 적어 **구현이 문서보다 넓었다**(주석의 단어
+# 하나로 미고정 정렬이 통과했다 — 실측). 인자 없는 `Sort-Object`에는 **고정 형태가 애초에 없다** —
+# 헬퍼로 바꾸면 사이트가 아니게 되고, 남겨야 하면 **선언**한다. 그래서 탈출구는 `.sh`의 `LC_ALL=C` 하나다.
+LOC_UNFIXED_SH=''; LOC_UNFIXED_PS1=''; NLOCSITE=0; NLOCPS1=0
+for f in "$ROOT"/tests/*/run.sh "$ROOT"/tests/lib/*.sh; do
+    LOC_UNFIXED_SH="$LOC_UNFIXED_SH$(locale_scan_in "$f" "$LOCALE_SITE_RE_SH")
+"
+    NLOCSITE=$((NLOCSITE + $(locale_sites_in "$f" "$LOCALE_SITE_RE_SH")))
+done
+for f in "$ROOT"/tests/*/run.ps1 "$ROOT"/tests/lib/*.ps1; do
+    LOC_UNFIXED_PS1="$LOC_UNFIXED_PS1$(locale_scan_in "$f" "$LOCALE_SITE_RE_PS1")
+"
+    NLOCPS1=$((NLOCPS1 + $(locale_sites_in "$f" "$LOCALE_SITE_RE_PS1")))
+done
+NLOCUNFIXED=$(printf '%s
+%s
+' "$LOC_UNFIXED_SH" "$LOC_UNFIXED_PS1" | grep -c .)
+[ "$NLOCUNFIXED" = "0" ] || printf '%s
+%s
+' "$LOC_UNFIXED_SH" "$LOC_UNFIXED_PS1" | grep . | sed 's/^/  -> locale not pinned and not declared: /'
+chk "F9: 로케일 미고정·미선언 사이트 0건"          "$NLOCUNFIXED" "0"
+chk "F10: sh 쪽 사이트 추출 positive-control(>0)"  "$([ "$NLOCSITE" -gt 0 ] && echo ok || echo no)" "ok"
+# 계열별로 나눠 센다(재작업 1) — 합으로 세면 한쪽 추출이 망가져도 다른 계열 수가 남아 초록이었다(R5 실측).
+chk "F11: ps1 쪽 사이트 추출 positive-control(>0)" "$([ "$NLOCPS1" -gt 0 ] && echo ok || echo no)" "ok"
+# 픽스처 통제 둘 — 살아 있는 미고정이 0건이라 이것이 공허를 막는다. 계열마다 하나씩 둔다(재작업 1:
+# 첫 판본은 sh 픽스처만 있어 ps1 검출기의 비공허성에 하니스 안 통제가 없었다).
+printf 'x=$(cat a b | sort -u)\n' > "$SBX/locfx.sh"   # locale-exempt: fixture-string (검사가 자기 픽스처 문자열을 문다)
+chk "F12: 통제 — 주입한 미고정 sh 사이트를 잡는다" "$(locale_scan_in "$SBX/locfx.sh" "$LOCALE_SITE_RE_SH" | grep -c .)" "1"
+printf '$s = @(1,2) | Sort-Object\n' > "$SBX/locfx.ps1"   # locale-exempt: fixture-string
+chk "F13: 통제 — 주입한 미고정 ps1 사이트를 잡는다" "$(locale_scan_in "$SBX/locfx.ps1" "$LOCALE_SITE_RE_PS1" | grep -c .)" "1"
+
 # (F1) 마지막 케이스 — 자기 README 선언(`cases: N`)과 실제 케이스 수(누계 + 이 케이스) 대조.
 chk "F1: README cases 선언 == 실제 케이스 수" "$(declared_cases)" "$((pass + fail + 1))"
 

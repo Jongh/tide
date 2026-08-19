@@ -923,7 +923,7 @@ try {
     # exactly what stopped M40 from reproducing the BSD divergence locally, and the .sh twin prints
     # them for the same reason. (A missing/empty anchor file cannot pass vacuously here: the anchor
     # extraction positive control above fails first.)
-    if ($dset.Count -ne 0) { Write-Host ("  -> duplicate anchors: " + (($dset | Sort-Object) -join ' ')) }
+    if ($dset.Count -ne 0) { Write-Host ("  -> duplicate anchors: " + (($dset | Sort-Object) -join ' ')) }   # locale-exempt: diagnostic-only (display order, never a verdict -- see M41 follow-up 11)
     Chk "G2: anchor names unique after normalization" ([string]$dset.Count) '0'
     Chk "G3: citation lines have balanced quotes (no wrapped citation)" ([string]$gOdd) '0'
 
@@ -1686,6 +1686,88 @@ try {
     }
     Chk "F8: hidden fixture stays hidden to a non-Force enumeration (F7 precondition)" `
         (DiscVisibleCount $discFix) '1'
+
+    # (F9-F12 -- M45) LOCALE PINNING discipline -- same layer as F5 (non-ASCII lines): it bites the
+    # RUNNER SOURCE, not documents. Four cycles in a row a human caught this class: M41 (Sort-Object /
+    # StartsWith, 6 seats), M42 (three surfaces audited + the omission in tests/lib/discover.sh), and the
+    # M44 review's issue 4 (a missing LC_ALL=C that the implementation missed and the review caught).
+    # This class has TWO precedents of splitting the two shells and failing only on BSD.
+    #   What it bites (spec): (1) on the .sh side only COMMAND-POSITION `sort`/`uniq` -- after start of
+    #         line, a pipe, `;`, `&`, `(` or `$(`. Function-name substrings (toposort) and comments are
+    #         out of scope (M45-T01 measured: 46 raw lines -> 22 command-position sites). (2) on the .ps1
+    #         side only BARE `Sort-Object` -- a keyed `Sort-Object { ... }` is culture-independent
+    #         (2 measured seats) and the broad APIs (-eq / -match / IndexOf) explode with false positives.
+    #   Counted as pinned: same-line `LC_ALL=C` (.sh) or an ordinal helper (.ps1).
+    #   Exceptions are DECLARED: a same-line `locale-exempt: <reason>` comment. Three live exceptions,
+    #         two reasons -- version-sort (two `sort -V` seats M40 decided to keep) and diagnostic-only
+    #         (display order, never a verdict; M41 follow-up 11 recorded the same fact).
+    #   Boundaries (the convention states them too): the verdict is PER LINE, so a second command after a
+    #         pipe (`LC_ALL=C sort ... | uniq`) is not asked about; calls through variables, `eval`, and
+    #         other locale-sensitive tools (join, comm) are out of scope; so are the broad .ps1 APIs.
+    # (M45 rework 1) THE VERDICT IS TAKEN ON THE LINE ITSELF. The first draft joined sites into
+    # "path:line:body" and split them back on colons -- and on this side the path carries a DRIVE COLON,
+    # so the split slid and the comment exclusion died (review blocker 1: bash skipped, pwsh false-flagged
+    # the same tree). Now each file is scanned in place and the raw line is judged; the path is prefixed
+    # for REPORTING only. No colon parsing remains, so that class is structurally closed.
+    # SITE TERMINATORS are part of the spec too (rework 1): a site ends at blank, `)`, `;`, `|`, `#` or
+    # end of line. The first draft accepted only blank/end-of-line and therefore MISSED `$(cat x | sort)`
+    # and `| Sort-Object  # comment` -- that miss, not the Ordinal hatch, was the real mechanism behind
+    # review blocker 2 (the attack line ended in a trailing comment, so it was never even a site).
+    # The blank-space class is pinned to ASCII space+tab on BOTH sides as well
+    # (sh [[:blank:]] under LC_ALL=C <-> ps1 [ \t]) -- [[:space:]] vs \s bite different widths, which is
+    # itself a seed of two-shell divergence (review return item 2).
+    $LOCALE_EXEMPT_TOK = 'locale-exempt:'
+    $LOCALE_SITE_RE_SH = '(^|[|;&(]|\$\()[ \t]*(LC_ALL=C[ \t]+)?(sort|uniq)([ \t);|#]|$)'
+    $LOCALE_SITE_RE_PS1 = 'Sort-Object[ \t]*(\||\)|#|$)'
+    # The `Ordinal` escape hatch is GONE (rework 1 -- review blocker 2). The first draft treated any line
+    # containing the string 'Ordinal' as pinned while the docs said "via an ordinal-only helper", so the
+    # implementation was WIDER than the documentation: one word in a comment let an unpinned sort through
+    # (measured). A bare Sort-Object has no pinned form at all -- fold it into a helper and it stops being
+    # a site, or keep it and DECLARE it. So the only escape hatch left is the .sh `LC_ALL=C`.
+    function LocaleScanIn($path, $regex) {   # unpinned AND undeclared lines -> "path:line:body"
+        if (-not (Test-Path -LiteralPath $path)) { return @() }
+        $out = @(); $i = 0
+        foreach ($l in [System.IO.File]::ReadAllLines($path)) {
+            $i++
+            if ($l -notmatch $regex) { continue }
+            if ($l.Contains($LOCALE_EXEMPT_TOK)) { continue }        # declared exception
+            if ($l.TrimStart().StartsWith('#')) { continue }         # comment
+            if ($l.Contains('LC_ALL=C ')) { continue }               # the .sh pinned form
+            $out += ("{0}:{1}:{2}" -f $path, $i, $l)
+        }
+        return $out
+    }
+    function LocaleSitesCountIn($path, $regex) {   # site count only (no filtering)
+        if (-not (Test-Path -LiteralPath $path)) { return 0 }
+        $n = 0
+        foreach ($l in [System.IO.File]::ReadAllLines($path)) { if ($l -match $regex) { $n++ } }
+        return $n
+    }
+    $locUnfixed = @(); $nLocSh = 0; $nLocPs1 = 0
+    foreach ($p in @(Get-ChildItem (Join-Path $root 'tests') -Directory | ForEach-Object { Join-Path $_.FullName 'run.sh' }) +
+                   @(Get-ChildItem (Join-Path $root 'tests/lib') -Filter '*.sh' -File | ForEach-Object { $_.FullName })) {
+        $locUnfixed += @(LocaleScanIn $p $LOCALE_SITE_RE_SH)
+        $nLocSh += (LocaleSitesCountIn $p $LOCALE_SITE_RE_SH)
+    }
+    foreach ($p in @(Get-ChildItem (Join-Path $root 'tests') -Directory | ForEach-Object { Join-Path $_.FullName 'run.ps1' }) +
+                   @(Get-ChildItem (Join-Path $root 'tests/lib') -Filter '*.ps1' -File | ForEach-Object { $_.FullName })) {
+        $locUnfixed += @(LocaleScanIn $p $LOCALE_SITE_RE_PS1)
+        $nLocPs1 += (LocaleSitesCountIn $p $LOCALE_SITE_RE_PS1)
+    }
+    foreach ($u in $locUnfixed) { Write-Host ("  -> locale not pinned and not declared: " + $u) }
+    Chk "F9: no locale site left unpinned and undeclared" ([string]$locUnfixed.Count) '0'
+    Chk "F10: sh-side site extraction positive control (>0)" $(if ($nLocSh -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # Counted PER FAMILY (rework 1) -- summing both families let one broken extractor stay green because
+    # the other family's count remained (measured as R5 in the impl report).
+    Chk "F11: ps1-side site extraction positive control (>0)" $(if ($nLocPs1 -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # Two fixture controls, one per family (rework 1: the first draft had only the .sh fixture, so the
+    # ps1 detector had no in-harness control for its non-vacuity).
+    $locFxSh = Join-Path $sbx 'locfx.sh'
+    [System.IO.File]::WriteAllText($locFxSh, "x=`$(cat a b | sort -u)`n", (New-Object System.Text.UTF8Encoding($false)))
+    Chk "F12: control -- an injected unpinned sh site is caught" ([string](@(LocaleScanIn $locFxSh $LOCALE_SITE_RE_SH)).Count) '1'
+    $locFxPs1 = Join-Path $sbx 'locfx.ps1'
+    [System.IO.File]::WriteAllText($locFxPs1, "`$s = @(1,2) | Sort-Object`n", (New-Object System.Text.UTF8Encoding($false)))
+    Chk "F13: control -- an injected unpinned ps1 site is caught" ([string](@(LocaleScanIn $locFxPs1 $LOCALE_SITE_RE_PS1)).Count) '1'
 
     # (F1) LAST case -- own README declaration ('cases: N') vs actual case count (running total + this one).
     Chk "F1: README cases declaration == actual case count" (DeclaredCases) ([string]($script:pass + $script:fail + 1))
