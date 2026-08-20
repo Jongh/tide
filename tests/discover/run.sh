@@ -1518,10 +1518,13 @@ ps1_disc_fixture() { # <dir> 만들고 그 경로를 출력
     mkdir -p "$_d/dir.ps1"   # 이름만 .ps1인 디렉터리 — 발견되지 않는다
     echo "$_d"
 }
-disc_spec() { # <dir> → 정렬된 basename을 |로 이어 붙인 한 줄
-    ps1_files_in "$1" | sed 's|.*/||' | LC_ALL=C sort |
+# basename 집합을 한 줄로 접는 자리는 **한 곳뿐**이다 — `F7`(`ps1_files_in`)과 `J6`(`runner_src_files_in`)이
+# 같은 접기를 불러 두 번째 선언처를 만들지 않는다. 정렬은 `LC_ALL=C`로 고정한다(ps1 사본은 ordinal).
+basename_join() { # (stdin: 경로 목록) → 정렬된 basename을 |로 이어 붙인 한 줄
+    sed 's|.*/||' | LC_ALL=C sort |
         awk '{ s = (NR == 1 ? $0 : s "|" $0) } END { print s }'
 }
+disc_spec() { ps1_files_in "$1" | basename_join; }   # <dir> → 정렬된 basename 한 줄
 DISC_FIX=$(ps1_disc_fixture)
 chk "F7: 발견 명세 — 대소문자 구분·숨김 포함·디렉터리 제외" \
     "$(disc_spec "$DISC_FIX")" ".hidden.ps1|a.ps1|c.ps1"
@@ -1573,13 +1576,28 @@ LOCALE_EXEMPT_TOK='locale-exempt:'
 # `[[:space:]]`와 `\s`는 무는 폭이 달라 그 자체가 두 셸 갈림의 씨앗이다(리뷰 반환 2).
 LOCALE_SITE_RE_SH='(^|[|;&(]|\$\()[[:blank:]]*(LC_ALL=C[[:blank:]]+)?(sort|uniq)([[:blank:]);|#]|$)'   # locale-exempt: detector-pattern
 LOCALE_SITE_RE_PS1='Sort-Object[[:blank:]]*(\||\)|#|$)'
+# **주석 줄 판정은 이 파일에 한 번만 둔다** — Part F(로케일 사이트) · Part J(변수 이름 경계) ·
+# Part K(공통 통제 토큰)가 **같은 술어**를 쓴다. 셋이 각자 적으면 그 순간 선언처가 셋이 되고 한 곳만
+# 고쳐도 나머지가 조용히 어긋난다(이 저장소가 반복해 데인 자리다).
+# **`run.ps1` 사본은 아직 둘이다** — 그쪽 Part F는 자기 인라인 술어(`TrimStart().StartsWith('#')`)를
+# 쓰고 Part J·K만 `IsCommentLine`을 쓴다. 폭도 다르다: .NET의 인자 없는 `TrimStart()`는 **모든
+# 유니코드 공백**을 벗기고 이쪽과 `IsCommentLine`은 **ASCII 공백·탭뿐**이라, `.sh`에 U+00A0으로
+# 시작하는 주석 줄이 있으면 Part F의 두 사본이 갈린다. 오늘 그런 줄은 0건이고 이 갈림은 M48 이전부터
+# 있던 것이며, 이 파일이 그것을 고친 것은 아니다(M48 리뷰 라운드 1의 경계 기록).
+# 술어: 줄의 첫 비-공백 문자(**ASCII 공백·탭만**)가 `#`이면 주석 줄이다. `LC_ALL=C`를 같은 줄에
+# 걸어 `[[:blank:]]`를 space·tab 둘로 고정한다(ps1 사본의 ASCII 공백·탭 클래스와 같은 넓이).
+# 줄 단위 술어(`is_comment_line`)와 파일 필터(`noncomment_lines`)는 **같은 `COMMENT_RE`에서 파생**한다 —
+# Part K는 하니스 일곱 × 러너 둘을 훑으므로 줄마다 서브프로세스를 띄우는 형태를 쓸 수 없다.
+COMMENT_RE='^[[:blank:]]*#'
+is_comment_line() { printf '%s\n' "$1" | LC_ALL=C grep -qE "$COMMENT_RE"; }
+noncomment_lines() { LC_ALL=C grep -vE "$COMMENT_RE" "$1" 2>/dev/null; }
 locale_scan_in() { # <파일> <정규식> [report-only] → 미고정·미선언 줄("파일:줄번호:본문")
     [ -f "$1" ] || return 0
     LC_ALL=C grep -nE "$2" "$1" 2>/dev/null | while IFS= read -r _nl; do
         _lno=${_nl%%:*}
         _body=${_nl#*:}                                   # grep -n 의 첫 콜론까지만 — 경로가 섞이지 않는다
         case "$_body" in *"$LOCALE_EXEMPT_TOK"*) continue ;; esac                              # 예외 선언
-        case "$(printf '%s' "$_body" | sed 's/^[[:blank:]]*//')" in '#'*) continue ;; esac      # 주석
+        is_comment_line "$_body" && continue                                                    # 주석
         case "$_body" in *'LC_ALL=C '*) continue ;; esac                                        # .sh 의 고정 형태
         printf '%s:%s:%s\n' "$1" "$_lno" "$_body"
     done
@@ -1661,6 +1679,270 @@ case "$(entry_cap_verdict "$SBX/entryover.md" "$ENTRY_CAP")" in
     *)     ENTRY_FIX_R=missed ;;
 esac
 chk "F16: 통제 — 판정 함수가 상한 초과 픽스처를 잡는다" "$ENTRY_FIX_R" "caught"
+
+
+# === Part J (M48) — 러너 소스의 변수 이름 경계 ==========================
+# `$이름` 바로 뒤에 다중바이트 문자가 오면 **셸 구현마다 이름 경계 판정이 갈린다**. 이 기계의
+# bash 5.2·dash는 이름을 거기서 끊지만, macOS가 `sh`로 쓰는 **bash 3.2는 뒤따르는 바이트를 이름에
+# 포함**해 `set -u`가 `unbound variable`로 죽인다 — v2.19.1 릴리즈 PR에서 `posix (macos-latest)`
+# 하나만 붉었고 **로컬 네 환경도 우분투 CI도 전부 초록**이었다(실측 수치의 단일 출처는
+# `docs/reports/debug-2.md`다 — 여기로 옮겨 적지 않는다). 로컬에서 영원히 초록인 부류라 **사람의
+# 눈이 아니라 기계가** 물어야 한다. 고치는 형태는 하나다 — 중괄호로 이름 경계를 명시한다.
+#
+# **무는 대상 집합의 명세(두 사본의 단일 기준)**: `$ROOT/tests`와 `$ROOT/hooks` 아래 **모든 깊이**의
+# **정규 파일** 중 이름이 `.sh` 또는 `.ps1`로 끝나는 것 — ⑴ 확장자 비교는 **대소문자 구분**
+# (`.SH`·`.PS1`은 발견하지 않는다) ⑵ **숨김 항목도 본다** ⑶ 디렉터리는 세지 않는다. `ps1_files_in`이
+# 이미 쓰는 명세와 **같은 형태**이고 확장자만 둘로 넓혔다 — 명세를 새로 만들지 않고
+# **같은 명세를 재사용**한다. 다만 `F7`이 물고 있는 것은 `ps1_files_in`이지 **이 파트가 쓰는
+# `runner_src_files_in`이 아니다** — 그 틈을 `J6`이 자기 픽스처로 직접 문다(M48 재작업 1).
+#
+# **판정**: ⑴ 줄의 첫 비-공백 문자(**ASCII 공백·탭만**)가 `#`이면 **주석 줄이라 판정하지 않는다** —
+# M48-T01 실측에서 원시 매치 다섯이 **전부** 주석이었고, 그중 하나는 **이 규율 자체를 설명하는 주석**
+# 이라 제외가 없으면 규율을 적은 자리가 규율 위반으로 붉어진다. ⑵ 나머지 줄에서 `$` + 이름 첫 글자
+# `[A-Za-z_]` + 이름 나머지 `[A-Za-z0-9_]*` 직후에 **byte>127**이 오면 위반이다. ⑶ 중괄호 형태는
+# `$` 다음이 `{`라 **구조적으로** 매치되지 않는다 — 이것이 이 판정의 핵심 성질이고 `J5`가 문다.
+# CR(byte 13)은 무시한다(`F5`의 `tr -d` 자리·ps1이 바이트 13을 건너뛰는 자리와 같다).
+#
+# **경계**(규약이 같은 문장으로 적는다): 이 판정은 **정적**이라 변수 경유·`eval`로 조립한 명령은 보지
+# 못한다. 주석 줄은 실행되지 않으므로 결함이 아니고 판정에서 제외한다.
+#
+# **판정은 함수 하나에만 둔다** — 실물(`J3`)과 픽스처 통제(`J4`·`J5`)가 **같은 함수**를 부른다.
+# M46의 `F16`이 판정을 인라인으로 재구현해 동어반복이 됐던 자리라 규약이 이 형태를 요구한다.
+#
+# 바이트 범위는 `NONASCII_RE`(`F5`가 쓰는 8진 이스케이프 클래스)를 **그대로 재사용**한다 — 두 곳에서
+# 따로 만들면 그 순간 두 번째 선언처가 생긴다. `LC_ALL=C`를 같은 줄에 걸어 바이트 비교로 고정한다.
+runner_src_files_in() { find "$1" -type f \( -name '*.sh' -o -name '*.ps1' \) 2>/dev/null; }
+# **스캔 루트의 단일 선언처**는 아래 한 줄이다. `J6`이 무는 것은 `runner_src_files_in`(디렉터리 하나의
+# 발견 명세)이라 **어느 루트를 훑는가**는 그 케이스가 보지 못한다 — M48 리뷰 라운드 0이 실측한 구멍이
+# 정확히 그 자리였고(루트에서 `hooks`를 빼도 초록), 라운드 1의 `J6`도 그 축은 닫지 못했다. 그래서
+# `J1`을 **루트마다** 묻는 형태로 세운다 — 루트를 지우면 자리 수가 줄어 기댓값과 어긋난다.
+VARBOUND_ROOTS='tests hooks'
+runner_src_files() { for _vbr in $VARBOUND_ROOTS; do runner_src_files_in "$ROOT/$_vbr"; done; }
+varbound_root_probe() { # → 루트마다 "ok"/"no"를 `/`로 이어 붙인 한 줄
+    _vbo=''
+    for _vbr in $VARBOUND_ROOTS; do
+        if [ "$(runner_src_files_in "$ROOT/$_vbr" | grep -c .)" -gt 0 ]; then _vbs=ok; else _vbs=no; fi
+        _vbo="${_vbo:+$_vbo/}$_vbs"
+    done
+    printf '%s
+' "$_vbo"
+}
+VARBOUND_RE='\$[A-Za-z_][A-Za-z0-9_]*'"$NONASCII_RE"
+varbound_scan_in() { # <파일> → 위반 줄("파일:줄번호:본문"). 주석 줄은 제외한다.
+    [ -f "$1" ] || return 0
+    tr -d '\r' < "$1" | LC_ALL=C grep -nE "$VARBOUND_RE" 2>/dev/null | while IFS= read -r _nl; do
+        _lno=${_nl%%:*}
+        _body=${_nl#*:}                                # grep -n 의 첫 콜론까지만 — 경로가 섞이지 않는다
+        is_comment_line "$_body" && continue
+        printf '%s:%s:%s\n' "$1" "$_lno" "$_body"
+    done
+}
+varbound_probe() { # <파일> → "<원시 매치 줄 수>/<위반 줄 수>" — 주석 제외 **전후**를 함께 낸다
+    printf '%s/%s\n' "$(tr -d '\r' < "$1" | LC_ALL=C grep -cE "$VARBOUND_RE" 2>/dev/null)" \
+                     "$(varbound_scan_in "$1" | grep -c .)"
+}
+# **목록은 파일로 직렬화해 되읽는다** — 단어 분할로 소비하면 경로에 공백이 하나만 있어도 목록이 조각나
+# 모든 경로가 열리지 않고, 그러면 위반이 있어도 `J3`이 절대 실패할 수 없다(`F6`이 같은 실패를 겪었다).
+varbound_scan() { # → "<검사한 파일 수> <위반 줄 수>"
+    _list="$SBX/runnersrc.txt"
+    runner_src_files > "$_list"
+    _n=0; _c=0
+    while IFS= read -r _f; do
+        [ -n "$_f" ] && [ -f "$_f" ] || continue
+        _n=$((_n + 1))
+        _c=$((_c + $(varbound_scan_in "$_f" | grep -c .)))
+    done < "$_list"
+    echo "$_n $_c"
+}
+VBSCAN=$(varbound_scan)
+NVBFOUND=$(runner_src_files | grep -c .)
+NVBCHECKED=${VBSCAN% *}
+NVBBAD=${VBSCAN#* }
+# 실패하면 **어느 파일 몇 줄인지 이름을 찍는다**(개수만 보면 원인을 찾는 데 다시 사람이 든다).
+if [ "$NVBBAD" != "0" ]; then
+    while IFS= read -r _f; do varbound_scan_in "$_f"; done < "$SBX/runnersrc.txt" |
+        sed 's|^|  -> variable name boundary, brace it: |'
+fi
+# (J1) 발견 positive-control — 발견이 0이면 아래가 `0 == 0`으로 공허 통과한다(체크리스트 ⑴).
+chk "J1: 러너 소스 발견 positive-control(루트마다 >0)" "$(varbound_root_probe)" "ok/ok"
+# (J2) 발견 ↔ 소비 대조 — `J1`이 보지 못하는 축이다(*"발견은 다 하고 소비에서 전부 흘림"*).
+# 소비는 **직렬화한 목록을 되읽어** 돌고 이 비교는 **새 열거**와 맞춘다 — 같은 열거를 두 번 해서
+# 자기와 비교하면 그것은 통제가 아니라 항등식이라 어떤 입력에서도 붉어지지 않는다(`F6`과 동형).
+chk "J2: 스캔한 파일 수 == 발견한 파일 수" "$NVBCHECKED" "$NVBFOUND"
+# (J3) 금지형 본 검사 — 살아 있는 위반은 **0건**이다(M48-T01 실측). 그래서 아래 픽스처 둘이 공허를 막는다.
+chk "J3: 러너 소스의 변수 이름 경계 위반 0건" "$NVBBAD" "0"
+# (J4·J5) 픽스처 통제. **픽스처는 샌드박스에서 8진 이스케이프로 조립한다** — 위반 문자열을 이 소스에
+# 리터럴로 쓰면 검사가 **자기 자신을 문다**(M45의 `F12`·`F13`이 정확히 그 자리를 밟았고 그때는
+# `locale-exempt:` 선언으로 처분했다. 여기서는 선언 없이 **소스에 그 바이트를 두지 않는 것**으로 닫는다 —
+# 아래 리터럴에서 이름 뒤에 오는 것은 백슬래시라 판정식이 매치하지 않는다). 픽스처를 `tests/`·`hooks/`
+# 아래에 두면 발견 집합에 섞여 `J3`이 붉어지므로 반드시 샌드박스 안에 둔다.
+# 심는 바이트는 U+AC74(UTF-8 `EA B1 B4`)이고 양 사본이 **같은 바이트**를 쓴다.
+printf 'echo "x $NANN\352\261\264 y"\n' > "$SBX/varfx1.sh"
+chk "J4: 통제 — 심은 경계 위반을 잡는다" "$(varbound_scan_in "$SBX/varfx1.sh" | grep -c .)" "1"
+# (J5) 두 축을 한 케이스로 문다 — 기댓값 `1/0`의 앞자리는 **원시 매치**, 뒷자리는 **판정 결과**다.
+# ⑴ 중괄호 줄이 구조적으로 매치되지 않으므로 원시 매치는 주석 줄 하나뿐이고(앞자리가 2가 되면
+# 중괄호 성질이 깨진 것이다) ⑵ 그 하나가 주석 제외로 사라진다(뒷자리가 1이 되면 주석 제외가 죽은
+# 것이다). 뒷자리만 보면 스캔이 통째로 죽어도 `0`이라 초록이므로 **앞자리가 그 공허를 막는다**.
+printf 'echo "x ${NANN}\352\261\264 y"\n#  note $NANN\352\261\264 tail\n' > "$SBX/varfx0.sh"
+chk "J5: 통제 — 중괄호 형태와 주석 줄은 잡지 않는다" "$(varbound_probe "$SBX/varfx0.sh")" "1/0"
+# (J6) **발견 명세를 픽스처로 문다**(M48 재작업 1 — 리뷰 권장 3). `J2`는 발견과 소비를 **같은 함수**로
+# 재므로 명세 자체를 무는 것이 하나도 없었다. **이 케이스가 무는 것은 디렉터리 하나의 명세이지
+# 「어느 루트를 훑는가」가 아니다** — 라운드 0이 실측한 그 구멍(루트에서 `hooks/`를 빼면 24 → 22 파일로
+# 줄 뿐 양 사본 초록)은 이 케이스가 아니라 **`J1`을 루트마다 묻게 바꿔** 닫았다.
+# `F7`이 `ps1_files_in`에 하는 것과 **같은 형태**로 `runner_src_files_in`을
+# 샌드박스 트리에 걸고 **정렬된 basename**을 대조한다 — 수가 아니라 **이름**을 보는 이유는 숨김을
+# 빠뜨리고(-1) 대문자를 더하면(+1) 개수가 상쇄돼 초록이 되기 때문이다.
+runner_disc_fixture() { # <dir> 만들고 그 경로를 출력
+    _d="$SBX/runnerdisc"
+    rm -rf "$_d" 2>/dev/null
+    mkdir -p "$_d/sub"
+    : > "$_d/a.sh"           # 평범한 것 — 발견된다
+    : > "$_d/b.SH"           # 대문자 확장자 — 발견되지 않는다(대소문자 구분)
+    : > "$_d/c.PS1"          # 대문자 확장자 — 발견되지 않는다
+    : > "$_d/.hidden.ps1"    # 숨김(POSIX는 점 이름, Windows는 숨김 속성) — 발견된다
+    : > "$_d/sub/d.ps1"      # 하위 깊이 — 발견된다
+    mkdir -p "$_d/dir.ps1" "$_d/dir.sh"   # 이름만 확장자인 디렉터리 — 발견되지 않는다
+    echo "$_d"
+}
+chk "J6: 통제 — 발견 명세를 픽스처로 문다(대소문자·숨김·디렉터리)" \
+    "$(runner_src_files_in "$(runner_disc_fixture)" | basename_join)" ".hidden.ps1|a.sh|d.ps1"
+
+# === Part K (M48) — 하니스 공통 통제 보유 대조 ==========================
+# **기존 하니스가 공통으로 가진 통제를 새 하니스가 빠뜨린다** — M47 사이클의 반환 셋이 전부 이 부류였고
+# 그 대조를 지금까지 **사람이 매번** 했다. 단일 원본은 `docs/conventions.md`의 "새 하니스가 갖출 공통 통제 (목록 대조 — 기계가 문다)" 절이며, 이 파트는 그 절의 선언 블록을 **읽기만** 한다.
+#
+# **선언 추출 명세**: 줄 선두가 `<!-- harness-control: `이고 줄 끝이 ` -->`인 줄. 필드 구분자는
+# ` :: `(공백·콜론콜론·공백)이고 순서는 <이름> · <sh 토큰> · <ps1 토큰> · <면제 쉼표목록>이다.
+# **토큰은 고정 문자열로 대조한다**(정규식이 아니다 — 값에 `$`·`{`·`'`가 들어 있어 정규식으로 읽으면
+# 뜻이 달라진다). `-`는 *그 셸에는 요구하지 않음*, `none`은 *면제 없음*이다. 선언 줄은 **네 필드를 다
+# 갖고 어느 필드도 비어 있지 않아야** 한다(`K2`의 뒷자리) — 빈 넷째 필드는 *면제 없음*과
+# *적는 것을 잊었다*를 구별하지 못해 규약의 *"빈 칸으로 두지 않는다"* 가 무집행이 된다.
+#
+# **토큰 대조는 주석 줄이 아닌 줄에서만 한다**(M48 재작업 1 — 리뷰 차단 2). 술어는 Part J와 **같다**
+# (`COMMENT_RE`에서 파생한 `noncomment_lines`). 주석까지 세면 `cases:`가 **일곱 하니스 전부의 주석에**
+# 있어(하니스마다 복붙된 *"첫 매치 고정 — sed의 선행 `.*`는 탐욕이라…"* 정형 문구) **실제 대조 코드를
+# 잃어도 보유로 판정**됐고, 그래서 이 파트가 자기 존재 이유로 든 M47 1회차 반환을 정작 막지 못했다.
+# 주석 제외 후에도 면제 집합은 **그대로**고 일곱 하니스가 전부 보유다 — 수치의 단일 출처는
+# `docs/reports/M48-impl.md`다.
+#
+# **하니스 발견 명세**: `$ROOT/tests` **바로 아래(깊이 1)** 디렉터리 중 `run.sh`와 `run.ps1`을 **둘 다**
+# 가진 것. 러너가 없는 디렉터리(`tests/lib`)는 하니스가 아니라 제외된다. 이름 비교·정렬은 `LC_ALL=C`로
+# 고정한다(ps1 사본은 ordinal 정렬로 같은 순서를 낸다). **하니스가 늘면 대상이 는다** — 목록을
+# 하드코딩하지 않는 이유가 그것이다.
+#
+# **판정 형태를 규약 선언 읽기로 택한 이유**: 하니스끼리 교차 비교하면 **기준 하니스가 낡을 때 같이
+# 낡고**, *"일곱 종 전부 빠뜨림"* 과 *"일곱 종 전부 보유"* 를 구별하지 못한다. 규약 선언 읽기는 대신
+# **선언 줄 유일성**이 필요하며(`K2`) 그 선례가 `F14`·`I18`·`I19`다.
+#
+# **자기 참조**: `tests/discover` 자신도 대상 집합에 들어간다 — 네 통제를 전부 보유하므로 역설이 없고
+# **자기 제외를 넣지 않는다**. 자기를 빼면 이 검사는 자기 자신에게만 공허해진다.
+#
+# **경계**(규약이 같은 문장으로 적는다): 이 검사가 무는 것은 **토큰의 존재**이지 그 통제가 **실제로
+# 동작하는가**가 아니다. 토큰을 두고 도달하지 못하게 만들면 이 파트는 초록이다 — 그 층은
+# `tests/mutation`과 규약이 요구하는 **케이스별 되돌림 실측**(사람)이 덮는다.
+HC_DECL_RE='^<!-- harness-control: .* -->$'
+hc_lines() { LC_ALL=C grep -E "$HC_DECL_RE" "$CONV" 2>/dev/null; }
+hc_field() { # <선언 줄> <필드 번호> → 그 필드
+    printf '%s' "$1" | LC_ALL=C sed 's|^<!-- harness-control: ||; s| -->$||' |
+        awk -F' :: ' -v n="$2" '{ print $n }'
+}
+harness_dirs_in() { # <디렉터리> → run.sh·run.ps1을 둘 다 가진 깊이 1 디렉터리(정렬)
+    for _d in "$1"/*; do
+        [ -d "$_d" ] || continue
+        [ -f "$_d/run.sh" ] && [ -f "$_d/run.ps1" ] || continue
+        printf '%s\n' "$_d"
+    done | LC_ALL=C sort
+}
+# **판정 함수는 하니스 목록을 인자로 받는다** — 실물(`K4`)과 픽스처(`K5`)에 **같은 코드**를 걸기
+# 위해서다(`F7`의 `ps1_files_in`·`F16`의 `entry_cap_verdict`와 같은 형태). 픽스처를 검사 대상과 다른
+# 코드로 재면 그 픽스처는 아무것도 증명하지 못한다.
+hc_missing() { # <하니스 목록 파일> → 미보유 조합("하니스:셸:통제")
+    while IFS= read -r _hd; do
+        [ -n "$_hd" ] || continue
+        _hn=${_hd##*/}
+        hc_lines | while IFS= read -r _l; do
+            _cn=$(hc_field "$_l" 1); _tsh=$(hc_field "$_l" 2)
+            _tps=$(hc_field "$_l" 3); _tex=$(hc_field "$_l" 4)
+            case ",$_tex," in *",$_hn,"*) continue ;; esac       # 면제로 선언된 하니스는 빠진다
+            if [ "$_tsh" != "-" ]; then
+                noncomment_lines "$_hd/run.sh" | LC_ALL=C grep -qF -e "$_tsh" ||
+                    printf '%s:sh:%s\n' "$_hn" "$_cn"
+            fi
+            if [ "$_tps" != "-" ]; then
+                noncomment_lines "$_hd/run.ps1" | LC_ALL=C grep -qF -e "$_tps" ||
+                    printf '%s:ps1:%s\n' "$_hn" "$_cn"
+            fi
+        done
+    done < "$1"
+}
+hc_orphan_exempt() { # <하니스 목록 파일> → 실재하지 않는 하니스를 지목한 면제 이름
+    while IFS= read -r _hd; do [ -n "$_hd" ] && printf '%s\n' "${_hd##*/}"; done < "$1" > "$SBX/hcnames.txt"
+    hc_lines | while IFS= read -r _l; do
+        _tex=$(hc_field "$_l" 4)
+        [ "$_tex" = "none" ] && continue
+        printf '%s\n' "$_tex" | tr ',' '\n' | while IFS= read -r _e; do
+            [ -n "$_e" ] || continue
+            LC_ALL=C grep -qxF -e "$_e" "$SBX/hcnames.txt" || printf '%s\n' "$_e"
+        done
+    done
+}
+hc_wellformed() { # <선언 줄> → 네 필드가 다 있고 어느 것도 비어 있지 않으면 0
+    _nf=$(printf '%s' "$1" | LC_ALL=C sed 's|^<!-- harness-control: ||; s| -->$||' |
+          awk -F' :: ' '{ print NF }')
+    [ "$_nf" = "4" ] || return 1
+    for _i in 1 2 3 4; do [ -n "$(hc_field "$1" "$_i")" ] || return 1; done
+    return 0
+}
+harness_dirs_in "$ROOT/tests" > "$SBX/harnesses.txt"
+NHCDECL=$(hc_lines | grep -c .)
+NHCNAME=$(hc_lines | while IFS= read -r _l; do hc_field "$_l" 1; done | LC_ALL=C sort -u | grep -c .)
+NHCWELL=$(hc_lines | while IFS= read -r _l; do hc_wellformed "$_l" && echo ok; done | grep -c .)
+NHARNESS=$(grep -c . "$SBX/harnesses.txt")
+NHCMISS=$(hc_missing "$SBX/harnesses.txt" | grep -c .)
+[ "$NHCMISS" = "0" ] || hc_missing "$SBX/harnesses.txt" | sed 's|^|  -> harness control token missing: |'
+# (K1) 선언 추출 positive-control — 선언 블록이 사라지면 아래 루프가 통째로 돌지 않아 `0 == 0`이 된다.
+chk "K1: harness-control 선언 추출 positive-control(>0)" "$([ "$NHCDECL" -gt 0 ] && echo ok || echo no)" "ok"
+# (K2) 선언 **이름 유일성 + 형식 정합**(체크리스트 ⑵). **복합 기댓값**이다 — 앞자리는
+# **유일 이름 수**(같은 이름이 둘이면 산문 한 줄이 목록을 통째로 바꾼다), 뒷자리는 **네 필드를 다 갖고
+# 어느 필드도 비어 있지 않은 줄 수**다. 뒷자리가 없으면 빈 넷째 필드가 `none`과 **완전히 같게**
+# 동작해 규약의 *"빈 칸으로 두지 않는다"* 가 무집행이 된다(M48 리뷰 사소 8).
+chk "K2: 통제 이름 유일성 + 선언 줄 형식 정합(네 필드·빈 칸 없음)" "$NHCNAME/$NHCWELL" "$NHCDECL/$NHCDECL"
+# (K3) 하니스 발견 positive-control — 발견이 0이면 `K4`가 공허 통과한다.
+chk "K3: 하니스 발견 positive-control(>0)" "$([ "$NHARNESS" -gt 0 ] && echo ok || echo no)" "ok"
+# (K4) 본 검사 — 면제를 뺀 모든 (하니스 x 셸) 조합이 자기 몫의 토큰을 갖는다.
+chk "K4: 면제 제외 하니스x셸 조합의 통제 토큰 미보유 0건" "$NHCMISS" "0"
+# (K5) 픽스처 통제 — 살아 있는 미보유가 0건이라 이것이 공허를 막는다. 기댓값 `1/caught`의 앞자리는
+# **발견 명세**(러너 하나뿐인 미끼 디렉터리는 하니스가 아니다)를, 뒷자리는 **판정**을 문다.
+# 픽스처 하니스는 토큰을 **주석으로만** 갖는다 — 주석 제외를 되돌리면 뒷자리가 `missed`로 바뀌어
+# 이 케이스가 붉어진다(차단 2가 닫혔다는 되돌림 증거가 이 자리다).
+hc_fixture() { # 토큰을 **주석에만** 가진 하니스 + 러너 하나뿐인 미끼를 만들고 목록 파일 경로를 출력
+    _d="$SBX/hcfix"
+    rm -rf "$_d" 2>/dev/null
+    mkdir -p "$_d/zz-fake" "$_d/zz-decoy"
+    # `zz-fake`는 선언된 토큰을 **전부 주석으로만** 갖는다 — 그래서 `K5`는 *"토큰 없음"* 뿐 아니라
+    # **"주석에만 있음"** 까지 문다(주석 제외가 죽으면 뒷자리가 `missed`가 된다). 주석 줄은
+    # **선언 블록에서 파생**한다 — 토큰을 이 소스에 리터럴로 적으면 그 순간 이 러너 자신이 그 토큰을
+    # 코드 줄에 갖게 돼 자기 대조가 헐거워진다(`J4`·`J5`가 바이트를 소스에 두지 않는 것과 같은 규율).
+    : > "$_d/zz-fake/run.sh"
+    : > "$_d/zz-fake/run.ps1"
+    hc_lines | while IFS= read -r _l; do
+        _ftsh=$(hc_field "$_l" 2); _ftps=$(hc_field "$_l" 3)
+        [ "$_ftsh" = "-" ] || printf '# %s in a comment only\n' "$_ftsh" >> "$_d/zz-fake/run.sh"
+        [ "$_ftps" = "-" ] || printf '# %s in a comment only\n' "$_ftps" >> "$_d/zz-fake/run.ps1"
+    done
+    printf 'echo hello\n'       >> "$_d/zz-fake/run.sh"
+    printf 'Write-Host hello\n' >> "$_d/zz-fake/run.ps1"
+    printf 'echo hello\n'       >  "$_d/zz-decoy/run.sh"    # run.ps1 없음 → 하니스가 아니다
+    harness_dirs_in "$_d" > "$_d/list.txt"
+    printf '%s\n' "$_d/list.txt"
+}
+HCFIXLIST=$(hc_fixture)
+HCFIXN=$(grep -c . "$HCFIXLIST")
+HCFIXR=$([ "$(hc_missing "$HCFIXLIST" | grep -c .)" -gt 0 ] && echo caught || echo missed)
+chk "K5: 통제 — 토큰이 주석에만 있는 픽스처 하니스를 같은 함수가 잡는다" "$HCFIXN/$HCFIXR" "1/caught"
+# (K6) 면제 실재 — 면제 목록이 지목한 이름이 **실재하는 하니스**여야 한다. 하니스 이름이 바뀌거나
+# 사라지면 면제가 고아가 되어 그 통제가 아무도 모르게 헐거워진다(Part H의 면제 실재 검사와 같은 층).
+chk "K6: 면제 목록이 지목한 하니스 실재(고아 0)" "$(hc_orphan_exempt "$SBX/harnesses.txt" | grep -c .)" "0"
 
 chk "F1: README cases 선언 == 실제 케이스 수" "$(declared_cases)" "$((pass + fail + 1))"
 
