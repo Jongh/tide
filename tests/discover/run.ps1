@@ -1845,6 +1845,372 @@ try {
     $entryFixR = if ((EntryCapVerdict $overPath $ENTRY_CAP) -like 'over*') { 'caught' } else { 'missed' }
     Chk "F16: control -- verdict function catches the over-cap fixture" $entryFixR 'caught'
 
+
+    # === Part J (M48) -- variable-name boundary in runner sources =========
+    # When a multi-byte character follows `$name` directly, SHELLS DISAGREE ON WHERE THE NAME ENDS.
+    # bash 5.2 and dash on this machine stop the name there, but the bash 3.2 that macOS ships as `sh`
+    # PULLS THE FOLLOWING BYTES INTO THE NAME and `set -u` kills the runner with "unbound variable".
+    # On the v2.19.1 release PR only `posix (macos-latest)` went red -- all four local environments and
+    # the ubuntu CI leg were green (the single source for those numbers is docs/reports/debug-2.md; they
+    # are NOT copied here). A class that stays green locally forever has to be bitten by a machine, not
+    # by a pair of eyes. There is exactly one fix: brace the name to make the boundary explicit.
+    #
+    # DISCOVERY SPEC -- THE ONE DEFINITION BOTH COPIES IMPLEMENT: every regular file at any depth under
+    # $ROOT/tests and $ROOT/hooks whose name ends in '.sh' or '.ps1', where (1) the extension compares
+    # CASE-SENSITIVELY ('.SH' / '.PS1' are NOT discovered), (2) HIDDEN items are included, (3)
+    # directories are not counted. This is the SAME spec Ps1FilesIn already implements, widened to two
+    # extensions -- this part does not invent a second spec. What F7 bites with a fixture is Ps1FilesIn,
+    # NOT the RunnerSrcFilesIn this part uses; J6 closes that gap with its own fixture (M48 rework 1).
+    #
+    # VERDICT: (1) a line whose first non-blank character (ASCII space/tab only) is '#' is a COMMENT and
+    # is not judged -- in the M48-T01 measurement ALL five raw matches were comments, and one of them is
+    # the comment that EXPLAINS this very rule, so without the exclusion the place that writes the rule
+    # down goes red for violating it. (2) on the remaining lines, '$' + name-start [A-Za-z_] + name-rest
+    # [A-Za-z0-9_]* followed immediately by a byte > 127 is a violation. (3) the braced form cannot match
+    # STRUCTURALLY, because the character after '$' is '{' -- that is the core property of this verdict
+    # and J5 bites it. CR (byte 13) is ignored, matching the twin's `tr -d` seat.
+    #
+    # BOUNDARY (the convention states the same sentence): the verdict is STATIC, so commands assembled
+    # through variables or `eval` are invisible to it. Comment lines never execute, so they are not a
+    # defect and are excluded.
+    #
+    # THE VERDICT LIVES IN ONE FUNCTION -- the real scan (J3) and both fixture controls (J4, J5) call it.
+    # M46's F16 re-implemented its verdict inline and became a tautology; the convention now requires
+    # this shape.
+    #
+    # ASCII-ONLY SOURCE: the byte range is assembled from CODE POINTS, exactly as $CAP_UNIT and the Uni
+    # helper do. Bytes are read raw and mapped 1:1 onto U+0000..U+00FF through ISO-8859-1, so the .NET
+    # regex class [U+0080-U+00FF] is BYTE-EQUIVALENT to the twin's octal [\200-\377] under LC_ALL=C.
+    # Matching is done with -cmatch (case-sensitive), which is what `grep -E` does on the other side.
+    $LATIN1 = [System.Text.Encoding]::GetEncoding(28591)
+    $VARBOUND_RE = '\$[A-Za-z_][A-Za-z0-9_]*[' + [char]0x0080 + '-' + [char]0x00FF + ']'
+    function RunnerSrcFilesIn($dir) {
+        if (-not (Test-Path $dir)) { return @() }
+        return @(Get-ChildItem -Path $dir -Recurse -Force -File | Where-Object {
+            $_.Name.EndsWith('.sh', [System.StringComparison]::Ordinal) -or
+            $_.Name.EndsWith('.ps1', [System.StringComparison]::Ordinal) })
+    }
+    # THE SCAN ROOTS ARE DECLARED IN ONE PLACE below. What J6 bites is RunnerSrcFilesIn (the spec for a
+    # single directory), so WHICH ROOTS GET WALKED is invisible to that case -- and that is exactly the
+    # hole the M48 round-0 review measured (drop 'hooks' from the roots and both copies stayed green);
+    # round 1's J6 did not close that axis either. So J1 asks the question PER ROOT: delete a root and
+    # the composite loses a slot, which no longer equals the expected value.
+    $VARBOUND_ROOTS = @('tests', 'hooks')
+    function RunnerSrcFiles() {
+        $acc = @()
+        foreach ($vbRoot in $VARBOUND_ROOTS) { $acc += @(RunnerSrcFilesIn (Join-Path $ROOT $vbRoot)) }
+        return $acc
+    }
+    function VarBoundRootProbe() {   # -> 'ok'/'no' per root, joined with '/'
+        $acc = @()
+        foreach ($vbRoot in $VARBOUND_ROOTS) {
+            $acc += $(if ((@(RunnerSrcFilesIn (Join-Path $ROOT $vbRoot))).Count -gt 0) { 'ok' } else { 'no' })
+        }
+        return ($acc -join '/')
+    }
+    function VarBoundLines($path) {   # raw bytes -> Latin-1 chars -> lines, CR dropped
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return @() }
+        $text = $LATIN1.GetString([System.IO.File]::ReadAllBytes($path))
+        return @($text.Replace([string][char]13, '') -split "`n")
+    }
+    # ONE SEAT FOR THE COMMENT PREDICATE. Part J (variable-name boundary) and Part K (shared control
+    # tokens) both need "is this line a comment?", and writing it twice creates a second declaration site
+    # the moment one of them is edited. The predicate: the first non-blank character (ASCII SPACE OR TAB
+    # ONLY, matching the twin's [[:blank:]] under LC_ALL=C) is '#'.
+    function IsCommentLine([string]$l) { return ($l -match '^[ \t]*#') }
+    function VarBoundScanIn($path) {  # violating lines -> "path:lineno"
+        $out = @(); $i = 0
+        foreach ($l in (VarBoundLines $path)) {
+            $i++
+            if (IsCommentLine $l) { continue }
+            if ($l -cmatch $VARBOUND_RE) { $out += ("{0}:{1}" -f $path, $i) }
+        }
+        return $out
+    }
+    function VarBoundProbe($path) {   # "<raw matches>/<violations>" -- before AND after comment exclusion
+        $raw = 0
+        foreach ($l in (VarBoundLines $path)) { if ($l -cmatch $VARBOUND_RE) { $raw++ } }
+        return ("{0}/{1}" -f $raw, (@(VarBoundScanIn $path)).Count)
+    }
+    # CONSUME THROUGH A SERIALIZED LIST, exactly as the twin does. Iterating the discovery result directly
+    # and comparing that count with a fresh enumeration is an IDENTITY, not a control -- it cannot go red
+    # on any input (F6 lived in that state once).
+    function VarBoundScan() {         # -> @(checked, bad)
+        $list = Join-Path $sbx 'runnersrc.txt'
+        [System.IO.File]::WriteAllLines($list, @(RunnerSrcFiles | ForEach-Object { $_.FullName }),
+            (New-Object System.Text.UTF8Encoding($false)))
+        $checked = 0; $bad = 0
+        foreach ($p in [System.IO.File]::ReadAllLines($list)) {
+            if ([string]::IsNullOrEmpty($p)) { continue }
+            if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { continue }
+            $checked++
+            $bad += (@(VarBoundScanIn $p)).Count
+        }
+        return @($checked, $bad)
+    }
+    $vbScan = VarBoundScan
+    $vbFound = (@(RunnerSrcFiles)).Count
+    if ([string]$vbScan[1] -ne '0') {
+        foreach ($vbPath in [System.IO.File]::ReadAllLines((Join-Path $sbx 'runnersrc.txt'))) {
+            foreach ($vbHit in (VarBoundScanIn $vbPath)) { Write-Host ("  -> variable name boundary, brace it: " + $vbHit) }
+        }
+    }
+    # (J1) discovery positive control -- if discovery returns nothing, everything below passes 0 == 0.
+    Chk "J1: runner source discovery positive control (>0 per root)" (VarBoundRootProbe) 'ok/ok'
+    # (J2) discovery vs consumption -- the axis J1 cannot see ("discovery returned everything and
+    # consumption dropped it all"). Consumption re-reads the SERIALIZED list; this compares it against a
+    # FRESH enumeration, so anything that loses a path splits the two numbers (same shape as F6).
+    Chk "J2: files scanned == files discovered" ([string]$vbScan[0]) ([string]$vbFound)
+    # (J3) the prohibition itself -- live violations are 0 (measured in M48-T01), which is exactly why the
+    # two fixture controls below exist.
+    Chk "J3: no variable-name boundary violation in runner sources" ([string]$vbScan[1]) '0'
+    # (J4/J5) fixture controls. THE FIXTURES ARE ASSEMBLED FROM BYTES IN THE SANDBOX: writing the
+    # offending string as a literal in this source would make the check BITE ITSELF (M45's F12/F13 stepped
+    # on that seat and had to declare an exemption; here it is closed by not putting those bytes in the
+    # source at all). The fixtures must live under the sandbox and never under tests/ or hooks/, or they
+    # join the discovery set and J3 goes red. The planted byte is U+AC74 (UTF-8 EA B1 B4) -- the SAME
+    # bytes the .sh twin writes with octal escapes.
+    $KOBYTES = [byte[]](0xEA, 0xB1, 0xB4)
+    $LFBYTE = [byte[]](0x0A)
+    function AsciiBytes([string]$s) { return [System.Text.Encoding]::ASCII.GetBytes($s) }
+    $varFx1 = Join-Path $sbx 'varfx1.sh'
+    [System.IO.File]::WriteAllBytes($varFx1,
+        [byte[]]((AsciiBytes 'echo "x $NANN') + $KOBYTES + (AsciiBytes ' y"') + $LFBYTE))
+    Chk "J4: control -- a planted boundary violation is caught" ([string](@(VarBoundScanIn $varFx1)).Count) '1'
+    # (J5) two axes in one case -- in the expected '1/0' the first field is the RAW match count and the
+    # second is the verdict. (1) the braced line cannot match structurally, so the only raw match is the
+    # comment line (a leading 2 means the brace property broke) and (2) that one match disappears through
+    # the comment exclusion (a trailing 1 means the comment exclusion died). The trailing field alone
+    # would stay 0 even if the scan died outright, so the leading field is what keeps this non-vacuous.
+    $varFx0 = Join-Path $sbx 'varfx0.sh'
+    [System.IO.File]::WriteAllBytes($varFx0,
+        [byte[]]((AsciiBytes 'echo "x ${NANN}') + $KOBYTES + (AsciiBytes ' y"') + $LFBYTE +
+                 (AsciiBytes '#  note $NANN') + $KOBYTES + (AsciiBytes ' tail') + $LFBYTE))
+    Chk "J5: control -- braced form and comment lines are not caught" (VarBoundProbe $varFx0) '1/0'
+    # (J6) BITE THE DISCOVERY SPEC WITH A FIXTURE (M48 rework 1 -- review recommendation 3). J2 measures
+    # discovery and consumption with the SAME function, so nothing bit the spec itself.
+    # WHAT J6 BITES IS THE SPEC FOR ONE DIRECTORY, NOT WHICH ROOTS GET WALKED -- the round-0 hole
+    # (drop 'hooks' from the roots and it goes 24 -> 22 files with both copies green) is closed by J1
+    # asking PER ROOT, not by this case. Run RunnerSrcFilesIn over a sandbox tree exactly as F7 runs
+    # Ps1FilesIn
+    # and compare SORTED BASENAMES rather than a count: dropping the hidden file (-1) while adding an
+    # uppercase one (+1) cancels out to the same count, which is why F7 looks at names.
+    # Hidden is expressed the way EACH PLATFORM expresses it, exactly as Ps1DiscFixture does: a leading
+    # dot on POSIX, plus the Hidden attribute where that exists.
+    function RunnerDiscFixture() {
+        $d = Join-Path $sbx 'runnerdisc'
+        if (Test-Path $d) { Remove-Item $d -Recurse -Force }
+        New-Item -ItemType Directory -Path (Join-Path $d 'sub') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $d 'dir.ps1') -Force | Out-Null   # a DIRECTORY
+        New-Item -ItemType Directory -Path (Join-Path $d 'dir.sh') -Force | Out-Null    # a DIRECTORY
+        foreach ($rdName in 'a.sh', 'b.SH', 'c.PS1', '.hidden.ps1', 'sub\d.ps1') {
+            [System.IO.File]::WriteAllText((Join-Path $d $rdName), '',
+                (New-Object System.Text.UTF8Encoding($false)))
+        }
+        try { (Get-Item -LiteralPath (Join-Path $d '.hidden.ps1') -Force).Attributes = 'Hidden' } catch { }
+        return $d
+    }
+    function RunnerDiscSpec($dir) {
+        $names = @(RunnerSrcFilesIn $dir | ForEach-Object { $_.Name })
+        [Array]::Sort($names, [System.StringComparer]::Ordinal)
+        return ($names -join '|')
+    }
+    Chk "J6: control -- the discovery spec bitten by a fixture (case, hidden, directories)" `
+        (RunnerDiscSpec (RunnerDiscFixture)) '.hidden.ps1|a.sh|d.ps1'
+
+    # === Part K (M48) -- shared harness controls, checked against a list ===
+    # A NEW HARNESS DROPS A CONTROL THE EXISTING ONES ALL HAVE -- all three M47 returns were of that
+    # class, and a human did that comparison by hand every round. The single source is the conventions
+    # section on the shared controls a new harness must carry; this part only READS its declaration block.
+    #
+    # DECLARATION EXTRACTION SPEC: a line that starts with '<!-- harness-control: ' and ends with ' -->'.
+    # Fields are separated by ' :: ' (blank, colon colon, blank) in the order <name>, <sh token>,
+    # <ps1 token>, <comma-separated exemptions>. TOKENS ARE COMPARED AS FIXED STRINGS, never as regexes --
+    # the values contain '$', '{' and a quote, which a regex would read as syntax. '-' means "not required
+    # in that shell" and 'none' means "no exemption". A declaration line must carry ALL FOUR FIELDS with
+    # NONE OF THEM EMPTY (K2's trailing field) -- an empty fourth field cannot tell "no exemption" from
+    # "forgot to write it", which leaves the convention's "never leave it blank" unenforced.
+    #
+    # TOKENS ARE COMPARED ONLY AGAINST NON-COMMENT LINES (M48 rework 1 -- review blocker 2). The predicate
+    # is the SAME one Part J uses (IsCommentLine). Counting comments made 'cases:' present in EVERY ONE of
+    # the seven harnesses through a copy-pasted comment, so a harness could LOSE ITS ACTUAL COMPARISON
+    # CODE and still be judged as carrying the control -- which is why this part failed to stop the very
+    # first of the three M47 returns it cites as its reason to exist. After the exclusion the exemption
+    # set is UNCHANGED and all seven still carry every control; the single source for those numbers is
+    # docs/reports/M48-impl.md.
+    #
+    # HARNESS DISCOVERY SPEC: a directory DIRECTLY under $ROOT/tests (depth 1) that has BOTH run.sh and
+    # run.ps1. A directory with no runner (tests/lib) is not a harness. Dot-named directories are skipped
+    # so this matches the POSIX glob on the twin (Get-ChildItem -Directory would otherwise include them --
+    # the same divergence Part B's skills/*/SKILL.md glob already had to pin), while -Force keeps
+    # attribute-hidden directories IN, which is what the twin's glob does. Order is ordinal on both
+    # sides. AS HARNESSES GROW THE TARGET SET GROWS -- that is why the list is never hardcoded.
+    #
+    # WHY READ A DECLARATION INSTEAD OF CROSS-COMPARING HARNESSES: cross-comparison GOES STALE WITH ITS
+    # REFERENCE and cannot tell "all seven dropped it" from "all seven have it". Reading a declaration
+    # needs declaration-line uniqueness instead (K2), whose precedents are F14, I18 and I19.
+    #
+    # SELF-REFERENCE: tests/discover is itself in the target set. It carries all four controls, so there
+    # is no paradox and NO SELF-EXCLUSION IS ADDED -- excluding itself would make the check vacuous
+    # exactly where it lives.
+    #
+    # BOUNDARY (the convention states the same sentence): this bites THE PRESENCE OF A TOKEN, not whether
+    # the control actually works. Leave the token in place and make it unreachable and this part stays
+    # green -- that layer is covered by tests/mutation and by the per-case revert measurement (a human)
+    # that the convention requires.
+    $HC_DECL_PREFIX = '<!-- harness-control: '
+    $HC_DECL_SUFFIX = ' -->'
+    function HcLines() {
+        return @([System.IO.File]::ReadAllLines($CONV) | Where-Object {
+            $_.Length -ge ($HC_DECL_PREFIX.Length + $HC_DECL_SUFFIX.Length) -and
+            $_.StartsWith($HC_DECL_PREFIX, [System.StringComparison]::Ordinal) -and
+            $_.EndsWith($HC_DECL_SUFFIX, [System.StringComparison]::Ordinal) })
+    }
+    function HcField([string]$line, [int]$n) {
+        $body = $line.Substring($HC_DECL_PREFIX.Length,
+            $line.Length - $HC_DECL_PREFIX.Length - $HC_DECL_SUFFIX.Length)
+        $f = @($body -split ' :: ')
+        if ($n -ge 1 -and $n -le $f.Count) { return $f[$n - 1] } else { return '' }
+    }
+    # -Force PLUS THE DOT-NAME FILTER IS EXACTLY THE POSIX GLOB on the twin. `for _d in "$1"/*` skips
+    # dot-named entries but has NO CONCEPT OF A HIDDEN ATTRIBUTE, so it still sees an attribute-hidden
+    # directory; a -Force-less Get-ChildItem here would not, and the two copies would enumerate different
+    # sets (containment is always sh > ps1, so a split is fail-loud -- but it is still a split, and the
+    # sibling RunnerSrcFilesIn / Ps1FilesIn already carry -Force for the same reason). M48 review issue 7.
+    function HarnessDirsIn($dir) {
+        if (-not (Test-Path $dir)) { return @() }
+        $out = @(Get-ChildItem -Path $dir -Directory -Force | Where-Object {
+            -not $_.Name.StartsWith('.', [System.StringComparison]::Ordinal) -and
+            (Test-Path -LiteralPath (Join-Path $_.FullName 'run.sh') -PathType Leaf) -and
+            (Test-Path -LiteralPath (Join-Path $_.FullName 'run.ps1') -PathType Leaf) } |
+            ForEach-Object { $_.FullName })
+        [Array]::Sort($out, [System.StringComparer]::Ordinal)
+        return $out
+    }
+    function FileHasToken([string]$path, [string]$tok) {   # FIXED STRING, ordinal, COMMENT LINES SKIPPED
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
+        foreach ($l in [System.IO.File]::ReadAllLines($path)) {
+            if (IsCommentLine $l) { continue }
+            if ($l.IndexOf($tok, [System.StringComparison]::Ordinal) -ge 0) { return $true }
+        }
+        return $false
+    }
+    # THE VERDICT TAKES THE HARNESS LIST AS A PARAMETER so the real set (K4) and the fixture (K5) run the
+    # SAME code (the shape F7's Ps1FilesIn and F16's EntryCapVerdict already use). Measuring a fixture
+    # with different code than the code under test proves nothing.
+    function HcMissing([string[]]$dirs) {                  # -> "<harness>:<shell>:<control>"
+        $out = @()
+        foreach ($hd in $dirs) {
+            if ([string]::IsNullOrEmpty($hd)) { continue }
+            $hn = Split-Path $hd -Leaf
+            foreach ($l in (HcLines)) {
+                $cn = HcField $l 1; $tsh = HcField $l 2; $tps = HcField $l 3; $tex = HcField $l 4
+                if ((',' + $tex + ',').Contains(',' + $hn + ',')) { continue }   # declared exemption
+                if ($tsh -ne '-' -and -not (FileHasToken (Join-Path $hd 'run.sh') $tsh)) {
+                    $out += ("{0}:sh:{1}" -f $hn, $cn)
+                }
+                if ($tps -ne '-' -and -not (FileHasToken (Join-Path $hd 'run.ps1') $tps)) {
+                    $out += ("{0}:ps1:{1}" -f $hn, $cn)
+                }
+            }
+        }
+        return $out
+    }
+    function HcOrphanExempt([string[]]$dirs) {             # exemptions naming a harness that does not exist
+        $names = @($dirs | ForEach-Object { Split-Path $_ -Leaf })
+        $out = @()
+        foreach ($l in (HcLines)) {
+            $tex = HcField $l 4
+            if ($tex -eq 'none') { continue }
+            foreach ($e in @($tex -split ',')) {
+                if ([string]::IsNullOrEmpty($e)) { continue }
+                $hit = $false
+                foreach ($n in $names) {
+                    if ([string]::Equals($n, $e, [System.StringComparison]::Ordinal)) { $hit = $true }
+                }
+                if (-not $hit) { $out += $e }
+            }
+        }
+        return $out
+    }
+    function HcWellFormed([string]$line) {   # exactly four fields, none of them empty
+        $body = $line.Substring($HC_DECL_PREFIX.Length,
+            $line.Length - $HC_DECL_PREFIX.Length - $HC_DECL_SUFFIX.Length)
+        $fields = @($body -split ' :: ')
+        if ($fields.Count -ne 4) { return $false }
+        foreach ($hcFld in $fields) { if ([string]::IsNullOrEmpty($hcFld)) { return $false } }
+        return $true
+    }
+    $hcDecls = @(HcLines)
+    $harnessList = @(HarnessDirsIn (Join-Path $ROOT 'tests'))
+    # ordinal dedup of the control names (a bare Sort-Object is banned and its uniqueness would be
+    # culture-sensitive anyway; this sorts with an ordinal comparer and counts the runs).
+    $hcNames = @($hcDecls | ForEach-Object { HcField $_ 1 })
+    [Array]::Sort($hcNames, [System.StringComparer]::Ordinal)
+    # NOTE: never bind a script-scope loop variable named $n here -- PowerShell variable names are
+    # case-insensitive, so $n and the command-skill count $N are the SAME variable (measured: the result
+    # line printed a control name instead of the count).
+    $hcUniq = 0; $hcPrev = $null
+    foreach ($hcNm in $hcNames) {
+        if ($null -eq $hcPrev -or -not [string]::Equals([string]$hcNm, [string]$hcPrev, [System.StringComparison]::Ordinal)) { $hcUniq++ }
+        $hcPrev = $hcNm
+    }
+    $hcWell = 0
+    foreach ($hcDl in $hcDecls) { if (HcWellFormed $hcDl) { $hcWell++ } }
+    $hcMiss = @(HcMissing $harnessList)
+    foreach ($hcMissLine in $hcMiss) { Write-Host ("  -> harness control token missing: " + $hcMissLine) }
+    # (K1) declaration extraction positive control -- if the block disappears the loop below never runs
+    # and everything passes 0 == 0.
+    Chk "K1: harness-control declaration extraction positive control (>0)" $(if ($hcDecls.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # (K2) declaration NAME UNIQUENESS plus DECLARATION SHAPE (checklist item 2). A COMPOUND EXPECTATION:
+    # the leading field is the unique-name count (two rows with one name and a single line of prose
+    # rewrites the whole list) and the trailing field is the number of lines that carry all four fields
+    # with none of them empty. Without the trailing field an EMPTY fourth field behaves EXACTLY like
+    # 'none', leaving the convention's "never leave it blank" unenforced (M48 review issue 8).
+    Chk "K2: control name uniqueness + declaration line shape (four fields, none empty)" `
+        ("{0}/{1}" -f $hcUniq, $hcWell) ("{0}/{1}" -f $hcDecls.Count, $hcDecls.Count)
+    # (K3) harness discovery positive control -- if discovery returns nothing K4 passes vacuously.
+    Chk "K3: harness discovery positive control (>0)" $(if ($harnessList.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # (K4) the check itself -- every (harness x shell) pair that is not exempt carries its token.
+    Chk "K4: no missing control token across harness x shell (exemptions aside)" ([string]$hcMiss.Count) '0'
+    # (K5) fixture control -- live misses are 0, so this is what keeps K4 from being vacuous. In the
+    # expected '1/caught' the first field bites the DISCOVERY SPEC (a decoy directory with only one runner
+    # is not a harness) and the second bites the VERDICT. The fixture harness carries EVERY DECLARED TOKEN
+    # BUT ONLY INSIDE COMMENTS, so this case now bites "token missing" AND "token in a comment only" --
+    # revert the comment exclusion and the trailing field flips to 'missed'. The comment lines are DERIVED
+    # FROM THE DECLARATION BLOCK rather than written as literals: a literal here would put those tokens on
+    # a CODE line of this very runner and loosen its own self-check (the same discipline that keeps J4/J5
+    # from putting their bytes in the source).
+    function HcFixture() {
+        $d = Join-Path $sbx 'hcfix'
+        if (Test-Path $d) { Remove-Item $d -Recurse -Force }
+        New-Item -ItemType Directory -Path (Join-Path $d 'zz-fake') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $d 'zz-decoy') -Force | Out-Null
+        $enc = New-Object System.Text.UTF8Encoding($false)
+        $fkSh = @(); $fkPs = @()
+        foreach ($hcFl in (HcLines)) {
+            $fkTsh = HcField $hcFl 2; $fkTps = HcField $hcFl 3
+            if ($fkTsh -ne '-') { $fkSh += ('# ' + $fkTsh + ' in a comment only') }
+            if ($fkTps -ne '-') { $fkPs += ('# ' + $fkTps + ' in a comment only') }
+        }
+        $fkSh += 'echo hello'
+        $fkPs += 'Write-Host hello'
+        [System.IO.File]::WriteAllText((Join-Path $d 'zz-fake/run.sh'),
+            (($fkSh -join "`n") + "`n"), $enc)
+        [System.IO.File]::WriteAllText((Join-Path $d 'zz-fake/run.ps1'),
+            (($fkPs -join "`n") + "`n"), $enc)
+        [System.IO.File]::WriteAllText((Join-Path $d 'zz-decoy/run.sh'), "echo hello`n", $enc)   # no run.ps1
+        return $d
+    }
+    $hcFixDirs = @(HarnessDirsIn (HcFixture))
+    $hcFixR = if ((@(HcMissing $hcFixDirs)).Count -gt 0) { 'caught' } else { 'missed' }
+    Chk "K5: control -- a comment-only-token fixture harness is caught by the same function" `
+        ("{0}/{1}" -f $hcFixDirs.Count, $hcFixR) '1/caught'
+    # (K6) exemption freshness -- a name in the exemption list must be a REAL harness. Rename or drop a
+    # harness and the exemption is orphaned, quietly loosening that control (same layer as Part H's
+    # exemption-freshness case).
+    Chk "K6: every exempted name is a real harness (orphans 0)" ([string](@(HcOrphanExempt $harnessList)).Count) '0'
+
     Chk "F1: README cases declaration == actual case count" (DeclaredCases) ([string]($script:pass + $script:fail + 1))
 
     Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) (actual command skills N=$N) [runtime: PowerShell $($PSVersionTable.PSVersion) $($PSVersionTable.PSEdition)]"
