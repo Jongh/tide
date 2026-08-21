@@ -1640,6 +1640,16 @@ printf 'x=$(cat a b | sort -u)\n' > "$SBX/locfx.sh"   # locale-exempt: fixture-s
 chk "F12: 통제 — 주입한 미고정 sh 사이트를 잡는다" "$(locale_scan_in "$SBX/locfx.sh" "$LOCALE_SITE_RE_SH" | grep -c .)" "1"
 printf '$s = @(1,2) | Sort-Object\n' > "$SBX/locfx.ps1"   # locale-exempt: fixture-string
 chk "F13: 통제 — 주입한 미고정 ps1 사이트를 잡는다" "$(locale_scan_in "$SBX/locfx.ps1" "$LOCALE_SITE_RE_PS1" | grep -c .)" "1"
+# (F17 — M49-T02) 주석 술어의 **폭**을 픽스처로 고정한다. 이 사본은 `COMMENT_RE`(`[[:blank:]]` @
+# `LC_ALL=C` = ASCII 공백·탭) 하나뿐이었으나 ps1 사본은 Part F에서 인자 없는 `TrimStart()`를 썼고,
+# .NET의 그것은 **모든 유니코드 공백**(U+00A0·U+3000 …)을 벗긴다. 그래서 `.sh` 소스에 U+00A0으로
+# 시작하는 주석 줄이 있으면 **두 사본이 갈렸다**(M48 리뷰 이슈 2의 실측 — 그때는 살아 있는 입력이
+# 0건이라 어느 케이스도 붉지 않았다). 폭이 좁은 쪽이 옳다 — POSIX 셸에서 `#` 앞에 공백·탭이 아닌
+# 바이트가 있으면 그 `#`은 주석 시작이 아니라 단어의 일부다. 픽스처 바이트는 양 사본이 같게 만든다
+# (여기는 8진 `\302\240`, ps1 사본은 같은 코드포인트를 UTF-8로 인코딩 — F5의 ASCII-only 규율 때문에
+# 그쪽은 리터럴을 쓸 수 없다).
+printf '\302\240# x=$(cat a b | sort -u)\n' > "$SBX/locfx_nb.sh"   # locale-exempt: fixture-string
+chk "F17: 통제 — 선행 U+00A0 뒤의 #은 주석이 아니다(폭 = ASCII 공백·탭)" "$(locale_scan_in "$SBX/locfx_nb.sh" "$LOCALE_SITE_RE_SH" | grep -c .)" "1"
 
 # (F1) 마지막 케이스 — 자기 README 선언(`cases: N`)과 실제 케이스 수(누계 + 이 케이스) 대조.
 # === F14~F16 (M46) — 진입점 문서 줄 수 상한 =============================
@@ -1943,6 +1953,194 @@ chk "K5: 통제 — 토큰이 주석에만 있는 픽스처 하니스를 같은 
 # (K6) 면제 실재 — 면제 목록이 지목한 이름이 **실재하는 하니스**여야 한다. 하니스 이름이 바뀌거나
 # 사라지면 면제가 고아가 되어 그 통제가 아무도 모르게 헐거워진다(Part H의 면제 실재 검사와 같은 층).
 chk "K6: 면제 목록이 지목한 하니스 실재(고아 0)" "$(hc_orphan_exempt "$SBX/harnesses.txt" | grep -c .)" "0"
+
+# === Part L (M49) — 선언한 수 ↔ 열거 항목 수 ==============================
+# 문서가 **개수를 선언하고 곧이어 열거**하는 골격에서 둘이 어긋나는 것을 문다. 발단은 M48 라운드 0의
+# 차단 1이다 — 그것은 **논리 결함이 아니라 편집 사고**였다(한 줄이 다른 줄을 통째로 덮어써 고지 항목
+# 하나가 사라졌는데 서두는 그대로 셋을 선언하고 있었다). 그때 하니스 7종 × 네 실행 환경이 **전부
+# 초록**이었고 어떤 가드도 그 자리를 보지 않았다. 단일 원본은
+# `docs/conventions.md`의 "선언한 수 ↔ 열거 항목 수" 절.
+#   표지는 **규약이 선언**하고 러너는 읽기만 한다(`state-neg:`·`harness-control:`과 같은 기전) —
+#   그래야 ps1 사본이 한글 리터럴 없이 **같은 판정**을 쓴다.
+#   창은 **동그라미 열거 기호 하나뿐**이다: 뒤따르는 불릿 블록을 창으로 잡으면 전건이 어긋나고
+#   `·` 구분 인라인 열거로 잡아도 대부분 어긋난다(`·`가 이 저장소에서 열거 기호가 아니라 범용
+#   구분자다). 수치의 단일 출처는 `docs/reports/M49-impl.md`다.
+#   경계: 어떤 항목의 **본문**이 아직 등장하지 않은 다음 번호를 언급하면 수가 부풀어 오른다(오탐).
+#   오늘 살아 있는 사이트에 그 형태는 0건이고, 규약이 같은 경계를 적는다.
+CNT_WORDS=$(markers_of 'count-word:')
+CNT_COPS=$(markers_of 'count-copula:')
+CNT_WORDS_SP=$(printf '%s' "$CNT_WORDS" | tr '\n' ' ')
+CNT_COPS_SP=$(printf '%s' "$CNT_COPS" | tr '\n' ' ')
+NCW=$(printf '%s\n' "$CNT_WORDS" | grep -c .)
+NCC=$(printf '%s\n' "$CNT_COPS" | grep -c .)
+# 열거 기호는 G8이 쓰는 **같은 생성기**로 만든다(리터럴을 두지 않는다 — ps1 사본의 ASCII-only 규율과
+# 같은 구성). 1~20줄 = U+2460 계열, 21~40줄 = U+2474 계열.
+circ_list > "$SBX/lcirc.txt"
+ENUM_S1_SP=$(head -20 "$SBX/lcirc.txt" | tr '\n' ' ')
+ENUM_S2_SP=$(tail -20 "$SBX/lcirc.txt" | tr '\n' ' ')
+NE1=$(printf '%s\n' "$ENUM_S1_SP" | tr ' ' '\n' | grep -c .)
+NE2=$(printf '%s\n' "$ENUM_S2_SP" | tr ' ' '\n' | grep -c .)
+# `LC_ALL=C`로 고정한다 — `index`·`length`·`substr`가 바이트 의미로 일관되고, 로케일에 따라 문자/
+# 바이트가 섞이는 축이 아예 없어진다(ps1 사본은 .NET 문자 의미로 일관되며, 쓰는 연산이 부분 문자열
+# 탐색과 그 뒤 자르기뿐이라 두 사본의 답이 같다).
+enum_scan_in() { # <파일> → 후보마다 "CAND", 불일치마다 "BAD <파일>:<줄>:<선언>/<실측>"
+    [ -f "$1" ] || return 0
+    LC_ALL=C awk -v W="$CNT_WORDS_SP" -v C="$CNT_COPS_SP" -v S1="$ENUM_S1_SP" -v S2="$ENUM_S2_SP" -v FN="$1" \
+        -v cr="$(printf '\r')" '
+    function lead(s,   t) { t = s; sub(/[^ \t].*$/, "", t); return length(t) }
+    function islist(s) { return (s ~ /^[ \t]*([-*]|[0-9]+\.)[ \t]/) }
+    function isenum(s,   t, k) {
+        if (!islist(s)) return 0
+        t = s; sub(/^[ \t]*([-*]|[0-9]+\.)[ \t]*/, "", t)
+        for (k = 1; k <= n1; k++) if (index(t, E1[k]) == 1) return 1
+        for (k = 1; k <= n2; k++) if (index(t, E2[k]) == 1) return 1
+        return 0
+    }
+    # **표지 앞 경계(M49 재작업 1).** 표지를 낱말 경계 없이 찾으면 수사가 **다른 낱말 안에** 들어
+    # 있을 때 그것이 선언으로 잡힌다 — `Uni 0xACC4 0xC5F4` 같은 말이 `Uni 0xC5F4`(=10) 표지를 품어
+    # 정상 문서가 붉어졌다(M49 리뷰 차단 1의 실측). 규칙은 **표지 바로 앞이 줄머리이거나 ASCII**여야
+    # 한다는 것이다. 이 판정이 두 사본에서 같은 답을 내는 근거: 이 사본은 `LC_ALL=C`라 앞 **바이트**를
+    # 보고 ps1 사본은 앞 **문자**를 보는데, 비-ASCII 문자는 UTF-8에서 마지막 바이트가 0x80 이상이라
+    # **둘의 판정이 항상 일치한다**(ASCII 문자 ⟺ ASCII 바이트).
+    function tokpos(s, t,   p, off, pb) {   # 경계를 만족하는 첫 위치. 없으면 0.
+        off = 0
+        while (1) {
+            p = index(substr(s, off + 1), t)
+            if (p == 0) return 0
+            p = p + off
+            if (p == 1) return p
+            pb = substr(s, p - 1, 1)
+            if (pb == "\t" || pb ~ /^[ -~]$/) return p
+            off = p
+        }
+    }
+    function maxrun(w,   a, b) {   # 1부터 이어지는 최대 구간. 두 계열은 따로 세고 큰 쪽을 쓴다.
+        a = 0; while (a < n1 && index(w, E1[a + 1]) > 0) a++
+        b = 0; while (b < n2 && index(w, E2[b + 1]) > 0) b++
+        return (a > b) ? a : b
+    }
+    BEGIN {
+        nw = split(W, WA, " "); nc = split(C, CA, " ")
+        n1 = split(S1, E1, " "); n2 = split(S2, E2, " ")
+        m = 0
+        for (i = 1; i <= nw; i++) {
+            p = index(WA[i], "=")
+            if (p > 0) { m++; WD[m] = substr(WA[i], 1, p - 1); VL[m] = substr(WA[i], p + 1) + 0 }
+        }
+        nwv = m
+    }
+    # **줄 끝 CR을 벗긴다(방어 — 케이스로 못박지 못한다).** `.gitattributes`가 LF로 못박은 것은
+    # `*.sh`뿐이라 `.md`는 CRLF로 체크아웃될 수 있고, POSIX awk가 그런 파일을 읽으면 빈 줄이 `\r` 한
+    # 글자가 되어 `/^[ \t]*$/`에 걸리지 않는다 — 창이 끊기지 않고 자라 이 사본만 어긋난다.
+    # **그런데 이 자리는 네 실행 환경 어디에서도 붉힐 수 없다**: `.md`가 CRLF가 되는 것은 Windows
+    # 체크아웃(`core.autocrlf=true`)뿐인데 거기서 이 사본이 쓰는 awk는 Git Bash의 gawk이고, 그것은
+    # 파일을 **텍스트 모드로 읽어 CR을 먼저 벗긴다**(M49-T04 실측: `printf 'a\r\n'`에 `length($0)`가
+    # 1이다 — bash·dash 둘 다). 그래서 이 줄은 **케이스 없는 방어**로 남긴다 — Part G의 `anchor_set`이
+    # 같은 이유로 같은 형태를 두고 있다(그쪽 주석: *"Git Bash grep은 가려 주지만 POSIX grep은 가려
+    # 주지 않는다"*). 공허한 케이스를 세우는 대신 **못 무는 것을 적는다.**
+    { p = $0; if (length(p) > 0 && substr(p, length(p), 1) == cr) p = substr(p, 1, length(p) - 1); L[NR] = p }
+    END {
+        for (i = 1; i <= NR; i++) {
+            line = L[i]
+            # 표지 선언 줄 자신은 대상이 아니다(선언처가 자기 표지에 걸리는 것을 막는다 — Part I와 동형).
+            if (index(line, "count-word:") || index(line, "count-copula:")) continue
+            base = lead(line)
+            for (w = 1; w <= nwv; w++) for (c = 1; c <= nc; c++) {
+                tok = WD[w] CA[c]
+                pos = tokpos(line, tok)
+                if (pos == 0) continue
+                win = substr(line, pos + length(tok))
+                for (j = i + 1; j <= NR; j++) {
+                    nl = L[j]
+                    if (nl ~ /^[ \t]*$/) break
+                    if (islist(nl) && lead(nl) <= base && !isenum(nl)) break
+                    win = win "\n" nl
+                }
+                k = maxrun(win)
+                if (k == 0) continue
+                print "CAND"
+                if (k != VL[w]) print "BAD " FN ":" i ":" tok ":" VL[w] "/" k
+            }
+        }
+    }' "$1"
+}
+: > "$SBX/lscan.txt"
+while IFS= read -r _lf; do
+    [ -f "$_lf" ] || continue
+    enum_scan_in "$_lf" >> "$SBX/lscan.txt"
+done < "$SBX/living.txt"
+NLCAND=$(grep -c '^CAND' "$SBX/lscan.txt")
+NLBAD=$(grep -c '^BAD ' "$SBX/lscan.txt")
+NLIVING=$(grep -c . "$SBX/living.txt")
+[ "$NLBAD" = "0" ] || grep '^BAD ' "$SBX/lscan.txt" | sed 's/^BAD /  -> declared count vs enumerated items: /'
+chk "L1: count-word 선언 줄 정확히 1개" "$(decl_count "$CONV" 'count-word:')" "1"
+chk "L2: count-copula 선언 줄 정확히 1개" "$(decl_count "$CONV" 'count-copula:')" "1"
+chk "L3: 표지 추출 positive-control(수사>0 · 조사>0)" \
+    "$([ "$NCW" -gt 0 ] && [ "$NCC" -gt 0 ] && echo ok || echo no)" "ok"
+chk "L4: 열거 기호 두 계열 각 20자(양 사본이 자기 단언)" "$NE1/$NE2" "20/20"
+# (L5) **루트마다 묻는다.** *"발견이 0이면 FAIL"* 만으로는 **루트 하나가 사라지는 것**을 보지 못한다 —
+# 나머지 루트의 문서가 남아 수는 여전히 0보다 크고, 훑는 범위만 조용히 줄어든다. M48 리뷰가 정확히
+# 이 형태(`J1`)를 반환했으므로 같은 실수를 되풀이하지 않는다. 부류는 **발견 함수가 돌려준 경로에서**
+# 분류한다(다시 발견하지 않는다 — 검사 대상과 다른 코드로 재면 아무것도 증명하지 못한다).
+living_roots() { # → 살아 있는 문서 목록에 나타난 최상위 루트 부류 수
+    awk -v r="$ROOT/" '
+        { p = $0; if (index(p, r) == 1) p = substr(p, length(r) + 1) }
+        p ~ /^skills\//    { c["skills"] = 1; next }
+        p ~ /^site\/docs\// { c["site"] = 1; next }
+        p ~ /^docs\//      { c["docs"] = 1; next }
+        p ~ /^tests\//     { c["tests"] = 1; next }
+        p == "README.md"   { c["readme"] = 1; next }
+        END { n = 0; for (k in c) n++; print n }
+    ' "$SBX/living.txt"
+}
+chk "L5: 살아 있는 문서 루트 다섯 부류가 전부 나타난다(>0이 아니라 루트마다)" \
+    "$(living_roots)/$([ "$NLIVING" -gt 0 ] && echo ok || echo no)" "5/ok"
+# (L6) 후보가 0이면 L7이 **0==0으로 조용히 통과**한다 — 추출 자체를 먼저 문다.
+chk "L6: 선언+열거 후보 추출 positive-control(>0)" "$([ "$NLCAND" -gt 0 ] && echo ok || echo no)" "ok"
+chk "L7: 살아 있는 문서의 선언 수 ↔ 열거 항목 수 불일치 0건" "$NLBAD" "0"
+# 픽스처 통제 둘 — **실제 판정을 픽스처에 건다**(픽스처가 조건을 만족하는가가 아니라 판정이 잡는가를
+# 묻는 형태. M46 리뷰 차단 #1의 판례). 픽스처 문자열은 **표지에서 파생**시킨다 — 러너 소스에 수사·
+# 조사를 리터럴로 적으면 ps1 사본이 ASCII-only 규율을 어기고, 이 사본도 자기 표지를 갖게 된다.
+enum_word_for() { printf '%s\n' "$CNT_WORDS" | awk -F= -v v="$1" '$2 + 0 == v { print $1; exit }'; }
+LW3=$(enum_word_for 3)
+LCOP=$(printf '%s\n' "$CNT_COPS" | head -1)
+LE1=$(sed -n '21p' "$SBX/lcirc.txt"); LE2=$(sed -n '22p' "$SBX/lcirc.txt")
+LE3=$(sed -n '23p' "$SBX/lcirc.txt"); LE4=$(sed -n '24p' "$SBX/lcirc.txt")
+printf '%s%s: %s a %s b\n' "$LW3" "$LCOP" "$LE1" "$LE2" > "$SBX/lfa.md"
+printf '%s%s: %s a %s b %s c %s d\n' "$LW3" "$LCOP" "$LE1" "$LE2" "$LE3" "$LE4" > "$SBX/lfb.md"
+printf '%s%s: a b c\n' "$LW3" "$LCOP" > "$SBX/lfc.md"
+printf '%s %s: %s a %s b %s c\n' "$LW3" "$LCOP" "$LE1" "$LE2" "$LE3" > "$SBX/lfd.md"
+chk "L8: 픽스처 통제 — 항목 하나가 사라진 선언을 판정이 잡는다" "$(enum_scan_in "$SBX/lfa.md" | grep -c '^BAD ')" "1"
+chk "L9: 픽스처 통제 — 항목 하나가 늘어난 선언을 판정이 잡는다" "$(enum_scan_in "$SBX/lfb.md" | grep -c '^BAD ')" "1"
+# (L10) 음성 통제 둘 — 동그라미 열거가 없으면 후보가 아니고(창이 이것 하나뿐이라는 명세의 실증),
+# 수사와 조사가 **붙어 있지 않으면** 선언이 아니다(이력 서술 *"넷에서 셋으로 줄였다"* 가 후보에서
+# 빠지는 것이 이 인접 조건이다 — 그쪽 조사는 `count-copula:`에 없다).
+chk "L10: 음성 통제 — 열거 없음 · 수사와 조사가 떨어진 형태는 후보가 아니다" \
+    "$(enum_scan_in "$SBX/lfc.md" | grep -c '^CAND')/$(enum_scan_in "$SBX/lfd.md" | grep -c '^CAND')" "0/0"
+# (L11) **빈 줄 판정의 폭.** 창은 빈 줄에서 끊기므로 *"무엇이 빈 줄인가"* 가 곧 창의 경계이고, 그
+# 폭이 두 사본에서 갈리면 같은 트리에 다른 수가 나온다. 폭은 **ASCII 공백·탭**뿐이다 — U+00A0만 있는
+# 줄은 **빈 줄이 아니다.** 픽스처는 선언 뒤에 항목 둘을 두고 **U+00A0 줄 뒤에 셋째**를 둔다: 폭이
+# 맞으면 창이 끊기지 않아 셋을 세고 불일치가 **0건**이며, 폭을 유니코드 공백까지 넓히면(ps1의 `\s`가
+# 그 폭이다) 창이 거기서 끊겨 둘을 세고 **불일치 1건**이 된다. 기댓값을 `<후보>/<불일치>` 복합으로
+# 두는 것은 스캔이 통째로 죽어도 `0/0`이 아니라 **붉게** 만들기 위해서다. F17과 같은 층이다.
+printf '%s%s: %s a %s b\n\302\240\n%s c\n' "$LW3" "$LCOP" "$LE1" "$LE2" "$LE3" > "$SBX/lfe.md"
+chk "L11: 통제 — U+00A0만 있는 줄은 빈 줄이 아니다(창 경계의 폭)" \
+    "$(enum_scan_in "$SBX/lfe.md" | grep -c '^CAND')/$(enum_scan_in "$SBX/lfe.md" | grep -c '^BAD ')" "1/0"
+
+# (L12) **오탐 방향 음성 통제(M49 재작업 1).** 여기까지의 케이스는 전부 *"검사가 죽는가"* 를 묻고
+# *"검사가 과하게 무는가"* 를 묻는 것이 하나도 없었다 — 그 빈자리에서 리뷰 차단 1이 나왔다. 이 케이스는
+# **양방향**이다: 앞자리는 수사가 **낱말 안에** 있을 때 후보가 아님을(경계를 지우면 1이 되어 붉는다),
+# 뒷자리는 **ASCII 공백 뒤**면 여전히 후보임을(경계를 지나치게 좁히면 0이 되어 붉는다) 문다.
+# 픽스처의 앞 낱말도 **표지에서 파생**시킨다 — 러너 소스에 한글 리터럴을 두지 않는 규율 그대로다.
+LW4=$(enum_word_for 4)
+printf '%s%s%s: %s a %s b\n' "$LW4" "$LW3" "$LCOP" "$LE1" "$LE2" > "$SBX/lff.md"
+printf ' %s%s: %s a %s b %s c\n' "$LW3" "$LCOP" "$LE1" "$LE2" "$LE3" > "$SBX/lfg.md"
+chk "L12: 음성 통제 — 수사가 낱말 안이면 표지가 아니다 / 공백 뒤면 표지다" \
+    "$(enum_scan_in "$SBX/lff.md" | grep -c '^CAND')/$(enum_scan_in "$SBX/lfg.md" | grep -c '^CAND')" "0/1"
+# (L13) 불일치 진단은 **걸린 표지를 함께 말한다**. 수를 세는 단언은 붉어져도 원인을 말해 주지 않아
+# M40에서 기전을 재현하지 못했고(그래서 `G2`가 중복 앵커 이름을 찍는다), M49 리뷰 차단 1의 재현에서도
+# `10/2`만으로는 원인이 보이지 않았다. 같은 일을 세 번째로 반복하지 않는다.
+chk "L13: 불일치 진단이 걸린 표지를 담는다"     "$(enum_scan_in "$SBX/lfa.md" | grep -c "^BAD .*:${LW3}${LCOP}:")" "1"
 
 chk "F1: README cases 선언 == 실제 케이스 수" "$(declared_cases)" "$((pass + fail + 1))"
 
