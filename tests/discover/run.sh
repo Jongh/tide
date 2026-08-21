@@ -220,7 +220,14 @@ CONCEPTS="$ROOT/site/docs/concepts.md"
 
 roster_line() { # <file> → 명단 줄(없으면 빈 출력)
     [ -f "$1" ] || return 0
-    grep -F -- "phase" "$1" | grep -F -- "milestone" | grep -F -- "impl"       | grep -F -- "review" | grep -F -- "release" | grep -F -- "debug"       | grep -F -- "cycle" | head -1
+    # (M50) 이전에는 `grep -F`를 **일곱 번 이어 붙이고** `head -1`을 더해 파일마다 8 프로세스를 썼다.
+    # 이 함수는 파일마다 도는 루프 셋에서 불리므로 그 8이 그대로 곱해졌다. awk 한 번이 같은 판정을
+    # 한다 — 일곱 토큰이 **모두 든 첫 줄**이고, `index`로 물어 **고정 문자열 검색**이라는 성질을
+    # 코드에 남긴다(원래의 `grep -F`와 같은 의미다. 토큰에 정규식 메타문자가 없어 결과도 같다).
+    LC_ALL=C awk '
+        index($0, "phase") && index($0, "milestone") && index($0, "impl") &&
+        index($0, "review") && index($0, "release") && index($0, "debug") &&
+        index($0, "cycle") { print; exit }' "$1"
 }
 roster_set() { # <file> → 명단 줄의 백틱 토큰 집합(정렬·공백 구분)
     roster_line "$1" | grep -oE '`[a-z][a-z-]*`' | tr -d '`' | LC_ALL=C sort -u       | tr '
@@ -691,61 +698,87 @@ while IFS= read -r cf; do
 done < "$SBX/convfiles.txt"
 
 # 인용 후보 줄 — 집합의 **어느 파일명이든** 든 줄. 스니펫 인클루드 지시어 줄(`8<--`)은 제외한다.
+# (M50) 살아 있는 문서마다 `grep` 둘을 띄우던 것을 **awk 한 번**으로 바꿨다. 파일 목록도 awk가
+# 직접 읽는다 — 목록을 인자로 펼치면 **공백이 든 경로에서 단어 분리를 탄다**(이 러너가 목록을
+# 파일로 주고받는 것과 같은 이유다). 판정은 그대로다: 파일명 부분일치 · `8<--` 줄 제외.
 citation_lines() {
-    while IFS= read -r f; do
-        [ -f "$f" ] || continue
-        grep -F -f "$SBX/convbases.txt" "$f" 2>/dev/null | grep -v '8<--'
-    done < "$SBX/living.txt"
-}
-
-# 인용의 파일 귀속 — 그 줄에 등장한 규약 파일명들의 인덱스(쉼표 결합). 없으면 빈 문자열.
-line_owners() { # <line> → "1" | "1,2" | ""
-    o=""; i=0
-    while IFS= read -r b; do
-        i=$((i + 1))
-        case "$1" in *"$b"*) o="$o,$i" ;; esac
-    done < "$SBX/convbases.txt"
-    printf '%s' "${o#,}"
+    LC_ALL=C awk -v BASES="$SBX/convbases.txt" -v LIVING="$SBX/living.txt" '
+        BEGIN {
+            nb = 0
+            while ((getline b < BASES) > 0) if (b != "") { nb++; B[nb] = b }
+            close(BASES)
+            while ((getline f < LIVING) > 0) {
+                if (f == "") continue
+                while ((getline l < f) > 0) {
+                    if (index(l, "8<--") > 0) continue
+                    for (i = 1; i <= nb; i++) if (index(l, B[i]) > 0) { print l; break }
+                }
+                close(f)
+            }
+        }' < /dev/null
 }
 
 citation_lines > "$SBX/citelines.txt"
 # 인용 = 후보 줄의 따옴표 구획. 골격 자리표({} 포함)와 빈 구획은 인용이 아니다(빈 줄로 떨어진다).
 # 레코드 형식은 `<인덱스 목록> <인용>` — 인용은 공백 제거 후라 공백을 담지 않는다.
+# 귀속은 그 줄에 등장한 규약 파일명들의 인덱스(쉼표 결합)다.
+# (M50) 이전 형태는 후보 줄마다 **명령치환 하나(`line_owners`)와 파이프라인 다섯**을 띄워
+# 줄당 6 프로세스였다. 지금은 **awk 한 번**이 귀속과 구획 추출을 함께 한다. 판정 규칙은 그대로다 —
+# 따옴표 구획을 왼쪽부터 겹치지 않게 · 골격 자리표(`{}`)가 든 구획 제외 · 공백과 CR 제거 ·
+# 빈 구획 제외. `line_owners`는 이 자리에서만 쓰이던 함수라 함께 접었다.
 cite_records() {
-    while IFS= read -r line; do
-        o=$(line_owners "$line")
-        [ -n "$o" ] || continue
-        printf '%s\n' "$line" | grep -o '"[^"]*"' |
-            sed 's/^"//; s/"$//' | grep -v '[{}]' | tr -d ' \r' |
-            while IFS= read -r span; do
-                [ -n "$span" ] || continue
-                printf '%s %s\n' "$o" "$span"
-            done
-    done < "$SBX/citelines.txt"
+    LC_ALL=C awk -v BASES="$SBX/convbases.txt" '
+    BEGIN {
+        nb = 0
+        while ((getline b < BASES) > 0) if (b != "") { nb++; B[nb] = b }
+        close(BASES)
+    }
+    {
+        o = ""
+        for (i = 1; i <= nb; i++) if (index($0, B[i]) > 0) o = o "," i
+        if (o == "") next
+        o = substr(o, 2)
+        s = $0
+        while (match(s, /"[^"]*"/)) {
+            v = substr(s, RSTART + 1, RLENGTH - 2)
+            s = substr(s, RSTART + RLENGTH)
+            if (v ~ /[{}]/) continue
+            gsub(/[ \r]/, "", v)
+            if (v != "") print o " " v
+        }
+    }' "$SBX/citelines.txt"
 }
 cite_records > "$SBX/cites.txt"
 
 NANCHOR=$(grep -c . "$SBX/anchors.txt")
 NCITE=$(grep -c . "$SBX/cites.txt")
 
-# `--`와 `</dev/null`이 둘 다 필요하다: 인용 이름이 `-`로 시작하면 grep이 그것을 **옵션**으로 읽고,
-# 그러면 패턴 인자가 없어 파일명을 패턴으로 삼아 **stdin을 읽는다** — 그 stdin이 이 루프의 입력이라
-# 나머지 인용이 통째로 소비돼 미검사로 남는다(실측: miss가 0으로 나오며 가드가 조용히 죽는다).
 # 귀속된 파일이 둘이면 **어느 집합에든 있으면** 통과다(안전 측).
+# (M50) 이전 형태는 레코드마다 `grep -qxF`를 띄웠고, 그래서 **인용 이름이 `-`로 시작하면 grep이
+# 그것을 옵션으로 읽어 stdin을 삼키는** 사고를 `--`와 `</dev/null`로 막고 있었다(M34 리뷰 차단 #1의
+# 자리다 — 막지 않으면 나머지 인용이 통째로 미검사로 남고 miss가 0으로 나온다). 지금은 **awk가
+# 앵커 집합을 한 번 읽어 조회**하므로 인용 이름이 **인자가 아니라 데이터**다 — 그 사고 경로 자체가
+# 사라졌다. 방어를 지운 것이 아니라 **방어가 필요하던 구조를 없앤 것**이다.
 cite_miss() {
-    n=0
-    while IFS= read -r rec; do
-        o=${rec%% *}; c=${rec#* }
-        [ -n "$c" ] || continue
-        ok=no; rest=$o
-        while [ -n "$rest" ]; do
-            i=${rest%%,*}
-            case "$rest" in *,*) rest=${rest#*,} ;; *) rest="" ;; esac
-            grep -qxF -- "$c" "$SBX/anchors.$i.txt" </dev/null && ok=yes
-        done
-        [ "$ok" = yes ] || n=$((n + 1))
-    done < "$SBX/cites.txt"
-    echo "$n"
+    LC_ALL=C awk -v SBX="$SBX" '
+    function loadset(i,   f, l) {
+        if (i in LOADED) return
+        LOADED[i] = 1
+        f = SBX "/anchors." i ".txt"
+        while ((getline l < f) > 0) if (l != "") A[i SUBSEP l] = 1
+        close(f)
+    }
+    NF >= 2 {
+        o = $1; c = $2
+        ok = 0
+        n = split(o, IDX, ",")
+        for (k = 1; k <= n; k++) {
+            loadset(IDX[k])
+            if ((IDX[k] SUBSEP c) in A) ok = 1
+        }
+        if (!ok) miss++
+    }
+    END { print miss + 0 }' "$SBX/cites.txt"
 }
 # 가짜 이름·유일성 통제는 **집합 전체**(합친 anchors.txt)를 본다.
 has_anchor_name() { grep -qxF -- "$1" "$SBX/anchors.txt" </dev/null && echo yes || echo no; }
@@ -796,51 +829,78 @@ chk "G3: 인용 줄 따옴표 종결(줄바꿈 인용 0)"       "$(odd_quote_lin
 #      남는 미탐지 넷: ⑴ 표지 미사용 ⑵ 백틱 경로 동반 ⑶ 규약이 아닌 파일로의 인용 ⑷ 위의 줄바꿈
 #      인용 예외. **전부 위반이 아니라 경계 밖**이며 규약이 양쪽에서 열거한다.
 SELFREF_JEOL=$(printf '\354\240\210')   # U+C808 — ps1은 Uni(0xC808)로 같은 문자를 만든다(ASCII 원본 규율)
-selfref_of() { # <file> → 그 파일의 자기참조 구획(공백·CR 제거, 한 줄에 하나)
-    awk -v J="$SELFREF_JEOL" -v BASES="$SBX/convbases.txt" '
-        BEGIN { while ((getline b < BASES) > 0) if (b != "") BASE[++NB] = b }
-        function hasbase(s,   i) { for (i = 1; i <= NB; i++) if (index(s, BASE[i])) return 1; return 0 }
-        {
-            cur = $0
+# 실패하면 **어느 파일의 무엇이 안 풀렸는지 이름을 출력한다**(M40의 자기고발 조치와 같은 취지).
+# 진단 문구가 **두 가지를 함께 말한다** — 해소되지 않는 자기참조이거나, 파일명이 두 줄 이상 앞에
+# 있는 끊긴 인용이다(위 ⑷ 참조). 어느 쪽인지는 사람이 그 줄과 앞 줄들을 보고 가르며, 어느 쪽이든
+# 고칠 것이 있다. 한쪽 이름만 찍으면 원인을 잘못 지목하게 된다.
+#
+# (M50) 이전 형태는 살아 있는 문서마다 `anchor_set`(3) + `selfref_of`(4) + `cat`(1)을 띄우고
+# 자기참조마다 `grep -qxF` 하나를 더 띄웠다(39문서에 약 358 프로세스). 지금은 **awk 한 번**이
+# 앵커 추출 · 자기참조 추출 · 소속 대조 · 진단 출력을 함께 한다. **판정 규칙은 그대로다** —
+# 표지 넷 · 창은 한 줄 · 앵커는 `##`·`###` 제목의 공백과 CR을 제거한 형태.
+# `--`·`</dev/null` 방어는 **필요 없어졌다**(G1과 같은 이유 — 이름이 인자가 아니라 데이터가 됐다).
+# 이식성 둘을 지킨다: `{n,m}` 인터벌을 쓰지 않고(`^## `·`^### `로 나눠 쓴다 — 오래된 one-true-awk가
+# 인터벌을 받지 않는다. `docs/reports/debug-1.md`와 같은 부류다), 배열 키에 **파일 접두**를 붙여
+# `delete`를 반복하지 않는다.
+: > "$SBX/selfrefs.txt"
+LC_ALL=C awk -v J="$SELFREF_JEOL" -v BASES="$SBX/convbases.txt" \
+    -v LIVING="$SBX/living.txt" -v OUT="$SBX/selfrefs.txt" \
+    -v CNT="$SBX/selfmiss.txt" -v ROOT="$ROOT/" '
+function hasbase(t,   i) { for (i = 1; i <= NB; i++) if (index(t, BASE[i])) return 1; return 0 }
+BEGIN {
+    NB = 0
+    while ((getline b < BASES) > 0) if (b != "") { NB++; BASE[NB] = b }
+    close(BASES)
+    pat = "\"[^\"]*\"[ \t]*" J
+    miss = 0
+    while ((getline lf < LIVING) > 0) {
+        if (lf == "") continue
+        nref = 0
+        prev = ""
+        while ((getline cur < lf) > 0) {
+            if (cur ~ /^## / || cur ~ /^### /) {
+                a = cur
+                sub(/^#* /, "", a)
+                gsub(/[ \r]/, "", a)
+                OWN[lf SUBSEP a] = 1
+            }
             skip = 0
             if (cur ~ /`[A-Za-z0-9_.\/-]+\.(md|sh|ps1|json|yml)`/) skip = 1
             else if (hasbase(cur)) skip = 1
             else if (hasbase(prev)) skip = 1
             if (!skip) {
                 line = cur
-                pat = "\"[^\"]*\"[ \t]*" J
                 while (match(line, pat)) {
                     m = substr(line, RSTART, RLENGTH)
                     rest = substr(m, 2)
                     q = index(rest, "\"")
-                    if (q > 1) print substr(rest, 1, q - 1)
                     line = substr(line, RSTART + RLENGTH)
+                    if (q <= 1) continue
+                    v = substr(rest, 1, q - 1)
+                    if (v ~ /[{}]/) continue
+                    gsub(/[ \r]/, "", v)
+                    if (v == "") continue
+                    nref++; REF[nref] = v
                 }
             }
             prev = cur
-        }' "$1" | grep -v '[{}]' | tr -d ' \r' | grep -v '^$'
-}
-# `--`와 `</dev/null`은 G1과 같은 이유로 둘 다 필요하다(이름이 `-`로 시작하면 grep이 옵션으로 읽고
-# stdin을 삼켜 나머지가 통째로 미검사로 남는다).
-# 실패하면 **어느 파일의 무엇이 안 풀렸는지 이름을 출력한다**(M40의 자기고발 조치와 같은 취지).
-# 진단 문구가 **두 가지를 함께 말한다** — 해소되지 않는 자기참조이거나, 파일명이 두 줄 이상 앞에
-# 있는 끊긴 인용이다(위 ⑷ 참조). 어느 쪽인지는 사람이 그 줄과 앞 줄들을 보고 가르며, 어느 쪽이든
-# 고칠 것이 있다. 한쪽 이름만 찍으면 원인을 잘못 지목하게 된다.
-: > "$SBX/selfrefs.txt"
-SELF_MISS=0
-while IFS= read -r lf; do
-    [ -f "$lf" ] || continue
-    anchor_set "$lf" > "$SBX/ownanchors.txt"
-    selfref_of "$lf" > "$SBX/ownrefs.txt"
-    cat "$SBX/ownrefs.txt" >> "$SBX/selfrefs.txt"
-    while IFS= read -r s; do
-        [ -n "$s" ] || continue
-        grep -qxF -- "$s" "$SBX/ownanchors.txt" </dev/null || {
-            SELF_MISS=$((SELF_MISS + 1))
-            printf '  ↳ 미해소 자기참조 또는 끊긴 인용: %s → %s\n' "${lf#"$ROOT"/}" "$s"
         }
-    done < "$SBX/ownrefs.txt"
-done < "$SBX/living.txt"
+        close(lf)
+        rel = lf
+        if (index(rel, ROOT) == 1) rel = substr(rel, length(ROOT) + 1)
+        for (i = 1; i <= nref; i++) {
+            print REF[i] > OUT
+            if (!((lf SUBSEP REF[i]) in OWN)) {
+                miss++
+                printf "  ↳ 미해소 자기참조 또는 끊긴 인용: %s → %s\n", rel, REF[i]
+            }
+        }
+    }
+    close(OUT)
+    print miss > CNT
+    close(CNT)
+}' < /dev/null
+SELF_MISS=$(cat "$SBX/selfmiss.txt")
 NSELF=$(grep -c . "$SBX/selfrefs.txt")
 selfref_has() { grep -qxF -- "$1" "$SBX/selfrefs.txt" </dev/null && echo yes || echo no; }
 
@@ -1851,10 +1911,32 @@ chk "J6: 통제 — 발견 명세를 픽스처로 문다(대소문자·숨김·�
 # 동작하는가**가 아니다. 토큰을 두고 도달하지 못하게 만들면 이 파트는 초록이다 — 그 층은
 # `tests/mutation`과 규약이 요구하는 **케이스별 되돌림 실측**(사람)이 덮는다.
 HC_DECL_RE='^<!-- harness-control: .* -->$'
-hc_lines() { LC_ALL=C grep -E "$HC_DECL_RE" "$CONV" 2>/dev/null; }
+# (M50) 선언 줄 추출을 **한 번만** 한다 — 이전에는 부르는 자리마다 규약 전체를 다시 훑었고,
+# 그 자리 하나가 하니스마다 도는 루프 안에 있어 호출 수가 하니스 수에 비례했다. 값은 같다.
+LC_ALL=C grep -E "$HC_DECL_RE" "$CONV" > "$SBX/hclines.txt" 2>/dev/null || :
+hc_lines() { cat "$SBX/hclines.txt"; }
 hc_field() { # <선언 줄> <필드 번호> → 그 필드
-    printf '%s' "$1" | LC_ALL=C sed 's|^<!-- harness-control: ||; s| -->$||' |
-        awk -F' :: ' -v n="$2" '{ print $n }'
+    # (M50) 이전에는 `printf | sed | awk`로 세 프로세스를 썼고, 이 함수가 **하니스 x 선언 줄 x 필드
+    # 넷**만큼 불려 Part K 비용의 주력이었다. 구분자가 **고정 문자열**(` :: `)이라 셸 파라미터
+    # 확장으로 **프로세스 없이** 같은 값을 낸다. `awk -F' :: '`의 의미를 그대로 유지한다 —
+    # 필드 번호가 실제 필드 수보다 크면 **빈 값**이고, 필드 값 안에 구분자가 들어 있으면 그 자리에서
+    # 쪼개지는 것도 같다.
+    _hf=${1#"<!-- harness-control: "}
+    _hf=${_hf%" -->"}
+    _hfn=$2
+    while [ "$_hfn" -gt 1 ]; do
+        case "$_hf" in
+            *' :: '*) _hf=${_hf#* :: } ;;
+            *) printf '
+'; return 0 ;;                       # 필드 수보다 크다 → 빈 값
+        esac
+        _hfn=$((_hfn - 1))
+    done
+    case "$_hf" in *' :: '*) _hf=${_hf%% :: *} ;; esac
+    # **줄바꿈을 붙인다.** 이전 판본은 `awk print`라 ORS가 따라붙었고, 이 함수를 **파이프로 흘려
+    # 보내는 자리**(`NHCNAME`의 필드 1 수집)가 그것에 기대고 있다. 빼면 필드들이 한 줄로 붙어
+    # `sort -u`가 1로 세고 `K2`가 조용히 어긋난다 — M50의 판정 지문 대조가 잡은 회귀다.
+    printf '%s\n' "$_hf"
 }
 harness_dirs_in() { # <디렉터리> → run.sh·run.ps1을 둘 다 가진 깊이 1 디렉터리(정렬)
     for _d in "$1"/*; do
@@ -1867,22 +1949,28 @@ harness_dirs_in() { # <디렉터리> → run.sh·run.ps1을 둘 다 가진 깊�
 # 위해서다(`F7`의 `ps1_files_in`·`F16`의 `entry_cap_verdict`와 같은 형태). 픽스처를 검사 대상과 다른
 # 코드로 재면 그 픽스처는 아무것도 증명하지 못한다.
 hc_missing() { # <하니스 목록 파일> → 미보유 조합("하니스:셸:통제")
+    # (M50) 이전에는 **선언 줄마다** 주석 제외 사본을 다시 만들어(하니스 x 선언 수 x 셸) 프로세스를
+    # 썼다. 사본은 선언과 무관하므로 **하니스마다 한 번**이면 된다. 선언 줄도 파일에서 직접 읽어
+    # `hc_lines`를 하니스마다 다시 돌리지 않는다. **판정·출력·면제 규칙은 그대로다.**
     while IFS= read -r _hd; do
         [ -n "$_hd" ] || continue
         _hn=${_hd##*/}
-        hc_lines | while IFS= read -r _l; do
+        noncomment_lines "$_hd/run.sh"  > "$SBX/hcnc-sh.txt"
+        noncomment_lines "$_hd/run.ps1" > "$SBX/hcnc-ps1.txt"
+        while IFS= read -r _l; do
+            [ -n "$_l" ] || continue
             _cn=$(hc_field "$_l" 1); _tsh=$(hc_field "$_l" 2)
             _tps=$(hc_field "$_l" 3); _tex=$(hc_field "$_l" 4)
             case ",$_tex," in *",$_hn,"*) continue ;; esac       # 면제로 선언된 하니스는 빠진다
             if [ "$_tsh" != "-" ]; then
-                noncomment_lines "$_hd/run.sh" | LC_ALL=C grep -qF -e "$_tsh" ||
+                LC_ALL=C grep -qF -e "$_tsh" "$SBX/hcnc-sh.txt" ||
                     printf '%s:sh:%s\n' "$_hn" "$_cn"
             fi
             if [ "$_tps" != "-" ]; then
-                noncomment_lines "$_hd/run.ps1" | LC_ALL=C grep -qF -e "$_tps" ||
+                LC_ALL=C grep -qF -e "$_tps" "$SBX/hcnc-ps1.txt" ||
                     printf '%s:ps1:%s\n' "$_hn" "$_cn"
             fi
-        done
+        done < "$SBX/hclines.txt"
     done < "$1"
 }
 hc_orphan_exempt() { # <하니스 목록 파일> → 실재하지 않는 하니스를 지목한 면제 이름
@@ -1897,8 +1985,16 @@ hc_orphan_exempt() { # <하니스 목록 파일> → 실재하지 않는 하니�
     done
 }
 hc_wellformed() { # <선언 줄> → 네 필드가 다 있고 어느 것도 비어 있지 않으면 0
-    _nf=$(printf '%s' "$1" | LC_ALL=C sed 's|^<!-- harness-control: ||; s| -->$||' |
-          awk -F' :: ' '{ print NF }')
+    # (M50) 필드 수도 파라미터 확장으로 센다 — `printf | sed | awk` 셋이 0개가 된다.
+    _hw=${1#"<!-- harness-control: "}
+    _hw=${_hw%" -->"}
+    _nf=1
+    while :; do
+        case "$_hw" in
+            *' :: '*) _hw=${_hw#* :: }; _nf=$((_nf + 1)) ;;
+            *) break ;;
+        esac
+    done
     [ "$_nf" = "4" ] || return 1
     for _i in 1 2 3 4; do [ -n "$(hc_field "$1" "$_i")" ] || return 1; done
     return 0
