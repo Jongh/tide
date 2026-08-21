@@ -1721,6 +1721,17 @@ try {
     Chk "F8: hidden fixture stays hidden to a non-Force enumeration (F7 precondition)" `
         (DiscVisibleCount $discFix) '1'
 
+    # ONE SEAT FOR THE COMMENT PREDICATE (M49-T02). Part F (locale pinning), Part J (variable-name
+    # boundary) and Part K (shared control tokens) all need "is this line a comment?". It used to be
+    # written twice on this side -- and the two seats bit DIFFERENT WIDTHS: the Part F seat was an inline
+    # `TrimStart().StartsWith('#')`, and the .NET argument-less TrimStart() strips EVERY Unicode space
+    # (U+00A0, U+3000, ...) while this predicate and the twin's [[:blank:]] under LC_ALL=C strip ASCII
+    # SPACE AND TAB ONLY. So a .sh source whose comment line began with U+00A0 SPLIT THE TWO COPIES
+    # (M48 review issue 2 measured it; F17 below pins it as a fixture). The definition sits HERE, ahead
+    # of Part F, for the same reason COMMENT_RE sits ahead of locale_scan_in in the twin.
+    # The predicate: the first character that is not ASCII space or tab is '#'.
+    function IsCommentLine([string]$l) { return ($l -match '^[ \t]*#') }
+
     # (F9-F12 -- M45) LOCALE PINNING discipline -- same layer as F5 (non-ASCII lines): it bites the
     # RUNNER SOURCE, not documents. Four cycles in a row a human caught this class: M41 (Sort-Object /
     # StartsWith, 6 seats), M42 (three surfaces audited + the omission in tests/lib/discover.sh), and the
@@ -1765,7 +1776,7 @@ try {
             $i++
             if ($l -notmatch $regex) { continue }
             if ($l.Contains($LOCALE_EXEMPT_TOK)) { continue }        # declared exception
-            if ($l.TrimStart().StartsWith('#')) { continue }         # comment
+            if (IsCommentLine $l) { continue }                       # comment (ONE seat -- see above)
             if ($l.Contains('LC_ALL=C ')) { continue }               # the .sh pinned form
             $out += ("{0}:{1}:{2}" -f $path, $i, $l)
         }
@@ -1802,6 +1813,17 @@ try {
     $locFxPs1 = Join-Path $sbx 'locfx.ps1'
     [System.IO.File]::WriteAllText($locFxPs1, "`$s = @(1,2) | Sort-Object`n", (New-Object System.Text.UTF8Encoding($false)))
     Chk "F13: control -- an injected unpinned ps1 site is caught" ([string](@(LocaleScanIn $locFxPs1 $LOCALE_SITE_RE_PS1)).Count) '1'
+    # (F17 -- M49-T02) The WIDTH of the comment predicate, pinned by fixture. This copy used to carry the
+    # predicate TWICE and the two seats were not the same width: the Part F seat was an argument-less
+    # TrimStart(), which strips EVERY Unicode space, while IsCommentLine and the twin's COMMENT_RE strip
+    # ASCII space and tab only. A .sh source whose comment line began with U+00A0 therefore SPLIT THE TWO
+    # COPIES (M48 review issue 2 measured it; no live input had that shape, so no case went red). The
+    # narrow width is the correct one -- in a POSIX shell a '#' preceded by a byte that is not space or
+    # tab does not start a comment. The fixture bytes must be identical on both sides: the twin writes
+    # octal \302\240, this copy encodes the SAME codepoint (the ASCII-only rule of F5 forbids a literal).
+    $locFxNb = Join-Path $sbx 'locfx_nb.sh'
+    [System.IO.File]::WriteAllText($locFxNb, ([string][char]0x00A0) + "# x=`$(cat a b | sort -u)`n", (New-Object System.Text.UTF8Encoding($false)))
+    Chk "F17: control -- '#' after a leading U+00A0 is NOT a comment (width = ASCII space+tab)" ([string](@(LocaleScanIn $locFxNb $LOCALE_SITE_RE_SH)).Count) '1'
 
     # (F1) LAST case -- own README declaration ('cases: N') vs actual case count (running total + this one).
     # === F14..F16 (M46) -- entry-point document line cap ==================
@@ -1913,11 +1935,6 @@ try {
         $text = $LATIN1.GetString([System.IO.File]::ReadAllBytes($path))
         return @($text.Replace([string][char]13, '') -split "`n")
     }
-    # ONE SEAT FOR THE COMMENT PREDICATE. Part J (variable-name boundary) and Part K (shared control
-    # tokens) both need "is this line a comment?", and writing it twice creates a second declaration site
-    # the moment one of them is edited. The predicate: the first non-blank character (ASCII SPACE OR TAB
-    # ONLY, matching the twin's [[:blank:]] under LC_ALL=C) is '#'.
-    function IsCommentLine([string]$l) { return ($l -match '^[ \t]*#') }
     function VarBoundScanIn($path) {  # violating lines -> "path:lineno"
         $out = @(); $i = 0
         foreach ($l in (VarBoundLines $path)) {
@@ -2210,6 +2227,201 @@ try {
     # harness and the exemption is orphaned, quietly loosening that control (same layer as Part H's
     # exemption-freshness case).
     Chk "K6: every exempted name is a real harness (orphans 0)" ([string](@(HcOrphanExempt $harnessList)).Count) '0'
+
+    # === Part L (M49) -- declared count vs enumerated item count ===========
+    # A document that STATES A COUNT and then ENUMERATES must not disagree with its own enumeration.
+    # The trigger was M48 round 0's blocker 1, which was NOT a logic defect but an EDITING ACCIDENT: one
+    # line overwrote another, an item of an honesty notice vanished, and the lead-in still declared three.
+    # Seven harnesses across four execution environments were ALL GREEN and no guard looked at that seat.
+    # Single source: the "declared count vs enumerated items" section of docs/conventions.md.
+    #   The MARKERS ARE DECLARED BY THE CONVENTION and this runner only reads them (same mechanism as
+    #   `state-neg:` and `harness-control:`) -- that is how this copy runs the SAME verdict with no
+    #   Korean literal in its source (the ASCII-only rule of F5).
+    #   THE WINDOW IS THE CIRCLED ENUMERATOR AND NOTHING ELSE. Taking the following bullet block as the
+    #   window disagrees on every live site, and taking a middle-dot inline list disagrees on most of
+    #   them (in this repo the middle dot is a general separator, not an enumerator). Numbers: see
+    #   docs/reports/M49-impl.md.
+    #   Boundary: if an item's BODY names a sibling number that has not appeared yet, the run inflates
+    #   (a false positive). Zero live sites have that shape today; the convention records the same bound.
+    $cntWords = @(MarkersOf 'count-word:')
+    $cntCops = @(MarkersOf 'count-copula:')
+    $lWord = @(); $lVal = @()
+    foreach ($t in $cntWords) {
+        $p = $t.IndexOf('=', [System.StringComparison]::Ordinal)
+        if ($p -gt 0) { $lWord += $t.Substring(0, $p); $lVal += [int]$t.Substring($p + 1) }
+    }
+    # Two SEPARATE series -- merging them in one window fuses two different enumerations into one.
+    $ENUM_S1 = @(0x2460..0x2473 | ForEach-Object { [char]$_ })
+    $ENUM_S2 = @(0x2474..0x2487 | ForEach-Object { [char]$_ })
+    # BLANK and LIST-ITEM tests are pinned to ASCII space+tab, the same width as the twin's awk under
+    # LC_ALL=C. Trim()/\s here would strip every Unicode space and split the two copies -- that is
+    # exactly the class F17 above was built for, so it is not repeated here.
+    function LLead([string]$s) {
+        $i = 0
+        while ($i -lt $s.Length -and ($s[$i] -eq ' ' -or $s[$i] -eq "`t")) { $i++ }
+        return $i
+    }
+    function LIsList([string]$s) { return ($s -match '^[ \t]*([-*]|[0-9]+\.)[ \t]') }
+    function LIsBlank([string]$s) { return ($s -notmatch '[^ \t]') }
+    function LIsEnumItem([string]$s) {
+        if (-not (LIsList $s)) { return $false }
+        $t = $s -replace '^[ \t]*([-*]|[0-9]+\.)[ \t]*', ''
+        foreach ($c in $ENUM_S1) { if ($t.StartsWith([string]$c, [System.StringComparison]::Ordinal)) { return $true } }
+        foreach ($c in $ENUM_S2) { if ($t.StartsWith([string]$c, [System.StringComparison]::Ordinal)) { return $true } }
+        return $false
+    }
+    # MARKER LEFT BOUNDARY (M49 rework 1). Searching for the marker with no word boundary means a
+    # numeral sitting INSIDE ANOTHER WORD is read as a declaration -- a normal Korean word ending in the
+    # syllable for ten made a correct document go red (measured, M49 review blocker 1). The rule: the
+    # character right before the marker must be the LINE START or ASCII. That verdict is identical in
+    # both copies: the twin runs under LC_ALL=C and looks at the preceding BYTE while this copy looks at
+    # the preceding CHAR, and a non-ASCII character always ends in a byte >= 0x80 -- so "ASCII char" and
+    # "ASCII byte" agree on every input.
+    function LTokPos([string]$s, [string]$t) {   # first position satisfying the boundary, else -1
+        $off = 0
+        while ($true) {
+            $p = $s.IndexOf($t, $off, [System.StringComparison]::Ordinal)
+            if ($p -lt 0) { return -1 }
+            if ($p -eq 0) { return $p }
+            $c = [int][char]$s[$p - 1]
+            if ($c -eq 9 -or ($c -ge 32 -and $c -le 126)) { return $p }
+            $off = $p + 1
+        }
+    }
+    function LMaxRun([string]$w) {   # longest run starting at 1; the two series are counted separately
+        $a = 0
+        while ($a -lt $ENUM_S1.Count -and $w.Contains([string]$ENUM_S1[$a])) { $a++ }
+        $b = 0
+        while ($b -lt $ENUM_S2.Count -and $w.Contains([string]$ENUM_S2[$b])) { $b++ }
+        if ($a -gt $b) { return $a } else { return $b }
+    }
+    function EnumScanIn($path) {   # 'CAND' per candidate, 'BAD path:line:declared/actual' per mismatch
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return @() }
+        $lines = [System.IO.File]::ReadAllLines($path)
+        $out = @()
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            $line = $lines[$i]
+            # The marker DECLARATION LINES themselves are not subjects (same guard as Part I).
+            if ($line.Contains('count-word:') -or $line.Contains('count-copula:')) { continue }
+            $base = LLead $line
+            for ($w = 0; $w -lt $lWord.Count; $w++) {
+                foreach ($cop in $cntCops) {
+                    $tok = [string]$lWord[$w] + [string]$cop
+                    $pos = LTokPos $line $tok
+                    if ($pos -lt 0) { continue }
+                    $win = $line.Substring($pos + $tok.Length)
+                    for ($j = $i + 1; $j -lt $lines.Count; $j++) {
+                        $nl = $lines[$j]
+                        if (LIsBlank $nl) { break }
+                        if ((LIsList $nl) -and ((LLead $nl) -le $base) -and -not (LIsEnumItem $nl)) { break }
+                        $win = $win + "`n" + $nl
+                    }
+                    $k = LMaxRun $win
+                    if ($k -eq 0) { continue }
+                    $out += 'CAND'
+                    if ($k -ne $lVal[$w]) { $out += ("BAD {0}:{1}:{2}:{3}/{4}" -f $path, ($i + 1), $tok, $lVal[$w], $k) }
+                }
+            }
+        }
+        return $out
+    }
+    $lScan = @()
+    $lLiving = @(LivingDocs)
+    foreach ($p in $lLiving) { $lScan += @(EnumScanIn $p) }
+    $lCand = @($lScan | Where-Object { $_ -eq 'CAND' }).Count
+    $lBad = @($lScan | Where-Object { $_.StartsWith('BAD ', [System.StringComparison]::Ordinal) })
+    foreach ($b in $lBad) { Write-Host ("  -> declared count vs enumerated items: " + $b.Substring(4)) }
+    Chk "L1: exactly one count-word declaration line" (DeclCount $CONV 'count-word:') '1'
+    Chk "L2: exactly one count-copula declaration line" (DeclCount $CONV 'count-copula:') '1'
+    Chk "L3: marker extraction positive control (numerals>0, copulas>0)" `
+        $(if ($lWord.Count -gt 0 -and $cntCops.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "L4: 20 enumerators in each series (each copy self-asserts)" ("{0}/{1}" -f $ENUM_S1.Count, $ENUM_S2.Count) '20/20'
+    # (L5) ASK PER ROOT. "extraction is not zero" cannot see ONE ROOT DISAPPEARING -- the other roots
+    # still yield documents, the count stays above zero, and the scanned range quietly shrinks. The M48
+    # review returned exactly that shape (J1), so the same mistake is not repeated here. The classes are
+    # derived FROM WHAT THE DISCOVERY FUNCTION RETURNED (no re-discovery -- measuring a fixture with code
+    # other than the code under test proves nothing).
+    function LivingRootClasses($paths) {
+        $c = @{}
+        foreach ($p in $paths) {
+            $rel = [string]$p
+            if ($rel.StartsWith($ROOT, [System.StringComparison]::Ordinal)) { $rel = $rel.Substring($ROOT.Length) }
+            $rel = $rel.Replace('\', '/').TrimStart('/')
+            if ($rel.StartsWith('skills/', [System.StringComparison]::Ordinal)) { $c['skills'] = 1 }
+            elseif ($rel.StartsWith('site/docs/', [System.StringComparison]::Ordinal)) { $c['site'] = 1 }
+            elseif ($rel.StartsWith('docs/', [System.StringComparison]::Ordinal)) { $c['docs'] = 1 }
+            elseif ($rel.StartsWith('tests/', [System.StringComparison]::Ordinal)) { $c['tests'] = 1 }
+            elseif ($rel -eq 'README.md') { $c['readme'] = 1 }
+        }
+        return $c.Count
+    }
+    Chk "L5: all five living-doc root classes appear (per root, not just >0)" `
+        ("{0}/{1}" -f (LivingRootClasses $lLiving), $(if ($lLiving.Count -gt 0) { 'ok' } else { 'no' })) '5/ok'
+    # (L6) With zero candidates L7 would pass as 0 == 0 -- ask about the extraction itself first.
+    Chk "L6: declaration+enumeration candidate extraction positive control (>0)" `
+        $(if ($lCand -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "L7: no declared-count vs enumerated-item mismatch in living docs" ([string]$lBad.Count) '0'
+    # Two fixture controls that RUN THE REAL VERDICT on the fixture (not "does the fixture satisfy the
+    # condition" -- the fourth precedent, M46 review blocker 1). Fixture strings are DERIVED FROM THE
+    # MARKERS: writing the numeral and copula as literals would break the ASCII-only rule on this side.
+    $lw3 = ''
+    for ($x = 0; $x -lt $lVal.Count; $x++) { if ($lVal[$x] -eq 3) { $lw3 = [string]$lWord[$x]; break } }
+    $lcop = if ($cntCops.Count -gt 0) { [string]$cntCops[0] } else { '' }
+    $u8 = New-Object System.Text.UTF8Encoding($false)
+    $lfa = Join-Path $sbx 'lfa.md'
+    [System.IO.File]::WriteAllText($lfa, ($lw3 + $lcop + ': ' + $ENUM_S2[0] + ' a ' + $ENUM_S2[1] + " b`n"), $u8)
+    $lfb = Join-Path $sbx 'lfb.md'
+    [System.IO.File]::WriteAllText($lfb, ($lw3 + $lcop + ': ' + $ENUM_S2[0] + ' a ' + $ENUM_S2[1] + ' b ' +
+        $ENUM_S2[2] + ' c ' + $ENUM_S2[3] + " d`n"), $u8)
+    $lfc = Join-Path $sbx 'lfc.md'
+    [System.IO.File]::WriteAllText($lfc, ($lw3 + $lcop + ": a b c`n"), $u8)
+    $lfd = Join-Path $sbx 'lfd.md'
+    [System.IO.File]::WriteAllText($lfd, ($lw3 + ' ' + $lcop + ': ' + $ENUM_S2[0] + ' a ' + $ENUM_S2[1] + ' b ' +
+        $ENUM_S2[2] + " c`n"), $u8)
+    function LBadCount($p) { return [string](@(EnumScanIn $p | Where-Object { $_.StartsWith('BAD ', [System.StringComparison]::Ordinal) })).Count }
+    function LCandCount($p) { return [string](@(EnumScanIn $p | Where-Object { $_ -eq 'CAND' })).Count }
+    Chk "L8: control -- a declaration that LOST an item is caught by the real verdict" (LBadCount $lfa) '1'
+    Chk "L9: control -- a declaration that GAINED an item is caught by the real verdict" (LBadCount $lfb) '1'
+    # (L10) Two negative controls -- without circled enumerators there is no candidate (the window is
+    # that and nothing else), and a numeral NOT IMMEDIATELY followed by a declared copula is not a
+    # declaration. That adjacency is what keeps the narrative form ("reduced from four to three", whose
+    # particle is not in `count-copula:`) out of the candidate set.
+    Chk "L10: negative controls -- no enumerator, and numeral detached from copula" `
+        ("{0}/{1}" -f (LCandCount $lfc), (LCandCount $lfd)) '0/0'
+    # (L11) THE WIDTH OF THE BLANK-LINE TEST. The window ends at a blank line, so "what counts as blank"
+    # IS the window boundary, and if that width differs between the copies the same tree yields different
+    # counts. The width is ASCII SPACE AND TAB only -- a line holding just U+00A0 is NOT blank. The
+    # fixture puts two items after the declaration and a THIRD after a U+00A0 line: at the correct width
+    # the window does not end there, it counts three, and reports NO mismatch; widen the width to every
+    # Unicode space (which is exactly what .NET \s does) and the window ends there, counts two, and
+    # reports ONE. The expectation is the compound <candidates>/<mismatches> so that a scan that died
+    # altogether goes RED instead of passing as 0/0. Same layer as F17.
+    $lfe = Join-Path $sbx 'lfe.md'
+    [System.IO.File]::WriteAllText($lfe, ($lw3 + $lcop + ': ' + $ENUM_S2[0] + ' a ' + $ENUM_S2[1] +
+        " b`n" + [string][char]0x00A0 + "`n" + $ENUM_S2[2] + " c`n"), $u8)
+    Chk "L11: control -- a line holding only U+00A0 is NOT blank (window boundary width)" `
+        ("{0}/{1}" -f (LCandCount $lfe), (LBadCount $lfe)) '1/0'
+    # (L12) FALSE-POSITIVE-DIRECTION NEGATIVE CONTROL (M49 rework 1). Every case up to here asks "does
+    # the check DIE"; not one asked "does the check OVER-BITE" -- and review blocker 1 came out of that
+    # empty seat. This case is BIDIRECTIONAL: the first half asks that a numeral INSIDE A WORD is not a
+    # marker (delete the boundary and it becomes 1, going red), the second that a numeral AFTER AN ASCII
+    # SPACE still is one (narrow the boundary too far and it becomes 0, going red). The leading word is
+    # DERIVED FROM THE MARKERS too -- no Korean literal enters this source.
+    $lw4 = ''
+    for ($x = 0; $x -lt $lVal.Count; $x++) { if ($lVal[$x] -eq 4) { $lw4 = [string]$lWord[$x]; break } }
+    $lff = Join-Path $sbx 'lff.md'
+    [System.IO.File]::WriteAllText($lff, ($lw4 + $lw3 + $lcop + ': ' + $ENUM_S2[0] + ' a ' + $ENUM_S2[1] + " b`n"), $u8)
+    $lfg = Join-Path $sbx 'lfg.md'
+    [System.IO.File]::WriteAllText($lfg, (' ' + $lw3 + $lcop + ': ' + $ENUM_S2[0] + ' a ' + $ENUM_S2[1] + ' b ' +
+        $ENUM_S2[2] + " c`n"), $u8)
+    Chk "L12: negative control -- numeral inside a word is not a marker / after a space it is" `
+        ("{0}/{1}" -f (LCandCount $lff), (LCandCount $lfg)) '0/1'
+    # (L13) A mismatch diagnostic NAMES THE MARKER IT MATCHED. A bare count assertion says nothing about
+    # WHY it went red -- that is why M40 could not reproduce its mechanism locally (and why G2 prints the
+    # duplicate anchor NAMES), and reproducing review blocker 1 showed the same gap. Not a third time.
+    $lTokMark = ':' + $lw3 + $lcop + ':'
+    Chk "L13: the mismatch diagnostic carries the marker it matched" `
+        ([string](@(EnumScanIn $lfa | Where-Object { $_.StartsWith('BAD ', [System.StringComparison]::Ordinal) -and $_.Contains($lTokMark) })).Count) '1'
 
     Chk "F1: README cases declaration == actual case count" (DeclaredCases) ([string]($script:pass + $script:fail + 1))
 
