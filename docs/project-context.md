@@ -17,6 +17,7 @@
 | `.claude-plugin/` | `plugin.json`·`marketplace.json` — 플러그인/마켓플레이스 매니페스트 (버전 원본) |
 | `skills/` | 커맨드 스킬 디렉터리 — 커맨드마다 `{단계}/SKILL.md` 하나씩. milestone·impl·review·retro·debug는 `template.md` 동봉. **커맨드 수·이름·역할의 선언처는 `docs/commands.md`**(카탈로그 단일 원본)이며 여기서 다시 적지 않는다 |
 | `hooks/` | `hooks.json`(PreToolUse 등록) + `tide-guard.sh`(원본 로직)·`tide-guard.ps1`(보조 사본) |
+| `docs/epics/` | 에픽(방향) 문서 `E{N}.md` — **사이클보다 큰 줄기**. 마일스톤이 `epic:` 한 줄로 자기가 속한 줄기를 밝히고 `tests/discover` Part M이 참조 실재·양방향 일치를 문다. 회고(후향)·이월 원장(처분 기록)·마일스톤(사이클 단위)과 구별되며 그 경계는 규약이 적는다 |
 | `docs/milestones/` | 마일스톤 문서 `M{N}.md` |
 | `docs/reports/` | 완료보고서 `M{N}-impl.md`·리뷰보고서 `M{N}-review.md`·debug 보고서 `debug-{N}.md`(발견 우선 세션 산출물 — 번호는 마일스톤과 무관한 독립 수열)·회고 `retro.md`(최근) + `retro-archive.md`(과거 회고 분리·보존) |
 | `docs/conventions.md` | 단계별 규약 단일 원본 — **규약 문서 집합의 본체**(조각은 `docs/conventions-{주제}.md`, 발견 글롭 `docs/conventions*.md`) |

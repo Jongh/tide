@@ -2238,6 +2238,205 @@ chk "L12: 음성 통제 — 수사가 낱말 안이면 표지가 아니다 / 공
 # `10/2`만으로는 원인이 보이지 않았다. 같은 일을 세 번째로 반복하지 않는다.
 chk "L13: 불일치 진단이 걸린 표지를 담는다"     "$(enum_scan_in "$SBX/lfa.md" | grep -c "^BAD .*:${LW3}${LCOP}:")" "1"
 
+# === Part M (M51) — 에픽(방향) 참조 정합 =================================
+# 사이클의 방향이 **직전 사이클의 후속 메모**가 아니라 **선언된 줄기**에서 오게 하는 장치다.
+# 마일스톤이 `epic:` 한 줄로 자기가 속한 줄기를 밝히고, 이 파트가 **참조의 존재·실재·양방향
+# 일치**를 문다. 단일 원본은 `docs/conventions.md`의 "에픽 (방향) 층" 절.
+#   값은 **규약이 선언하고 러너는 읽기만 한다**(`state-neg:`·`count-word:`와 같은 기전) —
+#   `epic-status:`(열림/닫힘 값 집합) · `epic-since:`(집행이 시작되는 마일스톤 번호).
+#   역방향은 에픽의 **줄머리 `- M{N}`** 으로 잡는다 — 절 제목을 매칭하지 않아 러너 소스가 한글
+#   바이트에 기대지 않고 ps1 사본과 같은 술어를 쓴다.
+#   **묻지 않는 것**: 「이 마일스톤이 그 줄기에 정말 속하는가」는 의미 판정이라 정적으로 물을 수
+#   없다(M49의 「머리 위치」·M50의 「while-read 루프」와 같은 부류). 거짓 참조는 문서에 남는 눈에
+#   보이는 진술이라 리뷰의 영역이다.
+EPIC_STATUSES=$(markers_of 'epic-status:')
+EPIC_MEMBER_MARK=$(markers_of 'epic-members:' | head -1)
+EPIC_SINCE=$(markers_of 'epic-since:' | head -1)
+NEPICSTAT=$(printf '%s\n' "$EPIC_STATUSES" | grep -c .)
+epic_list_into() { # <에픽목록 경로> <마일스톤목록 경로> <트리 루트>
+    : > "$1"
+    [ -d "$3/docs/epics" ] && ls "$3"/docs/epics/E*.md 2>/dev/null > "$1"
+    : > "$2"
+    ls "$3"/docs/milestones/M*.md 2>/dev/null > "$2"
+    return 0
+}
+# 한 번 도는 awk가 **양쪽을 함께** 읽어 판정한다(줄마다 프로세스를 띄우지 않는다 — M50 비용 규율).
+#   출력: `OPEN <n>` 열린 에픽 수 · `MREF <M> <E>` 마일스톤의 참조 · `EREF <E> <M>` 에픽의 역방향
+#         `BAD <사유> <대상>` 불일치
+epic_scan() { # <에픽목록> <마일스톤목록>
+    LC_ALL=C awk -v EL="$1" -v ML="$2" -v SINCE="$EPIC_SINCE" -v MARK="$EPIC_MEMBER_MARK" '
+    function base(t,   i) { while ((i = index(t, "/")) > 0) t = substr(t, i + 1); return t }
+    function num(t,   d) { d = t; gsub(/[^0-9]/, "", d); return d + 0 }
+    BEGIN {
+        since = num(SINCE)
+        nopen = 0
+        while ((getline ef < EL) > 0) {
+            if (ef == "") continue
+            eid = base(ef); sub(/\.md$/, "", eid)
+            EPIC[eid] = 1
+            inblk = 0
+            while ((getline l < ef) > 0) {
+                if (l ~ /^- status:/) {
+                    st = l; sub(/^- status:[ \t]*/, "", st); gsub(/[ \t\r]/, "", st)
+                    if (st == "open") { nopen++; }
+                }
+                # **마커 블록 안만 등재로 본다.** 줄머리 `- M{N}`만으로 잡으면 에픽 본문의
+                # 평범한 산문 목록 항목이 등재로 세어진다(공백으로 끊기는 형태는 토큰이 정확히
+                # `M{N}`이 되어 실재 마일스톤과 일치한다 — M51 리뷰 권장 2의 실측). 마커는
+                # **ASCII**라 ps1 사본의 byte>127=0 규율을 지키면서 창을 정확히 자른다.
+                if (index(l, "<!-- " MARK ":start -->") > 0) { inblk = 1; continue }
+                if (index(l, "<!-- " MARK ":end -->") > 0) { inblk = 0; continue }
+                if (inblk && l ~ /^- M[0-9]/) {
+                    m = l; sub(/^- /, "", m); sub(/[ \t].*$/, "", m); gsub(/\r/, "", m)
+                    nback++; BE[nback] = eid; BM[nback] = m
+                    BACK[eid SUBSEP m] = 1
+                    print "EREF " eid " " m
+                }
+            }
+            close(ef)
+        }
+        close(EL)
+        print "OPEN " nopen
+        while ((getline mf < ML) > 0) {
+            if (mf == "") continue
+            mid = base(mf); sub(/\.md$/, "", mid)
+            ref = ""
+            while ((getline l < mf) > 0) {
+                if (l ~ /^- epic:/) { ref = l; sub(/^- epic:[ \t]*/, "", ref); gsub(/[ \t\r]/, "", ref); break }
+            }
+            close(mf)
+            MSEEN[mid] = 1                                       # 실재 기록(에픽 기준 순회가 쓴다)
+            MREF[mid] = ref
+            if (num(mid) < since) continue                       # 집행 시작 이전은 대상이 아니다
+            if (ref == "") {
+                if (nopen > 0) print "BAD noref " mid            # 규칙 1
+                continue
+            }
+            print "MREF " mid " " ref
+            if (!(ref in EPIC)) { print "BAD dangling " mid ">" ref; continue }    # 규칙 2
+            if (!((ref SUBSEP mid) in BACK)) print "BAD oneway " mid ">" ref       # 규칙 3
+        }
+        close(ML)
+        # **에픽 기준 순회(규칙 3의 「그 반대」).** 마일스톤 기준 순회만으로는 **에픽이 어떤 마일스톤을
+        # 자기 줄기라고 주장하는데 그 마일스톤이 부인하는 자리**를 보지 못한다(M51 리뷰 차단 1).
+        #   ⑴ 등재된 마일스톤이 **실재하지 않으면** FAIL(고아)
+        #   ⑵ 실재하되 **다른 에픽을 가리키면** FAIL
+        #   ⑶ `epic-since:` **미만**이면 **정상** — 그 마일스톤은 에픽 층이 없던 시절의 산출물이라
+        #      참조를 갖지 않는 것이 옳다. 이것을 FAIL로 만들면 과거를 소급하는 셈이 된다.
+        for (i = 1; i <= nback; i++) {
+            e = BE[i]; m = BM[i]
+            if (!(m in MSEEN)) { print "BAD ghost " e ">" m; continue }
+            if (num(m) < since) continue
+            if (MREF[m] != e) print "BAD claim " e ">" m
+        }
+    }' < /dev/null
+}
+epic_list_into "$SBX/epics.txt" "$SBX/msdocs.txt" "$ROOT"
+NMSDOC=$(grep -c . "$SBX/msdocs.txt")
+epic_scan "$SBX/epics.txt" "$SBX/msdocs.txt" > "$SBX/epicscan.txt"
+NEPICOPEN=$(grep -c '^OPEN [1-9]' "$SBX/epicscan.txt")
+NEPICREF=$(grep -c '^MREF ' "$SBX/epicscan.txt")
+NEPICBAD=$(grep -c '^BAD ' "$SBX/epicscan.txt")
+[ "$NEPICBAD" = "0" ] || grep '^BAD ' "$SBX/epicscan.txt" | sed 's/^BAD /  -> epic reference: /'
+chk "M1: epic-status 선언 줄 정확히 1개" "$(decl_count "$CONV" 'epic-status:')" "1"
+chk "M2: epic-since 선언 줄 정확히 1개" "$(decl_count "$CONV" 'epic-since:')" "1"
+# (M3) 표지가 비면 아래 판정이 통째로 공허해진다 — 추출 자체를 먼저 문다.
+# (M3) **복합 기댓값**이다. 앞자리는 추출 positive-control(살아 있는 표지가 뽑혀야 한다), 뒷자리는
+# **없는 키로 같은 추출 경로를 한 번 더 태워** 그것이 **비었다고 판정되는지**를 묻는다 — 두 사본이
+# 갈렸던 자리가 정확히 거기다(ps1의 `[string](@() | Select-Object -First 1)`이 `''`가 아니라 `$null`
+# 이고 `$null -ne ''`가 참이라 없는 선언을 있는 것으로 읽었다. M51 되돌림의 `m2-key`·`m3-empty`가
+# 잡았다). 뒷자리를 두면 그 갈림이 되돌림 표가 아니라 **상시 케이스**로 고정된다.
+EPIC_SINCE_ABSENT=$(markers_of 'epic-since-absent:' | head -1)
+chk "M3: 표지 추출 positive-control / 없는 키는 비었다고 판정" \
+    "$([ "$NEPICSTAT" -gt 0 ] && [ -n "$EPIC_SINCE" ] && echo ok || echo no)/$([ -n "$EPIC_SINCE_ABSENT" ] && echo ok || echo no)" "ok/no"
+# (M4) 두 발견 목록을 **각각** 묻는다 — 합으로 세면 한쪽이 사라져도 다른 쪽 수가 남아 초록이다
+# (M48 리뷰가 `J1`에서 반환한 부류와 같은 방향).
+chk "M4: 마일스톤 문서 발견 positive-control(>0)" "$([ "$NMSDOC" -gt 0 ] && echo ok || echo no)" "ok"
+chk "M5: 본 검사 — 에픽 참조 불일치 0건" "$NEPICBAD" "0"
+# 픽스처 통제 셋 — **실제 판정을 픽스처에 건다**(픽스처가 조건을 만족하는가가 아니라 판정이
+# 잡는가를 묻는 형태. M46 리뷰 차단 #1의 판례). 목록을 인자로 넘기므로 **살아 있는 목록을
+# 덮어쓰지 않는다.**
+EPIC_SN=${EPIC_SINCE#M}
+epic_fixture() { # <모드> → 사본 트리 경로. 모드: dangling | oneway | noref | clean | noepic
+    _d="$SBX/epicfix-$1"
+    rm -rf "$_d" 2>/dev/null
+    mkdir -p "$_d/docs/milestones"
+    [ "$1" = "noepic" ] || mkdir -p "$_d/docs/epics"
+    _bs="<!-- $EPIC_MEMBER_MARK:start -->"
+    _be="<!-- $EPIC_MEMBER_MARK:end -->"
+    case "$1" in
+        # `oneway`·`dangling`·`noref`는 **블록을 비운다** — 그래야 마일스톤 쪽 위반 하나만 남는다.
+        # 블록이 `M{since}`를 등재한 채로 두면 에픽 기준 순회가 `claim`을 하나 더 내 통제가 둘을 센다.
+        oneway|dangling|noref)
+                 printf -- '- status: open\n%s\n%s\n' "$_bs" "$_be" > "$_d/docs/epics/E1.md" ;;
+        noepic)  : ;;
+        # `ghost`는 반대다 — **정방향은 성립시켜 두고**(블록에 `M{since}`도 넣는다) 없는 마일스톤
+        # 하나만 더해 에픽 기준 위반 하나만 남긴다.
+        ghost)   printf -- '- status: open\n%s\n- M%s x\n- M999 x\n%s\n' \
+                     "$_bs" "$EPIC_SN" "$_be" > "$_d/docs/epics/E1.md" ;;
+        # E1은 정상으로 등재하고(정방향 통과) **E2가 같은 마일스톤을 자기 것이라 주장**한다.
+        # 그 마일스톤은 `epic: E1`을 적으므로 E2의 주장만 어긋난다.
+        claim)   printf -- '- status: open\n%s\n- M%s x\n%s\n' "$_bs" "$EPIC_SN" "$_be" > "$_d/docs/epics/E1.md"
+                 printf -- '- status: open\n%s\n- M%s x\n%s\n' "$_bs" "$EPIC_SN" "$_be" > "$_d/docs/epics/E2.md" ;;
+        # `prose`는 `claim`과 **줄의 위치만 다른 한 쌍**이다 — E2가 같은 마일스톤을 언급하되
+        # **블록 밖**에서 한다. 창이 살아 있으면 세지 않아 0이고, 창을 지우면 E2의 주장이 되어
+        # `claim`이 난다. 언급 대상이 **`epic-since:` 이상**이어야 한다 — 미만을 쓰면 창을 지워도
+        # **과거 예외가 삼켜** 통제가 창이 아니라 그 예외를 무는 자리가 된다(라운드 1 실측:
+        # 대상이 M9이던 판에서 `m-block-off`가 초록으로 돌아왔다).
+        prose)   printf -- '- status: open\n%s\n- M%s x\n%s\n' "$_bs" "$EPIC_SN" "$_be" > "$_d/docs/epics/E1.md"
+                 printf -- '- status: open\n- M%s x\n%s\n%s\n' "$EPIC_SN" "$_bs" "$_be" > "$_d/docs/epics/E2.md" ;;
+        past)    printf -- '- status: open\n%s\n- M9 x\n- M%s x\n%s\n' "$_bs" "$EPIC_SN" "$_be" \
+                     > "$_d/docs/epics/E1.md" ;;
+        *)       printf -- '- status: open\n%s\n- M%s x\n%s\n' "$_bs" "$EPIC_SN" "$_be" > "$_d/docs/epics/E1.md" ;;
+    esac
+    case "$1" in
+        # `claim`·`prose` 둘 다 E2가 M{since}를 자기 것이라 하는데 그 마일스톤은 E1을 가리킨다.
+        claim|prose) printf -- '- epic: E1\n' > "$_d/docs/milestones/M$EPIC_SN.md" ;;
+        # `past`는 과거 마일스톤(M9)이 실재해야 판정이 성립한다(`prose`는 라운드 1에서
+        # 언급 대상을 M{since}로 옮겨 M9 의존이 없어졌다).
+        past)     printf -- '- epic: E1\n' > "$_d/docs/milestones/M$EPIC_SN.md"
+                  printf -- '- x\n' > "$_d/docs/milestones/M9.md" ;;
+        dangling) printf -- '- epic: E9\n' > "$_d/docs/milestones/M$EPIC_SN.md" ;;
+        # `noref`는 **열린 에픽이 있는데** 참조가 없는 자리고, `noepic`은 **에픽 자체가 없는**
+        # 저장소다 — 후자의 마일스톤도 참조를 갖지 않아야 그 저장소의 현실이 된다(하위 호환).
+        noref|noepic) printf -- '- x\n'    > "$_d/docs/milestones/M$EPIC_SN.md" ;;
+        *)        printf -- '- epic: E1\n' > "$_d/docs/milestones/M$EPIC_SN.md" ;;
+    esac
+    printf '%s' "$_d"
+}
+epic_bad_in() { # <사본 트리> → 그 트리에서 **실제 판정**이 낸 BAD 수
+    epic_list_into "$SBX/fx-epics.txt" "$SBX/fx-ms.txt" "$1"
+    epic_scan "$SBX/fx-epics.txt" "$SBX/fx-ms.txt" | grep -c '^BAD '
+}
+chk "M6: 픽스처 통제 — 실재하지 않는 에픽을 가리키면 판정이 잡는다" \
+    "$(epic_bad_in "$(epic_fixture dangling)")" "1"
+chk "M7: 픽스처 통제 — 역방향이 끊기면 판정이 잡는다" \
+    "$(epic_bad_in "$(epic_fixture oneway)")" "1"
+chk "M8: 픽스처 통제 — 열린 에픽이 있는데 참조가 없으면 판정이 잡는다" \
+    "$(epic_bad_in "$(epic_fixture noref)")" "1"
+# (M9) **오탐 방향 음성 통제 — 양방향 기댓값.** 앞자리는 정상 참조가 붉지 않음을, 뒷자리는
+# **에픽이 하나도 없는 트리**가 붉지 않음을 묻는다(하위 호환 — tide는 남의 저장소에 얹는 물건이라
+# 이것이 계약이다). 경계를 지우면 앞자리가, 지나치게 좁히면 뒷자리가 어긋난다.
+chk "M9: 음성 통제 — 정상 참조 / 에픽 없는 트리는 붉지 않는다" \
+    "$(epic_bad_in "$(epic_fixture clean)")/$(epic_bad_in "$(epic_fixture noepic)")" "0/0"
+# (M10) 이 저장소에서 장치가 **실제로 서 있는지** — 열린 에픽과 마일스톤 참조가 각각 실재한다.
+# 에픽을 쓰지 않는 저장소에서는 둘 다 0이고 그때 M5는 발동하지 않는다(위 M9 뒷자리가 그 경로다).
+chk "M10: 이 저장소에 열린 에픽과 마일스톤 참조가 실재" \
+    "$NEPICOPEN/$([ "$NEPICREF" -gt 0 ] && echo ok || echo no)" "1/ok"
+chk "M11: epic-members 선언 줄 정확히 1개" "$(decl_count "$CONV" 'epic-members:')" "1"
+# 픽스처 통제 둘 — **에픽 기준 순회**(규칙 3의 「그 반대」)를 실제 판정으로 건다. M51 리뷰 차단 1이
+# 정확히 이 축의 부재였고, **되돌림은 구현되지 않은 축을 볼 수 없어** 그때 잡지 못했다.
+chk "M12: 픽스처 통제 — 에픽이 실재하지 않는 마일스톤을 등재하면 잡는다" \
+    "$(epic_bad_in "$(epic_fixture ghost)")" "1"
+chk "M13: 픽스처 통제 — 에픽이 남의 마일스톤을 등재하면 잡는다" \
+    "$(epic_bad_in "$(epic_fixture claim)")" "1"
+# (M14) **오탐 방향 음성 통제 — 양방향.** 앞자리는 **블록 밖 산문 목록 항목**(E2가 남의 마일스톤을
+# 블록 밖에서 언급한다 — 창이 없으면 `claim`이 난다)이 등재로 세어지지 않음을,
+# 뒷자리는 **`epic-since:` 미만 마일스톤 등재**가 붉지 않음을 묻는다(과거는 소급 대상이 아니다).
+# 창을 지우면 앞자리가, 과거 예외를 지우면 뒷자리가 어긋난다.
+chk "M14: 음성 통제 — 블록 밖 산문 / 과거 마일스톤 등재는 붉지 않는다" \
+    "$(epic_bad_in "$(epic_fixture prose)")/$(epic_bad_in "$(epic_fixture past)")" "0/0"
+
 chk "F1: README cases 선언 == 실제 케이스 수" "$(declared_cases)" "$((pass + fail + 1))"
 
 echo
