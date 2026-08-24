@@ -2423,6 +2423,242 @@ try {
     Chk "L13: the mismatch diagnostic carries the marker it matched" `
         ([string](@(EnumScanIn $lfa | Where-Object { $_.StartsWith('BAD ', [System.StringComparison]::Ordinal) -and $_.Contains($lTokMark) })).Count) '1'
 
+    # === Part M (M51) -- epic (direction) reference integrity =================
+    # The direction of a cycle must come from a DECLARED TRUNK, not from whatever the previous
+    # cycle left in its follow-up notes. A milestone names its trunk with one `epic:` line and this
+    # part asks for the reference's PRESENCE, EXISTENCE and TWO-WAY AGREEMENT. Single source: the
+    # "epic (direction) layer" section of docs/conventions.md.
+    #   The values are DECLARED BY THE CONVENTION and this runner only reads them (same mechanism as
+    #   `state-neg:` and `count-word:`): `epic-status:` (the open/done value set) and `epic-since:`
+    #   (the milestone number from which enforcement starts).
+    #   The reverse direction is matched on a line starting with `- M{N}` -- no section-heading match,
+    #   so this source needs no non-ASCII byte and the twin uses the SAME predicate.
+    #   NOT ASKED: whether a milestone really belongs to that trunk. That is a semantic judgement and
+    #   cannot be asked statically (same class as M49's "head position" and M50's "while-read loop").
+    #   A false reference is a VISIBLE STATEMENT in the document, so it belongs to review.
+    $epicStatuses = @(MarkersOf 'epic-status:')
+    # `[string](@() | Select-Object -First 1)` is **$null**, not '' -- and `$null -ne ''` is TRUE,
+    # so an emptiness guard written as `-ne ''` reads a MISSING declaration as present. The twin's
+    # `[ -n "$x" ]` catches it exactly. Force a real string here and keep the two copies identical.
+    # (Found by M51's reversal measurement: `m2-key` / `m3-empty` reddened M3 on the sh side only.)
+    function EpicFirstMarker([string]$key) {
+        $a = @(MarkersOf $key)
+        if ($a.Count -gt 0) { return [string]$a[0] }
+        return ''
+    }
+    $epicSince = EpicFirstMarker 'epic-since:'
+    $epicMemberMark = EpicFirstMarker 'epic-members:'
+    $epicSinceNum = 0
+    if ($epicSince -ne '') { $epicSinceNum = [int](($epicSince -replace '[^0-9]', '')) }
+    function EpicNumOf([string]$t) {
+        $d = $t -replace '[^0-9]', ''
+        if ($d -eq '') { return 0 }
+        return [int]$d
+    }
+    function EpicFilesIn($root) {
+        $d = Join-Path $root 'docs/epics'
+        if (-not (Test-Path -LiteralPath $d -PathType Container)) { return @() }
+        return @(Get-ChildItem $d -Filter 'E*.md' -File -Force -ErrorAction SilentlyContinue |
+                 Sort-Object -Property Name | ForEach-Object { $_.FullName })
+    }
+    function MilestoneFilesIn($root) {
+        $d = Join-Path $root 'docs/milestones'
+        if (-not (Test-Path -LiteralPath $d -PathType Container)) { return @() }
+        return @(Get-ChildItem $d -Filter 'M*.md' -File -Force -ErrorAction SilentlyContinue |
+                 Sort-Object -Property Name | ForEach-Object { $_.FullName })
+    }
+    # Returns the same record stream as the twin: 'OPEN n' / 'MREF m e' / 'EREF e m' / 'BAD why what'
+    function EpicScan($epicFiles, $msFiles) {
+        $out = @()
+        $epics = @{}
+        $back = @{}
+        $backList = @()
+        $nopen = 0
+        $blkStart = '<!-- ' + $epicMemberMark + ':start -->'
+        $blkEnd = '<!-- ' + $epicMemberMark + ':end -->'
+        foreach ($ef in $epicFiles) {
+            $eid = [System.IO.Path]::GetFileNameWithoutExtension($ef)
+            $epics[$eid] = 1
+            $inblk = $false
+            foreach ($l in [System.IO.File]::ReadAllLines($ef)) {
+                if ($l.StartsWith('- status:', [System.StringComparison]::Ordinal)) {
+                    $st = ($l.Substring(9) -replace '[ \t\r]', '')
+                    if ($st -eq 'open') { $nopen++ }
+                }
+                # ONLY INSIDE THE MARKER BLOCK counts as membership. Matching a bare leading `- M{N}`
+                # makes ordinary prose list items in the epic body read as entries (a form that breaks
+                # on whitespace yields exactly `M{N}` and collides with a real milestone -- M51 review's
+                # recommendation 2). The marker is ASCII, so this source keeps byte>127 = 0 while the
+                # window is cut exactly.
+                if ($l.Contains($blkStart)) { $inblk = $true; continue }
+                if ($l.Contains($blkEnd)) { $inblk = $false; continue }
+                if ($inblk -and $l -match '^- M[0-9]') {
+                    $m = $l.Substring(2)
+                    $sp = $m.IndexOfAny([char[]](' ', "`t"))
+                    if ($sp -ge 0) { $m = $m.Substring(0, $sp) }
+                    $m = $m -replace '\r', ''
+                    $back[$eid + [char]0x1F + $m] = 1
+                    $backList += ($eid + [char]0x1F + $m)
+                    $out += ('EREF {0} {1}' -f $eid, $m)
+                }
+            }
+        }
+        $out += ('OPEN {0}' -f $nopen)
+        $msSeen = @{}
+        $msRef = @{}
+        foreach ($mf in $msFiles) {
+            $mid = [System.IO.Path]::GetFileNameWithoutExtension($mf)
+            $ref = ''
+            foreach ($l in [System.IO.File]::ReadAllLines($mf)) {
+                if ($l.StartsWith('- epic:', [System.StringComparison]::Ordinal)) {
+                    $ref = ($l.Substring(7) -replace '[ \t\r]', '')
+                    break
+                }
+            }
+            $msSeen[$mid] = 1                       # existence record (the epic-side pass reads it)
+            $msRef[$mid] = $ref
+            if ((EpicNumOf $mid) -lt $epicSinceNum) { continue }
+            if ($ref -eq '') {
+                if ($nopen -gt 0) { $out += ('BAD noref {0}' -f $mid) }
+                continue
+            }
+            $out += ('MREF {0} {1}' -f $mid, $ref)
+            if (-not $epics.ContainsKey($ref)) { $out += ('BAD dangling {0}>{1}' -f $mid, $ref); continue }
+            if (-not $back.ContainsKey($ref + [char]0x1F + $mid)) { $out += ('BAD oneway {0}>{1}' -f $mid, $ref) }
+        }
+        # EPIC-SIDE PASS (the "and the reverse" half of rule 3). The milestone-side pass alone cannot see
+        # an epic CLAIMING a milestone that denies it (M51 review blocker 1).
+        #   (1) an entry naming a milestone that does not exist -> FAIL (orphan)
+        #   (2) an entry naming a milestone that points at a DIFFERENT epic -> FAIL
+        #   (3) an entry below `epic-since:` -> NORMAL. That milestone predates the epic layer, so having
+        #       no reference is correct; treating it as a denial would retro-apply the rule to the past.
+        foreach ($k in $backList) {
+            $parts = $k -split ([char]0x1F)
+            $e = $parts[0]; $m = $parts[1]
+            if (-not $msSeen.ContainsKey($m)) { $out += ('BAD ghost {0}>{1}' -f $e, $m); continue }
+            if ((EpicNumOf $m) -lt $epicSinceNum) { continue }
+            if ($msRef[$m] -ne $e) { $out += ('BAD claim {0}>{1}' -f $e, $m) }
+        }
+        return $out
+    }
+    $epicScan = @(EpicScan (EpicFilesIn $ROOT) (MilestoneFilesIn $ROOT))
+    $nMsDoc = (@(MilestoneFilesIn $ROOT)).Count
+    $nEpicOpen = @($epicScan | Where-Object { $_ -match '^OPEN [1-9]' }).Count
+    $nEpicRef = @($epicScan | Where-Object { $_.StartsWith('MREF ', [System.StringComparison]::Ordinal) }).Count
+    $epicBadLines = @($epicScan | Where-Object { $_.StartsWith('BAD ', [System.StringComparison]::Ordinal) })
+    if ($epicBadLines.Count -gt 0) {
+        foreach ($b in $epicBadLines) { Write-Host ("  -> epic reference: " + $b.Substring(4)) }
+    }
+    Chk "M1: epic-status declaration line is exactly 1" (DeclCount $CONV 'epic-status:') '1'
+    Chk "M2: epic-since declaration line is exactly 1" (DeclCount $CONV 'epic-since:') '1'
+    # (M3) If the markers are empty the whole verdict below is vacuous -- ask about extraction first.
+    # (M3) COMPOUND. The first half is the positive control (the live markers must extract). The second
+    # runs the SAME extraction path with a key that does not exist and demands it read as EMPTY --
+    # that is where the two copies diverged, so this half pins it as a standing case rather than
+    # leaving it to a reversal table.
+    Chk "M3: marker extraction positive control / an absent key reads as empty" `
+        ("{0}/{1}" -f `
+            $(if ($epicStatuses.Count -gt 0 -and $epicSince -ne '') { 'ok' } else { 'no' }), `
+            $(if ((EpicFirstMarker 'epic-since-absent:') -ne '') { 'ok' } else { 'no' })) 'ok/no'
+    # (M4) Ask about EACH discovery list -- a sum lets one of them vanish while the other keeps it green.
+    Chk "M4: milestone document discovery positive control (>0)" `
+        $(if ($nMsDoc -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "M5: the real check -- zero epic reference mismatches" ([string]$epicBadLines.Count) '0'
+    # Three fixture controls that RUN THE REAL VERDICT on the fixture (M46 review blocker 1's precedent).
+    # The lists are passed in, so a fixture never overwrites the living lists.
+    $epicSn = $epicSince -replace '[^0-9]', ''
+    function EpicFixture([string]$mode) {
+        $d = Join-Path $sbx ("epicfix-" + $mode)
+        if (Test-Path -LiteralPath $d) { Remove-Item -Recurse -Force $d }
+        New-Item -ItemType Directory -Force (Join-Path $d 'docs/milestones') | Out-Null
+        $u8 = New-Object System.Text.UTF8Encoding($false)
+        $bs = '<!-- ' + $epicMemberMark + ':start -->'
+        $be = '<!-- ' + $epicMemberMark + ':end -->'
+        if ($mode -ne 'noepic') {
+            New-Item -ItemType Directory -Force (Join-Path $d 'docs/epics') | Out-Null
+            $ep = Join-Path $d 'docs/epics/E1.md'
+            $entry = "- M" + $epicSn + " x`n"
+            # `oneway` / `dangling` / `noref` EMPTY THE BLOCK so only the milestone-side violation remains.
+            # Leaving `M{since}` listed would make the epic-side pass emit a `claim` too and the control
+            # would count two.
+            if ($mode -eq 'oneway' -or $mode -eq 'dangling' -or $mode -eq 'noref') {
+                [System.IO.File]::WriteAllText($ep, ("- status: open`n" + $bs + "`n" + $be + "`n"), $u8)
+            }
+            # `ghost` is the mirror: keep the forward direction satisfied and add ONE non-existent entry.
+            elseif ($mode -eq 'ghost') {
+                [System.IO.File]::WriteAllText($ep, ("- status: open`n" + $bs + "`n" + $entry + "- M999 x`n" + $be + "`n"), $u8)
+            }
+            # `claim`: E1 lists it correctly, E2 ALSO claims it -- the milestone points at E1, so only
+            # E2's claim is wrong.
+            elseif ($mode -eq 'claim') {
+                [System.IO.File]::WriteAllText($ep, ("- status: open`n" + $bs + "`n" + $entry + $be + "`n"), $u8)
+                [System.IO.File]::WriteAllText((Join-Path $d 'docs/epics/E2.md'),
+                    ("- status: open`n" + $bs + "`n" + $entry + $be + "`n"), $u8)
+            }
+            # `prose` is `claim` with THE LINE MOVED OUTSIDE THE BLOCK. With the window alive it does
+            # not count (0); delete the window and it becomes E2's claim. The named milestone must be AT
+            # OR ABOVE `epic-since:` -- naming an older one lets the past exception swallow it even with
+            # the window gone, and the control would pin that exception instead of the window (round 1
+            # measured exactly this: with M9 there, `m-block-off` came back green).
+            elseif ($mode -eq 'prose') {
+                [System.IO.File]::WriteAllText($ep, ("- status: open`n" + $bs + "`n" + $entry + $be + "`n"), $u8)
+                [System.IO.File]::WriteAllText((Join-Path $d 'docs/epics/E2.md'),
+                    ("- status: open`n" + $entry + $bs + "`n" + $be + "`n"), $u8)
+            }
+            # `past`: an entry below `epic-since:` is NORMAL (the past is not retro-applied).
+            elseif ($mode -eq 'past') {
+                [System.IO.File]::WriteAllText($ep, ("- status: open`n" + $bs + "`n- M9 x`n" + $entry + $be + "`n"), $u8)
+            }
+            else { [System.IO.File]::WriteAllText($ep, ("- status: open`n" + $bs + "`n" + $entry + $be + "`n"), $u8) }
+        }
+        $mp = Join-Path $d ('docs/milestones/M' + $epicSn + '.md')
+        # `noref` is "an open epic exists but the reference is missing"; `noepic` is "no epics at all",
+        # and that repo's milestones carry no reference either -- that is the backward-compatible path.
+        if ($mode -eq 'dangling') { [System.IO.File]::WriteAllText($mp, "- epic: E9`n", $u8) }
+        elseif ($mode -eq 'noref' -or $mode -eq 'noepic') { [System.IO.File]::WriteAllText($mp, "- x`n", $u8) }
+        else { [System.IO.File]::WriteAllText($mp, "- epic: E1`n", $u8) }
+        # `past` needs the past milestone (M9) to exist for the verdict to mean anything.
+        if ($mode -eq 'past') {
+            [System.IO.File]::WriteAllText((Join-Path $d 'docs/milestones/M9.md'), "- x`n", $u8)
+        }
+        return $d
+    }
+    function EpicBadIn($root) {
+        return [string](@(EpicScan (EpicFilesIn $root) (MilestoneFilesIn $root) |
+            Where-Object { $_.StartsWith('BAD ', [System.StringComparison]::Ordinal) })).Count
+    }
+    Chk "M6: control -- a reference to a non-existent epic is caught by the real verdict" `
+        (EpicBadIn (EpicFixture 'dangling')) '1'
+    Chk "M7: control -- a broken reverse direction is caught by the real verdict" `
+        (EpicBadIn (EpicFixture 'oneway')) '1'
+    Chk "M8: control -- a missing reference while an epic is open is caught" `
+        (EpicBadIn (EpicFixture 'noref')) '1'
+    # (M9) FALSE-POSITIVE-DIRECTION NEGATIVE CONTROL, bidirectional. The first half asks that a correct
+    # reference does NOT go red; the second that a tree with NO epics at all does not either (backward
+    # compatibility -- tide is bolted onto other people's repos, so that is the contract). Delete the
+    # boundary and the first half breaks; narrow it too far and the second does.
+    Chk "M9: negative control -- correct reference / tree with no epics stay green" `
+        ("{0}/{1}" -f (EpicBadIn (EpicFixture 'clean')), (EpicBadIn (EpicFixture 'noepic'))) '0/0'
+    # (M10) Is the device actually standing IN THIS repo -- an open epic and a milestone reference both
+    # exist. A repo that does not use epics has both at zero and then M5 never fires (M9's second half).
+    Chk "M10: this repo has an open epic and a milestone reference" `
+        ("{0}/{1}" -f $nEpicOpen, $(if ($nEpicRef -gt 0) { 'ok' } else { 'no' })) '1/ok'
+    Chk "M11: epic-members declaration line is exactly 1" (DeclCount $CONV 'epic-members:') '1'
+    # Two fixture controls for the EPIC-SIDE pass (the "and the reverse" half of rule 3). M51's review
+    # blocker 1 was exactly this axis missing, and THE REVERSAL MEASUREMENT COULD NOT SEE IT -- you
+    # cannot break an axis that was never implemented.
+    Chk "M12: control -- an epic listing a non-existent milestone is caught" `
+        (EpicBadIn (EpicFixture 'ghost')) '1'
+    Chk "M13: control -- an epic claiming another epic's milestone is caught" `
+        (EpicBadIn (EpicFixture 'claim')) '1'
+    # (M14) FALSE-POSITIVE-DIRECTION NEGATIVE CONTROL, bidirectional. The first half asks that an
+    # entry-looking line OUTSIDE the block is not counted (E2 names another epic's milestone in prose --
+    # with no window that turns into a `claim`); the second that an entry below `epic-since:`
+    # does not go red (the past is not retro-applied). Delete the window and the first breaks; delete
+    # the past exception and the second does.
+    Chk "M14: negative control -- prose outside the block / a past milestone entry stay green" `
+        ("{0}/{1}" -f (EpicBadIn (EpicFixture 'prose')), (EpicBadIn (EpicFixture 'past'))) '0/0'
+
     Chk "F1: README cases declaration == actual case count" (DeclaredCases) ([string]($script:pass + $script:fail + 1))
 
     Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) (actual command skills N=$N) [runtime: PowerShell $($PSVersionTable.PSVersion) $($PSVersionTable.PSEdition)]"
