@@ -2662,6 +2662,64 @@ chk "N22: 음성 통제 - 붙지 않은 사본은 붉지 않는다" "$(floor_hit
 # (N23) **하위 불릿 형태** — 리뷰 라운드 2가 실측한 모양이다. 창이 들여쓰기를 모르면 이 사본이 초록이 된다.
 chk "N23: 픽스처 통제 - 하위 불릿으로 달아도 잡는다" "$(floor_hits "$(floor_fixture nest)")" "1"
 
+# --- 되돌림 축 선언 정합 (M53-T02) ------------------------------------------
+# 되돌림의 방향이 둘(`broken`·`adversarial`)이라는 것을 규약이 선언하고, **각 축이 그 절 안에서 실제로
+# 서술되는지**를 문다. 선언만 있고 서술이 없으면 «축이 있다»는 말만 남고 무엇을 하라는 것인지가
+# 사라진다 — M53-T01 실측: 재작업 17라운드가 낳은 차단 25건 중 `adversarial` 방향이 연 것이 15건이고
+# `broken` 방향이 연 것은 0건이었다. **묻는 방향이 한쪽이면 나머지는 통째로 뒤 단계로 미뤄진다.**
+MAXES=$(decl_tail "$CONV" 'mutation-axes:' | LC_ALL=C awk -v q="\`" '{
+    n = split($0, a, q)
+    for (i = 2; i <= n; i += 2) if (a[i] != "") print a[i]
+}')
+NMAX=$(printf '%s\n' "$MAXES" | grep -c .)
+axis_desc_in() { # <규약 경로> <축 토큰> → **그 절 안에서** 그 축을 서술하는 줄 수
+    # **창은 선언 줄부터 다음 최상위 체크리스트 항목 전까지다.** 파일 전역을 훑으면 서술을 **지우지
+    # 않고 다른 절로 옮기는** 편집이 초록으로 지나간다 — 같은 피해에 이르는 다른 모양이고,
+    # M53-T03의 **적대 변이 `adv-move`가 실측으로 그것을 보였다**(양 사본 240/0 초록). 이 저장소가
+    # 창 경계에서 세 번 데인 자리라(M52 리뷰 라운드 1·2·3) 이번엔 impl 안에서 닫는다.
+    LC_ALL=C awk -v ax="$2" '
+        index($0, "mutation-axes:") > 0 { win = 1; next }
+        win && $0 ~ /^[0-9]+\. / { win = 0 }
+        win && substr($0, 1, 1) == "#" { win = 0 }
+        win && index($0, "- **`" ax "`") > 0 { n++ }
+        END { print n + 0 }
+    ' "$1"
+}
+axis_missing() { # <규약 경로> → 서술이 없는 축의 수
+    _am=0
+    for _ax in $MAXES; do
+        [ "$(axis_desc_in "$1" "$_ax")" -gt 0 ] || _am=$((_am + 1))
+    done
+    echo "$_am"
+}
+axis_fixture() { # <모드> → 사본 규약 경로 (clean | nodesc | moved)
+    _axf="$SBX/axis-$1.md"
+    case "$1" in
+        nodesc) LC_ALL=C awk '{ if (index($0, "- **`adversarial`") > 0) sub(/adversarial/, "zzz-gone"); print }' \
+                    "$CONV" > "$_axf" ;;
+        moved)  LC_ALL=C awk '
+                    index($0, "- **`adversarial`") > 0 && index($0, "mutation-axes:") == 0 { held = $0; next }
+                    { print }
+                    END { if (held != "") { print ""; print "## zzz-appendix"; print ""; print held } }
+                ' "$CONV" > "$_axf" ;;
+        *)      cat "$CONV" > "$_axf" ;;
+    esac
+    printf '%s' "$_axf"
+}
+chk "N24: mutation-axes 선언 줄 정확히 1개" "$(decl_count "$CONV" 'mutation-axes:')" "1"
+# (N25) 추출 positive-control — 백틱 구획 파싱이 망가지면 아래 본 검사가 «축 0개»로 공허 통과한다.
+chk "N25: 되돌림 축 추출 positive-control(>0)" "$([ "$NMAX" -gt 0 ] && echo ok || echo no)" "ok"
+# (N26) **본 검사.** 선언된 축마다 그 축을 서술하는 줄이 있어야 한다.
+chk "N26: 본 검사 - 서술이 없는 되돌림 축 0개" "$(axis_missing "$CONV")" "0"
+# 픽스처 통제 — **실제 판정을 픽스처에 건다**(M46 판례).
+chk "N27: 픽스처 통제 - 축의 서술이 사라지면 잡는다" "$(axis_missing "$(axis_fixture nodesc)")" "1"
+chk "N28: 음성 통제 - 손대지 않은 사본은 붉지 않는다" "$(axis_missing "$(axis_fixture clean)")" "0"
+# (N29) **적대 변이의 승격**(M53). 서술을 **지우지 않고 다른 절로 옮기는** 편집 — 적대 변이가 초록으로
+# 열었던 자리이고, 창을 절로 좁혀 닫았다. 이 케이스가 없으면 **창을 되돌려도 아무것도 붉지 않는다**
+# (실측: 창 좁히기를 되돌린 변이가 240/0 초록이었다). 규약의 「성립한 적대 변이는 픽스처로 승격한다」가
+# 이 자리를 가리킨다.
+chk "N29: 적대 통제 - 서술을 절 밖으로 옮기면 잡는다" "$(axis_missing "$(axis_fixture moved)")" "1"
+
 chk "F1: README cases 선언 == 실제 케이스 수" "$(declared_cases)" "$((pass + fail + 1))"
 
 echo
