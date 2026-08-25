@@ -12,7 +12,7 @@ flowchart LR
     I --> R["/tide:review<br/>(리뷰·판정)"]
     R --> Rel["/tide:release vX.Y.Z<br/>(배포)"]
 
-    subgraph cycle ["/tide:cycle — release 직전 정지"]
+    subgraph cycle ["/tide:cycle — release 직전 정지 (autonomy=continuous면 커밋 앞)"]
         M
         I
         R
