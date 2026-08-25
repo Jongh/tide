@@ -2921,6 +2921,73 @@ try {
     # this copy reads green.
     Chk "N23: control -- attaching via a nested bullet is caught too" ([string](FloorHits (FloorFixture 'nest'))) '1'
 
+    # --- reversal-axis declaration consistency (M53-T02) ----------------------
+    # The convention declares that reversal has TWO directions (`broken`, `adversarial`) and this asks
+    # whether each declared axis is actually DESCRIBED in that section. A declaration without a
+    # description leaves "there are axes" and nothing telling you what to do -- M53-T01 measured it:
+    # of 25 blockers born from 17 rework rounds, the `adversarial` direction opened 15 and `broken`
+    # opened 0. When the question points one way, the rest is deferred wholesale to a later stage.
+    $mAxes = @((DeclTail $CONV 'mutation-axes:') -split ([string][char]0x60) | ForEach-Object -Begin { $i = 0 } -Process {
+        $i++
+        if (($i % 2) -eq 0 -and $_ -ne '') { $_ }
+    })
+    # THE WINDOW IS THAT SECTION -- from the declaration line to the next top-level checklist item.
+    # Scanning the whole file lets an edit that MOVES the description to another section (rather than
+    # deleting it) sail through green: same damage, different shape. M53-T03's adversarial mutation
+    # `adv-move` measured exactly that (240/0 green in both copies). This repo has been burned at a
+    # window boundary three times (M52 review rounds 1-3), so this one is closed inside impl.
+    function AxisDescIn([string]$path, [string]$ax) {
+        $n = 0
+        $win = $false
+        foreach ($l in [System.IO.File]::ReadAllLines($path)) {
+            if ($l.Contains('mutation-axes:')) { $win = $true; continue }
+            if ($win -and ($l -match '^[0-9]+\. ')) { $win = $false }
+            if ($win -and $l.StartsWith('#', [System.StringComparison]::Ordinal)) { $win = $false }
+            if ($win -and $l.Contains('- **' + [string][char]0x60 + $ax)) { $n++ }
+        }
+        return $n
+    }
+    function AxisMissing([string]$path) {
+        $m = 0
+        foreach ($ax in $mAxes) {
+            if ((AxisDescIn $path $ax) -eq 0) { $m++ }
+        }
+        return $m
+    }
+    function AxisFixture([string]$mode) {
+        $f = Join-Path $sbx ('axis-' + $mode + '.md')
+        $out = New-Object System.Collections.ArrayList
+        $held = ''
+        foreach ($l in [System.IO.File]::ReadAllLines($CONV)) {
+            $x = $l
+            $isDesc = ($x.Contains('- **' + [string][char]0x60 + 'adversarial') -and (-not $x.Contains('mutation-axes:')))
+            if ($mode -eq 'nodesc' -and $isDesc) { $x = $x.Replace('adversarial', 'zzz-gone') }
+            if ($mode -eq 'moved' -and $isDesc) { $held = $x; continue }
+            [void]$out.Add($x)
+        }
+        if ($mode -eq 'moved' -and $held -ne '') {
+            [void]$out.Add('')
+            [void]$out.Add('## zzz-appendix')
+            [void]$out.Add('')
+            [void]$out.Add($held)
+        }
+        [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    Chk "N24: mutation-axes declaration line is exactly 1" (DeclCount $CONV 'mutation-axes:') '1'
+    # (N25) Extraction positive-control -- a broken backtick-span parse makes the check below vacuous.
+    Chk "N25: reversal-axis extraction positive-control (>0)" $(if (@($mAxes).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # (N26) THE MAIN CHECK. Every declared axis must be described in the section.
+    Chk "N26: main check -- declared axes with no description: 0" ([string](AxisMissing $CONV)) '0'
+    # Fixture control -- the REAL verdict runs against the fixture (M46 precedent).
+    Chk "N27: control -- an axis losing its description is caught" ([string](AxisMissing (AxisFixture 'nodesc'))) '1'
+    Chk "N28: negative control -- an untouched copy stays green" ([string](AxisMissing (AxisFixture 'clean'))) '0'
+    # (N29) PROMOTING THE ADVERSARIAL MUTATION (M53). Moving the description to another section rather
+    # than deleting it -- the shape the adversarial mutation walked through green, closed by narrowing
+    # the window to the section. Without this case, REVERTING that narrowing reddens nothing (measured:
+    # 240/0 green). The convention's "a landed adversarial mutation is promoted to a fixture" points here.
+    Chk "N29: adversarial control -- moving the description out of the section is caught" ([string](AxisMissing (AxisFixture 'moved'))) '1'
+
     Chk "F1: README cases declaration == actual case count" (DeclaredCases) ([string]($script:pass + $script:fail + 1))
 
     Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) (actual command skills N=$N) [runtime: PowerShell $($PSVersionTable.PSVersion) $($PSVersionTable.PSEdition)]"
