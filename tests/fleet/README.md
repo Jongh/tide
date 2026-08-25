@@ -2,7 +2,7 @@
 
 `/tide:fleet`(멀티 레포 오케스트레이션 1층)의 **결정적 핵심**을 재현 가능하게 검증하는 하니스다.
 
-**현재 케이스 수 (cases: 42)** — `run.sh` @ **dash**(우분투 `/bin/sh`) · `run.sh` @ **bash**(Git
+**현재 케이스 수 (cases: 45)** — `run.sh` @ **dash**(우분투 `/bin/sh`) · `run.sh` @ **bash**(Git
 Bash) · `run.ps1` @ **Windows PowerShell 5.1** · `run.ps1` @ **pwsh 7** — **네 실행 환경 모두**
 같은 수, FAIL 0.
 

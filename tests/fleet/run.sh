@@ -4,7 +4,7 @@
 # fleet은 프롬프트 스킬이라 실행 바이너리가 없다. 따라서 그 스킬이 따르는 **결정적 핵심**
 # (발견 규약 + `/tide:status` 분류 + 정규 taxonomy 요약)을 동일 로직의 **참조 셸 절차**로
 # 재현해 픽스처에 대해 검증한다 — 단일 원본은 `docs/conventions.md` "멀티 레포 오케스트레이션"
-# 절이고, 이 러너는 그 정규 taxonomy(5 position·1:1 요약·숨김 무시)를 회귀 고정한다.
+# 절이고, 이 러너는 그 정규 taxonomy(일곱 position·1:1 요약·숨김 무시)를 회귀 고정한다.
 # advisory 서술 품질은 README의 세션 레벨 수동 절차로 분리한다.
 #
 # 주의: git 차단 동사는 이 스크립트 내부 setup에만 둔다(여기선 init만 — commit 불필요).
@@ -35,9 +35,20 @@ chk() { # <desc> <got> <want>
 
 # is_tide_repo/discover: tests/lib/discover.sh (단일 원본)
 
-# --- 분류(참조 구현): /tide:status 다음 커맨드 판단 규칙 (5 position, ASCII 라벨) ---
+# --- 분류(참조 구현): /tide:status 다음 커맨드 판단 규칙 (일곱 position, ASCII 라벨) ---
+# **debug position이 사이클 position보다 앞선다** — status의 판단 규칙이 그 순서를 정하고 규약의
+# "advisory 계획 규칙" 절이 taxonomy로 고정한다. 이 순서가 없으면 같은 상태에서 status와 fleet이
+# 다른 커맨드를 낸다(M52 리뷰 차단 2: 수집만 고치고 taxonomy를 두면 실해가 그대로 남는다).
 classify() { # <repo> → 라벨
     r="$1"
+    [ -f "$r/.tide/debug-session" ] && { echo "debug-open"; return; }
+    dbg=$(ls "$r"/docs/reports/debug-*.md 2>/dev/null | sort -V | tail -1)   # locale-exempt: version-sort (M40 결정과 같은 자리)
+    # 태그가 하나도 없으면 전부 미릴리즈다(규약 "debug 세션" 절의 릴리즈 경로 항목). 픽스처는 커밋을
+    # 만들지 않으므로 **이 분기만 실증되고**, 태그가 있는 트리의 `git ls-tree` 대조는 묻지 않는다.
+    if [ -n "$dbg" ] && [ -z "$(git -C "$r" tag 2>/dev/null)" ]; then
+        if grep -q '불가' "$dbg"; then :
+        elif grep -q '가능' "$dbg"; then echo "debug-release-ready"; return; fi
+    fi
     ms=$(ls "$r"/docs/milestones/M*.md 2>/dev/null | sort -V | tail -1)   # locale-exempt: version-sort (M40 결정 — macOS 레그 통과가 BSD 지원의 실측)
     [ -n "$ms" ] || { echo "milestone-needed"; return; }       # milestone 필요
     n=$(basename "$ms" .md)
@@ -47,9 +58,9 @@ classify() { # <repo> → 라벨
     if grep -q '가능' "$r/docs/reports/${n}-review.md"; then echo "release-ready"; return; fi  # release 가능
     echo "unknown"
 }
-# --- 교차 요약(참조 구현): position 1:1 카운트 (정규 5버킷, 합산 금지) ---
-summarize() { # <parent> → "release=N review=N impl=N milestone=N fix=N"
-    rel=0; rev=0; imp=0; mil=0; fix=0
+# --- 교차 요약(참조 구현): position 1:1 카운트 (정규 일곱 버킷, 합산 금지) ---
+summarize() { # <parent> → "release=N review=N impl=N milestone=N fix=N dbgopen=N dbgrel=N"
+    rel=0; rev=0; imp=0; mil=0; fix=0; dbo=0; dbr=0
     for b in $(discover "$1"); do
         case "$(classify "$1/$b")" in
             release-ready)   rel=$((rel+1));;
@@ -57,9 +68,11 @@ summarize() { # <parent> → "release=N review=N impl=N milestone=N fix=N"
             impl-inprogress) imp=$((imp+1));;
             milestone-needed) mil=$((mil+1));;
             needs-fix)       fix=$((fix+1));;
+            debug-open)      dbo=$((dbo+1));;
+            debug-release-ready) dbr=$((dbr+1));;
         esac
     done
-    echo "release=$rel review=$rev impl=$imp milestone=$mil fix=$fix"
+    echo "release=$rel review=$rev impl=$imp milestone=$mil fix=$fix dbgopen=$dbo dbgrel=$dbr"
 }
 
 # read_deps/dep_name: tests/lib/deps.sh, strip_bom: tests/lib/encoding.sh (단일 원본; 위에서 source).
@@ -155,7 +168,7 @@ idx_of() { # <order-string> <name> → 0-based 인덱스(없으면 -1)
     echo "-1"
 }
 
-# --- 픽스처: 5 position을 각각 두는 자식들 + 제외 케이스(commit 불필요) ---
+# --- 픽스처: 일곱 position을 각각 두는 자식들 + 제외 케이스(commit 불필요) ---
 P="$SBX/parent"; mkdir -p "$P"
 A="$P/repo-a"; mkdir -p "$A/docs/milestones" "$A/docs/reports"; git -C "$A" init -q   # release 가능
 printf '# M1\n' > "$A/docs/milestones/M1.md"; printf '{ "version": "0.1.0" }\n' > "$A/package.json"
@@ -170,6 +183,19 @@ printf '# M1\n' > "$D/docs/milestones/M1.md"; printf '# M1 impl\n' > "$D/docs/re
 printf '## release verdict\n\n**불가**(테스트 실패) — 보완 필요\n' > "$D/docs/reports/M1-review.md"
 E="$P/repo-e"; mkdir -p "$E/.tide"; git -C "$E" init -q                               # milestone 필요
 printf '{ "version": "0.1.0" }\n' > "$E/package.json"; printf 'idle\n' > "$E/.tide/phase"
+# 아래 둘은 **사이클 규칙만 보면 release 가능**인 트리다 — debug 규칙이 먼저 걸리는지를 묻는 자리다.
+F="$P/repo-f"; mkdir -p "$F/docs/milestones" "$F/docs/reports" "$F/.tide"; git -C "$F" init -q  # debug 세션 열림
+printf '# M1\n' > "$F/docs/milestones/M1.md"; printf '# M1 impl\n' > "$F/docs/reports/M1-impl.md"
+printf '## release verdict\n\n**가능** — 추천: **v0.2.0 (minor)**\n' > "$F/docs/reports/M1-review.md"
+printf '1\n' > "$F/.tide/debug-session"
+G="$P/repo-g"; mkdir -p "$G/docs/milestones" "$G/docs/reports"; git -C "$G" init -q             # debug 릴리즈 가능
+printf '# M1\n' > "$G/docs/milestones/M1.md"; printf '# M1 impl\n' > "$G/docs/reports/M1-impl.md"
+printf '## release verdict\n\n**가능** — 추천: **v0.2.0 (minor)**\n' > "$G/docs/reports/M1-review.md"
+printf '## release verdict\n\n**가능** — 추천: **v0.2.1 (patch)**\n' > "$G/docs/reports/debug-1.md"
+H2="$P/repo-h"; mkdir -p "$H2/docs/milestones" "$H2/docs/reports" "$H2/.tide"; git -C "$H2" init -q  # 잔재 phase=debug
+printf '# M1\n' > "$H2/docs/milestones/M1.md"; printf '# M1 impl\n' > "$H2/docs/reports/M1-impl.md"
+printf '## release verdict\n\n**가능** — 추천: **v0.2.0 (minor)**\n' > "$H2/docs/reports/M1-review.md"
+printf 'debug\n' > "$H2/.tide/phase"
 mkdir -p "$P/plain"; printf 'x\n' > "$P/plain/readme.txt"                             # 비-git → 제외
 NDr="$P/notide"; mkdir -p "$NDr"; git -C "$NDr" init -q; printf 'x\n' > "$NDr/file.txt"  # tide 산출물 없음 → 제외
 H="$P/.hidden-svc"; mkdir -p "$H/docs/milestones"; git -C "$H" init -q                # 숨김 → 제외(tide 산출물 있어도)
@@ -177,14 +203,17 @@ printf '# M1\n' > "$H/docs/milestones/M1.md"
 
 # --- 시나리오 ---
 got=$(discover "$P" | tr '\n' ',')
-chk "발견: tide 레포만 (plain·notide·.hidden 제외)" "$got" "repo-a,repo-b,repo-c,repo-d,repo-e,"
+chk "발견: tide 레포만 (plain·notide·.hidden 제외)" "$got" "repo-a,repo-b,repo-c,repo-d,repo-e,repo-f,repo-g,repo-h,"
 chk "분류 repo-a = release 가능"  "$(classify "$A")" "release-ready"
 chk "분류 repo-b = review 대기"   "$(classify "$B")" "review-pending"
 chk "분류 repo-c = impl 진행"     "$(classify "$C")" "impl-inprogress"
 chk "분류 repo-d = 보완 필요(불가)" "$(classify "$D")" "needs-fix"
 chk "분류 repo-e = milestone 필요" "$(classify "$E")" "milestone-needed"
+chk "분류 repo-f = debug 세션 열림 (사이클 규칙보다 우선)" "$(classify "$F")" "debug-open"
+chk "분류 repo-g = debug 릴리즈 가능 (리뷰 판정보다 우선)" "$(classify "$G")" "debug-release-ready"
+chk "분류 repo-h = 잔재 phase=debug는 position이 아니다" "$(classify "$H2")" "release-ready"
 chk "숨김 디렉터리(.hidden-svc) 미발견" "$(discover "$P" | grep -c hidden)" "0"
-chk "교차 요약 5버킷 1:1" "$(summarize "$P")" "release=1 review=1 impl=1 milestone=1 fix=1"
+chk "교차 요약 일곱 버킷 1:1" "$(summarize "$P")" "release=2 review=1 impl=1 milestone=1 fix=1 dbgopen=1 dbgrel=1"
 
 # graceful 강등: tide 레포 0개인 부모
 EMPTY="$SBX/empty"; mkdir -p "$EMPTY/just-a-folder"
@@ -327,4 +356,4 @@ chk "case-count: README cases declaration == actual" "$(declared_cases)" "$((pas
 echo
 echo "# 결과: PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ] || exit 1
-echo "# fleet 발견·5분류·1:1 요약·숨김 무시·강등·다중 자리 마일스톤·위상정렬·순환 폴백·전체 연산자 계약 비교·BOM 내성 확인됨 (참조 구현 기준)"
+echo "# fleet 발견·일곱 분류(debug 우선)·1:1 요약·숨김 무시·강등·다중 자리 마일스톤·위상정렬·순환 폴백·전체 연산자 계약 비교·BOM 내성 확인됨 (참조 구현 기준)"

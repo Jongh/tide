@@ -2659,6 +2659,268 @@ try {
     Chk "M14: negative control -- prose outside the block / a past milestone entry stay green" `
         ("{0}/{1}" -f (EpicBadIn (EpicFixture 'prose')), (EpicBadIn (EpicFixture 'past'))) '0/0'
 
+    # === Part N (M52) -- status-item declaration consistency ==================
+    # The convention declares the check-item list ONCE and /tide:status + /tide:fleet only READ it.
+    # The defect this closes: the declaration and a copy drifted -- fleet had six pinned while status
+    # grew to eight, so fleet's decision rules could not fire for lack of data (M52-T01 measurement).
+    # Consumer checks use ASCII tokens ONLY (`status-items:`, `M{N}-impl.md`) so this copy keeps
+    # byte>127 = 0 while both twins use LITERALLY THE SAME predicate.
+    $nSiAbsent = @(MarkersOf 'status-items-absent:').Count
+    $nSi = @(MarkersOf 'status-items:').Count
+    function SiRowsIn([string]$path) {
+        $win = $false; $n = 0
+        foreach ($l in [System.IO.File]::ReadAllLines($path)) {
+            if ($l.Contains('status-items:')) { $win = $true; continue }
+            if ($win -and $l.StartsWith('#', [System.StringComparison]::Ordinal)) { $win = $false }
+            if ($win -and $l.StartsWith('  | `', [System.StringComparison]::Ordinal)) { $n++ }
+        }
+        return $n
+    }
+    function SiMismatch([string]$path) {
+        $t = DeclTail $path 'status-items:'
+        $d = 0
+        if ($null -ne $t) { $d = @(($t -replace '[`*]', '') -split ' ' | Where-Object { $_ -ne '' }).Count }
+        if ($d -eq (SiRowsIn $path)) { return '0' }
+        return '1'
+    }
+    function SiFixture([string]$mode) {
+        $f = Join-Path $sbx ("si-" + $mode + ".md")
+        $out = New-Object System.Collections.ArrayList
+        $dropped = $false
+        foreach ($l in [System.IO.File]::ReadAllLines($CONV)) {
+            $x = $l
+            if ($mode -eq 'norow' -and -not $dropped -and `
+                $x.StartsWith('  | `open-epic`', [System.StringComparison]::Ordinal)) { $dropped = $true; continue }
+            if ($mode -eq 'notoken' -and $x.Contains('`status-items:`')) { $x = $x.Replace(' open-epic', '') }
+            [void]$out.Add($x)
+        }
+        [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    Chk "N1: status-items declaration line is exactly 1" (DeclCount $CONV 'status-items:') '1'
+    Chk "N2: autonomy-level declaration line is exactly 1" (DeclCount $CONV 'autonomy-level:') '1'
+    # (N3) COMPOUND expectation. The first half is the extraction positive-control; the second re-runs
+    # the SAME extraction path with an ABSENT key and asks that it reads as empty. Deciding absence by
+    # COUNT (not by string) is M51's lesson -- PowerShell's null-passthrough made `-ne ''` true and the
+    # two copies diverged.
+    Chk "N3: marker extraction positive-control / an absent key reads as empty" `
+        ("{0}/{1}" -f $(if ($nSi -gt 0) { 'ok' } else { 'no' }), $(if ($nSiAbsent -gt 0) { 'ok' } else { 'no' })) 'ok/no'
+    # (N4) THE MAIN CHECK. Declaration token count vs table row count.
+    Chk "N4: main check -- declared token count == table row count" (SiMismatch $CONV) '0'
+    # Two fixture controls -- the REAL verdict is run against the fixture (M46 precedent), breaking
+    # EACH DIRECTION separately.
+    Chk "N5: control -- a row missing from the table is caught" (SiMismatch (SiFixture 'norow')) '1'
+    Chk "N6: control -- a token missing from the declaration is caught" (SiMismatch (SiFixture 'notoken')) '1'
+    Chk "N7: negative control -- an untouched copy stays green" (SiMismatch (SiFixture 'clean')) '0'
+    # (N8)(N9) CONSUMER CHECK -- copies 0, references 2. Only one of the two holding means either
+    # "points at nothing" or "a copy survived", so BOTH are asked.
+    $siRefS = @(Select-String -Path (Join-Path $ROOT 'skills/status/SKILL.md') -SimpleMatch 'status-items:').Count
+    $siRefF = @(Select-String -Path (Join-Path $ROOT 'skills/fleet/SKILL.md') -SimpleMatch 'status-items:').Count
+    $siOldS = @(Select-String -Path (Join-Path $ROOT 'skills/status/SKILL.md') -SimpleMatch 'M{N}-impl.md').Count
+    $siOldF = @(Select-String -Path (Join-Path $ROOT 'skills/fleet/SKILL.md') -SimpleMatch 'M{N}-impl.md').Count
+    Chk "N8: both consumers point at the declaration (status/fleet)" `
+        ("{0}/{1}" -f $(if ($siRefS -gt 0) { 'ok' } else { 'no' }), $(if ($siRefF -gt 0) { 'ok' } else { 'no' })) 'ok/ok'
+    Chk "N9: no trace of the old enumeration in the consumers (status/fleet)" `
+        ("{0}/{1}" -f $siOldS, $siOldF) '0/0'
+
+    # --- autonomy wiring declaration consistency (M52 review blocker 1) -------
+    # Part L bites the safety-floor ENUMERATION itself, but an edit that makes a floor gate
+    # autonomy-conditional IN THE SKILL leaves that enumeration untouched -- the M52 review measured it
+    # on a tree copy (one sentence added to the PR-CI gate, list untouched: 221/0 green). So the
+    # convention now declares WHERE autonomy may attach (`autonomy-lines:`) and this compares it with
+    # the measured tree. Changing the scope requires editing the declaration, and that edit being
+    # visible to review is the defense here -- the convention states that limit alongside.
+    $autLines = ((OrdinalSort @(MarkersOf 'autonomy-lines:')) -join ' ')
+    $autDef = @(MarkersOf 'autonomy-default:')[0]
+    function AutonScan([string]$root) {
+        $out = New-Object System.Collections.Generic.List[string]
+        foreach ($d in ([System.IO.Directory]::GetDirectories($root))) {
+            $f = Join-Path $d 'SKILL.md'
+            if (-not [System.IO.File]::Exists($f)) { continue }
+            $c = @([System.IO.File]::ReadAllLines($f) | Where-Object { $_.Contains('autonomy') }).Count
+            if ($c -gt 0) { [void]$out.Add((Split-Path $d -Leaf) + '=' + $c) }
+        }
+        return ((OrdinalSort $out.ToArray()) -join ' ')
+    }
+    function AutonMismatch([string]$root, [string]$decl) {
+        if ((AutonScan $root) -eq $decl) { return '0' }
+        return '1'
+    }
+    function AutonFixture([string]$mode) {
+        $f = Join-Path $sbx ('auton-' + $mode)
+        if (Test-Path $f) { Remove-Item $f -Recurse -Force }
+        [void][System.IO.Directory]::CreateDirectory($f)
+        $done = $false
+        foreach ($t in ($autLines -split ' ')) {
+            if ($t -eq '') { continue }
+            $name = $t.Substring(0, $t.IndexOf('='))
+            $k = [int]$t.Substring($t.IndexOf('=') + 1)
+            if ($mode -eq 'more' -and -not $done) { $k = $k + 1; $done = $true }
+            $d = Join-Path $f $name
+            [void][System.IO.Directory]::CreateDirectory($d)
+            $lines = New-Object System.Collections.Generic.List[string]
+            for ($i = 0; $i -lt $k; $i++) { [void]$lines.Add('autonomy') }
+            [System.IO.File]::WriteAllLines((Join-Path $d 'SKILL.md'), $lines.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        }
+        if ($mode -eq 'extra') {
+            $d = Join-Path $f 'zzz-outside'
+            [void][System.IO.Directory]::CreateDirectory($d)
+            [System.IO.File]::WriteAllLines((Join-Path $d 'SKILL.md'), @('autonomy'), (New-Object System.Text.UTF8Encoding($false)))
+        }
+        return $f
+    }
+    function AutonDefaultOk() {
+        # An EMPTY default is pinned to 'no': an empty pattern always matches in `grep -F` (the .sh
+        # twin), while `Contains($null)` here yields 0 -- so a lost marker would SPLIT THE TWO COPIES.
+        # Reversal `n10-key` measured exactly that split (sh 228/1 vs ps1 227/2). Pin the verdict here.
+        if ([string]::IsNullOrEmpty($autDef)) { return 'no' }
+        $r = 'ok'
+        foreach ($t in ($autLines -split ' ')) {
+            if ($t -eq '') { continue }
+            $name = $t.Substring(0, $t.IndexOf('='))
+            $p = Join-Path $ROOT ('skills/' + $name + '/SKILL.md')
+            if (-not [System.IO.File]::Exists($p)) { return 'no' }
+            if (@([System.IO.File]::ReadAllLines($p) | Where-Object { $_.Contains($autDef) }).Count -eq 0) { $r = 'no' }
+        }
+        return $r
+    }
+    # (N10) COMPOUND -- one declaration fixes the meaning of absence, and its value must be a member of
+    # the value set. A default outside the set leaves "what does a missing file mean" undecided.
+    Chk "N10: autonomy-default declared once / value is in the value set" `
+        ("{0}/{1}" -f (DeclCount $CONV 'autonomy-default:'), @(@(MarkersOf 'autonomy-level:') | Where-Object { $_ -eq $autDef }).Count) '1/1'
+    Chk "N11: autonomy-lines declaration line is exactly 1" (DeclCount $CONV 'autonomy-lines:') '1'
+    # (N12) THE MAIN CHECK. Measured autonomy wiring vs the declaration.
+    Chk "N12: main check -- measured autonomy wiring == autonomy-lines declaration" (AutonMismatch (Join-Path $ROOT 'skills') $autLines) '0'
+    # Two fixture controls -- the REAL verdict runs against the fixture (M46 precedent), each direction.
+    Chk "N13: control -- a skill outside the declaration carrying the token is caught" (AutonMismatch (AutonFixture 'extra') $autLines) '1'
+    Chk "N14: control -- a declared skill growing an autonomy line is caught" (AutonMismatch (AutonFixture 'more') $autLines) '1'
+    Chk "N15: negative control -- a copy matching the declaration stays green" (AutonMismatch (AutonFixture 'clean') $autLines) '0'
+    # (N16) The backward-compatibility contract: absence means CURRENT behaviour, stated in both sites.
+    Chk "N16: default contract -- every declared skill carries the default token" (AutonDefaultOk) 'ok'
+    # (N17) fleet-cycle start-point copy -- reference 1, enumeration 0 IN THAT WHOLE PARAGRAPH.
+    # The first version opened the window at the marker line and closed it at the next blank line;
+    # reversal `n17-copy` revived the enumeration ABOVE the marker and sailed through green (229/0).
+    # A window that opens in one direction only lets the copy live on the other side. Now the paragraph
+    # is collected whole (blank-line delimited) and bullets are counted whenever it carries the marker.
+    $fcPath = Join-Path $ROOT 'skills/fleet-cycle/SKILL.md'
+    $fcRef = @([System.IO.File]::ReadAllLines($fcPath) | Where-Object { $_.Contains('status-items:') }).Count
+    $fcBul = 0
+    $fcBuf = New-Object System.Collections.Generic.List[string]
+    $fcHas = $false
+    function FcFlush() {
+        if ($script:fcHas) {
+            foreach ($b in $script:fcBuf) {
+                if ($b.StartsWith('- ', [System.StringComparison]::Ordinal) -or $b.StartsWith('  -', [System.StringComparison]::Ordinal)) { $script:fcBul++ }
+            }
+        }
+        $script:fcHas = $false
+        $script:fcBuf.Clear()
+    }
+    foreach ($l in [System.IO.File]::ReadAllLines($fcPath)) {
+        if ($l -eq '') { FcFlush; continue }
+        [void]$fcBuf.Add($l)
+        if ($l.Contains('status-items:')) { $fcHas = $true }
+    }
+    FcFlush
+    Chk "N17: fleet-cycle start point -- reference 1 / enumeration 0 in that paragraph" `
+        ("{0}/{1}" -f $(if ($fcRef -gt 0) { 'ok' } else { 'no' }), $fcBul) 'ok/0'
+
+    # --- floor-mark co-existence ban (M52 review round 1, blocker 1) ----------
+    # `autonomy-lines:` counts MENTIONS, not conditions, so MOVING a condition from one gate to another
+    # preserved the count and stayed green (review measured: preflight-3's condition moved onto the
+    # PR-CI gate -> 229/0). So this asks the question directly: is autonomy attached TO A FLOOR GATE?
+    # A declared `floor-marks:` token in the SAME ITEM WINDOW as an autonomy token is a hit. Windows
+    # break at list items (and blank lines).
+    function FloorMarks() {
+        $t = DeclTail $CONV 'floor-marks:'
+        $out = New-Object System.Collections.Generic.List[string]
+        if ($null -eq $t) { return @() }
+        $parts = $t.Split([char]0x60)
+        for ($i = 1; $i -lt $parts.Count; $i += 2) {
+            if ($parts[$i] -ne '') { [void]$out.Add($parts[$i]) }
+        }
+        return @($out)
+    }
+    $floorMarks = @(FloorMarks)
+    function IndOf([string]$s) {
+        $n = 0
+        while ($n -lt $s.Length -and $s[$n] -eq ' ') { $n++ }
+        return $n
+    }
+    function IsItemLine([string]$s) {
+        $t = $s.Substring((IndOf $s))
+        if ($t.StartsWith('- ', [System.StringComparison]::Ordinal)) { return $true }
+        return ($t -match '^[0-9]+\. ')
+    }
+    # THE WINDOW KNOWS INDENTATION (rework 3). The first version opened a new window at ANY item line,
+    # so a NESTED bullet escaped its parent's window: attaching the condition right under a floor-gate
+    # item left mark and condition in different windows and the tree stayed green (review round 2
+    # measured 234/0). A deeper item now stays inside the parent window -- what closes is the item's
+    # SUBTREE, not one edit shape. Windows break at (1) an item at the same or shallower indent and
+    # (2) an indent-0 non-item line following a blank line. Indent counts SPACES only (no tabs here).
+    function FloorHitsIn([string]$path) {
+        $wins = New-Object System.Collections.Generic.List[string]
+        $cur = New-Object System.Text.StringBuilder
+        $curInd = -1
+        $pb = $true
+        foreach ($l in [System.IO.File]::ReadAllLines($path)) {
+            if ($l -eq '') { $pb = $true; [void]$cur.Append([string][char]10 + $l); continue }
+            if (IsItemLine $l) {
+                $i = IndOf $l
+                if ($curInd -lt 0 -or $i -le $curInd) {
+                    [void]$wins.Add($cur.ToString()); [void]$cur.Clear(); $curInd = $i
+                }
+            } elseif ((IndOf $l) -eq 0 -and $pb) {
+                [void]$wins.Add($cur.ToString()); [void]$cur.Clear(); $curInd = -1
+            }
+            $pb = $false
+            [void]$cur.Append([string][char]10 + $l)
+        }
+        [void]$wins.Add($cur.ToString())
+        $hits = 0
+        foreach ($w in $wins) {
+            if (-not $w.Contains('autonomy')) { continue }
+            foreach ($m in $floorMarks) { if ($m -ne '' -and $w.Contains($m)) { $hits++; break } }
+        }
+        return $hits
+    }
+    function FloorHits([string]$root) {
+        $h = 0
+        foreach ($d in ([System.IO.Directory]::GetDirectories($root))) {
+            $f = Join-Path $d 'SKILL.md'
+            if (-not [System.IO.File]::Exists($f)) { continue }
+            $h += (FloorHitsIn $f)
+        }
+        return $h
+    }
+    function FloorFixture([string]$mode) {
+        $f = Join-Path $sbx ('floor-' + $mode)
+        if (Test-Path $f) { Remove-Item $f -Recurse -Force }
+        [void][System.IO.Directory]::CreateDirectory((Join-Path $f 'rel'))
+        $ln = New-Object System.Collections.Generic.List[string]
+        [void]$ln.Add('- publish branch -- finish a merged PR.')
+        [void]$ln.Add('  PR CI check (`gh pr checks`): on failure, proceed after user confirmation.')
+        if ($mode -eq 'attach') { [void]$ln.Add('  unless `.tide/autonomy` is `continuous`, in which case proceed without asking.') }
+        if ($mode -eq 'nest') { [void]$ln.Add('  - if `.tide/autonomy` is `continuous`, proceed without the confirmation above.') }
+        [void]$ln.Add('')
+        [void]$ln.Add('- preflight 3 -- unrelated changes. If `.tide/autonomy` is `continuous`, proceed without asking.')
+        [System.IO.File]::WriteAllLines((Join-Path $f 'rel/SKILL.md'), $ln.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    # (N18)(N19) Declaration uniqueness and the EXTRACTION positive-control -- if extraction comes back
+    # empty the main check below is vacuously 0, and a broken backtick-span parse is exactly that path.
+    Chk "N18: floor-marks declaration line is exactly 1" (DeclCount $CONV 'floor-marks:') '1'
+    Chk "N19: floor-mark extraction positive-control (>0)" $(if ($floorMarks.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # (N20) THE MAIN CHECK. An autonomy token sharing an item window with a floor mark is a hit.
+    Chk "N20: main check -- autonomy token in a floor-mark window: 0" ([string](FloorHits (Join-Path $ROOT 'skills'))) '0'
+    # Fixture controls -- the REAL verdict runs against the fixture (M46). `attach` is the shape of the
+    # MOVE edit the review measured.
+    Chk "N21: control -- autonomy attached to a floor gate is caught" ([string](FloorHits (FloorFixture 'attach'))) '1'
+    Chk "N22: negative control -- an unattached copy stays green" ([string](FloorHits (FloorFixture 'clean'))) '0'
+    # (N23) THE NESTED-BULLET SHAPE -- what review round 2 measured. If the window ignores indentation
+    # this copy reads green.
+    Chk "N23: control -- attaching via a nested bullet is caught too" ([string](FloorHits (FloorFixture 'nest'))) '1'
+
     Chk "F1: README cases declaration == actual case count" (DeclaredCases) ([string]($script:pass + $script:fail + 1))
 
     Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) (actual command skills N=$N) [runtime: PowerShell $($PSVersionTable.PSVersion) $($PSVersionTable.PSEdition)]"

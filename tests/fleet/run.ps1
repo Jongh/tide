@@ -1,7 +1,7 @@
-# tide fleet live test (Windows PowerShell 5.1) -- discovery / 5-position classify / summary / degrade
+# tide fleet live test (Windows PowerShell 5.1) -- discovery / 7-position classify / summary / degrade
 #
 # fleet is a prompt skill with no executable. This exercises a REFERENCE of its deterministic
-# core (discovery rule + /tide:status classification + canonical 5-position taxonomy summary)
+# core (discovery rule + /tide:status classification + canonical 7-position taxonomy summary)
 # against fixtures; the single source is docs/conventions.md "multi-repo orchestration".
 # Advisory narrative quality -> README manual.
 #
@@ -56,8 +56,23 @@ function GitInit($d) { New-Item -ItemType Directory -Force -Path $d | Out-Null; 
 
 # IsTideRepo/Discover: tests\lib\discover.ps1 (single source)
 
-# --- classification reference: /tide:status next-command judgment (5 positions, ASCII labels) ---
+# --- classification reference: /tide:status next-command judgment (7 positions, ASCII labels) ---
+# DEBUG POSITIONS COME FIRST -- status' judgment rules set that order and the conventions section
+# "advisory plan rules" pins it as the taxonomy. Without the order, the same state yields a different
+# command from status and from fleet (M52 review blocker 2: fixing collection alone leaves the defect).
 function Classify($r) {
+    if (Test-Path (Join-Path $r '.tide\debug-session')) { return 'debug-open' }
+    $dbg = Get-ChildItem (Join-Path $r 'docs\reports') -Filter 'debug-*.md' -ErrorAction SilentlyContinue |
+        Sort-Object { [int]([regex]::Match($_.BaseName, '\d+').Value) } | Select-Object -Last 1
+    # No tags at all -> everything is unreleased (conventions "debug session", release path). Fixtures
+    # create no commits, so ONLY that branch is exercised; the tagged-tree ls-tree compare is not asked.
+    if ($dbg) {
+        $tags = & git -C $r tag 2>$null
+        if (-not $tags) {
+            $dc = Get-Content $dbg.FullName -Raw
+            if ((-not $dc.Contains($BAD)) -and $dc.Contains($OK)) { return 'debug-release-ready' }
+        }
+    }
     # natural sort on the numeric milestone index (M10 > M9, multi-digit safe; sh uses `sort -V`)
     $ms = Get-ChildItem (Join-Path $r 'docs\milestones') -Filter 'M*.md' -ErrorAction SilentlyContinue |
         Sort-Object { [int]([regex]::Match($_.BaseName, '\d+').Value) } | Select-Object -Last 1
@@ -72,9 +87,9 @@ function Classify($r) {
     if ($c.Contains($OK))  { return 'release-ready' }
     return 'unknown'
 }
-# --- cross-summary reference: 1:1 position counts (canonical 5 buckets, no lumping) ---
+# --- cross-summary reference: 1:1 position counts (canonical 7 buckets, no lumping) ---
 function Summarize($parent) {
-    $rel=0;$rev=0;$imp=0;$mil=0;$fix=0
+    $rel=0;$rev=0;$imp=0;$mil=0;$fix=0;$dbo=0;$dbr=0
     foreach ($name in (Discover $parent)) {
         switch (Classify (Join-Path $parent $name)) {
             'release-ready'    { $rel++ }
@@ -82,9 +97,11 @@ function Summarize($parent) {
             'impl-inprogress'  { $imp++ }
             'milestone-needed' { $mil++ }
             'needs-fix'        { $fix++ }
+            'debug-open'       { $dbo++ }
+            'debug-release-ready' { $dbr++ }
         }
     }
-    "release=$rel review=$rev impl=$imp milestone=$mil fix=$fix"
+    "release=$rel review=$rev impl=$imp milestone=$mil fix=$fix dbgopen=$dbo dbgrel=$dbr"
 }
 
 # ReadDeps/DepLines/DepName: tests\lib\deps.ps1, StripBom: tests\lib\encoding.ps1 (single source;
@@ -216,19 +233,41 @@ try {
     W (Join-Path $E 'package.json') '{ "version": "0.1.0" }'
     W (Join-Path $E '.tide\phase') 'idle'
 
+    # The two below look release-ready by CYCLE rules alone -- they ask whether debug rules win first.
+    $F = Join-Path $P 'repo-f'; GitInit $F            # debug-open
+    W (Join-Path $F 'docs\milestones\M1.md') '# M1'
+    W (Join-Path $F 'docs\reports\M1-impl.md') '# M1 impl'
+    W (Join-Path $F 'docs\reports\M1-review.md') ("## release verdict`n`n**" + $OK + "** -- rec: **v0.2.0 (minor)**`n")
+    W (Join-Path $F '.tide\debug-session') '1'
+
+    $G = Join-Path $P 'repo-g'; GitInit $G            # debug-release-ready
+    W (Join-Path $G 'docs\milestones\M1.md') '# M1'
+    W (Join-Path $G 'docs\reports\M1-impl.md') '# M1 impl'
+    W (Join-Path $G 'docs\reports\M1-review.md') ("## release verdict`n`n**" + $OK + "** -- rec: **v0.2.0 (minor)**`n")
+    W (Join-Path $G 'docs\reports\debug-1.md') ("## release verdict`n`n**" + $OK + "** -- rec: **v0.2.1 (patch)**`n")
+
+    $H2 = Join-Path $P 'repo-h'; GitInit $H2          # stale phase=debug, no open session
+    W (Join-Path $H2 'docs\milestones\M1.md') '# M1'
+    W (Join-Path $H2 'docs\reports\M1-impl.md') '# M1 impl'
+    W (Join-Path $H2 'docs\reports\M1-review.md') ("## release verdict`n`n**" + $OK + "** -- rec: **v0.2.0 (minor)**`n")
+    W (Join-Path $H2 '.tide\phase') 'debug'
+
     W (Join-Path $P 'plain\readme.txt') 'x'           # non-git -> excluded
     $ND = Join-Path $P 'notide'; GitInit $ND; W (Join-Path $ND 'file.txt') 'x'   # no tide artifacts -> excluded
     $H = Join-Path $P '.hidden-svc'; GitInit $H; W (Join-Path $H 'docs\milestones\M1.md') '# M1'  # hidden -> excluded
 
     # --- scenarios ---
-    Chk "discover: tide repos only (plain/notide/.hidden excluded)" ((Discover $P) -join ',') 'repo-a,repo-b,repo-c,repo-d,repo-e'
+    Chk "discover: tide repos only (plain/notide/.hidden excluded)" ((Discover $P) -join ',') 'repo-a,repo-b,repo-c,repo-d,repo-e,repo-f,repo-g,repo-h'
     Chk "classify repo-a = release-ready"    (Classify $A) 'release-ready'
     Chk "classify repo-b = review-pending"   (Classify $B) 'review-pending'
     Chk "classify repo-c = impl-inprogress"  (Classify $C) 'impl-inprogress'
     Chk "classify repo-d = needs-fix (blocked)" (Classify $D) 'needs-fix'
     Chk "classify repo-e = milestone-needed" (Classify $E) 'milestone-needed'
+    Chk "classify repo-f = debug-open (wins over cycle rules)" (Classify $F) 'debug-open'
+    Chk "classify repo-g = debug-release-ready (wins over review verdict)" (Classify $G) 'debug-release-ready'
+    Chk "classify repo-h = stale phase=debug is not a position" (Classify $H2) 'release-ready'
     Chk "hidden dir (.hidden-svc) not discovered" ([bool]((Discover $P) -match 'hidden')).ToString() 'False'
-    Chk "cross-summary 5 buckets 1:1" (Summarize $P) 'release=1 review=1 impl=1 milestone=1 fix=1'
+    Chk "cross-summary 7 buckets 1:1" (Summarize $P) 'release=2 review=1 impl=1 milestone=1 fix=1 dbgopen=1 dbgrel=1'
 
     $EMPTY = Join-Path $sbx 'empty'; New-Item -ItemType Directory -Force -Path (Join-Path $EMPTY 'just-a-folder') | Out-Null
     $e = (Discover $EMPTY) -join ','
@@ -373,5 +412,5 @@ if (-not $script:completed) {
     exit 1
 }
 if ($script:fail -ne 0) { exit 1 }
-Write-Host "# fleet discovery / 5-position classify / 1:1 summary / hidden-skip / degrade / multi-digit-milestone / topo-sort / cycle-fallback / full-operator contract / BOM-tolerance confirmed"
+Write-Host "# fleet discovery / 7-position classify (debug first) / 1:1 summary / hidden-skip / degrade / multi-digit-milestone / topo-sort / cycle-fallback / full-operator contract / BOM-tolerance confirmed"
 exit 0

@@ -2437,6 +2437,231 @@ chk "M13: 픽스처 통제 — 에픽이 남의 마일스톤을 등재하면 잡
 chk "M14: 음성 통제 — 블록 밖 산문 / 과거 마일스톤 등재는 붉지 않는다" \
     "$(epic_bad_in "$(epic_fixture prose)")/$(epic_bad_in "$(epic_fixture past)")" "0/0"
 
+# === Part N (M52) — 상태 확인 항목 선언 정합 =============================
+# 확인 항목 목록의 선언처를 규약 한 곳으로 만들고 `/tide:status`·`/tide:fleet`이 **읽기만** 하게 한
+# 것을 문다. 결함의 형태는 **선언과 사본이 갈리는 것**이었다 — fleet이 여섯을 박아 둔 채 status가
+# 여덟로 늘어 fleet의 판단 규칙이 **데이터 없이 조용히 발화하지 못했다**(M52-T01 실측).
+#   단일 원본은 `docs/conventions.md`의 "상태 확인 항목과 시작점 판단 (선언)" 절.
+#   **소비자 대조에 ASCII 토큰만 쓴다**(`status-items:`·`M{N}-impl.md`) — ps1 사본이 한글 리터럴을
+#   가질 수 없으므로 두 사본이 **문자 그대로 같은 술어**를 쓰게 하는 자리다.
+NSIABSENT=$(markers_of 'status-items-absent:' | grep -c .)
+NSI=$(markers_of 'status-items:' | grep -c .)
+si_rows_in() { # <규약 경로> → 「무엇을 읽는가」 표의 행 수(선언 줄 이후·다음 제목 전까지)
+    LC_ALL=C awk '
+        index($0, "status-items:") > 0 { win = 1; next }
+        win && substr($0, 1, 1) == "#" { win = 0 }
+        win && index($0, "  | `") == 1 { n++ }
+        END { print n + 0 }
+    ' "$1"
+}
+si_mismatch() { # <규약 경로> → 선언 토큰 수 != 표 행 수면 1
+    _sd=$(decl_tail "$1" 'status-items:' | tr -d '`*' | tr ' ' '\n' | grep -c .)
+    _sr=$(si_rows_in "$1")
+    [ "$_sd" = "$_sr" ] && echo 0 || echo 1
+}
+si_fixture() { # <모드> → 사본 규약 경로 (clean | norow | notoken)
+    _sf="$SBX/si-$1.md"
+    case "$1" in
+        norow)   LC_ALL=C awk 'BEGIN { d = 0 }
+                     d == 0 && index($0, "  | `open-epic`") == 1 { d = 1; next }
+                     { print }' "$CONV" > "$_sf" ;;
+        notoken) LC_ALL=C awk '{ if (index($0, "`status-items:`") > 0) sub(/ open-epic/, ""); print }' \
+                     "$CONV" > "$_sf" ;;
+        *)       cat "$CONV" > "$_sf" ;;
+    esac
+    printf '%s' "$_sf"
+}
+chk "N1: status-items 선언 줄 정확히 1개" "$(decl_count "$CONV" 'status-items:')" "1"
+chk "N2: autonomy-level 선언 줄 정확히 1개" "$(decl_count "$CONV" 'autonomy-level:')" "1"
+# (N3) **복합 기댓값**. 앞자리는 추출 positive-control, 뒷자리는 **없는 키로 같은 추출 경로를 한 번
+# 더 태워** 그것이 비었다고 판정되는지를 묻는다. 부재 판정을 **문자열이 아니라 개수**로 하는 것이
+# M51의 교훈이다 — PowerShell의 null 통과 캐스트에서 `-ne ''`가 참이 되어 두 사본이 갈렸다.
+chk "N3: 표지 추출 positive-control / 없는 키는 비었다고 판정" \
+    "$([ "$NSI" -gt 0 ] && echo ok || echo no)/$([ "$NSIABSENT" -gt 0 ] && echo ok || echo no)" "ok/no"
+# (N4) **본 검사.** 선언 토큰 수와 표 행 수가 어긋나면 붉는다 — 목록이 늘 때 표가 따라오지 않는
+# (또는 그 반대의) 드리프트를 잡는 자리다.
+chk "N4: 본 검사 — 선언 토큰 수 == 표 행 수" "$(si_mismatch "$CONV")" "0"
+# 픽스처 통제 둘 — **실제 판정을 픽스처에 건다**(M46 판례). **양쪽 방향을 각각 깨서** 건다.
+chk "N5: 픽스처 통제 — 표에서 행이 사라지면 잡는다" "$(si_mismatch "$(si_fixture norow)")" "1"
+chk "N6: 픽스처 통제 — 선언에서 토큰이 사라지면 잡는다" "$(si_mismatch "$(si_fixture notoken)")" "1"
+chk "N7: 음성 통제 — 손대지 않은 사본은 붉지 않는다" "$(si_mismatch "$(si_fixture clean)")" "0"
+# (N8)(N9) **소비자 대조 — 사본 0 · 참조 2.** 둘 중 하나만 성립하면 «아무것도 가리키지 않는 상태»나
+# «복제가 남은 상태»가 되므로 **양쪽을 다 묻는다.**
+chk "N8: 소비자 둘이 선언을 가리킨다 (status/fleet)" \
+    "$([ "$(grep -cF 'status-items:' "$ROOT/skills/status/SKILL.md")" -gt 0 ] && echo ok || echo no)/$([ "$(grep -cF 'status-items:' "$ROOT/skills/fleet/SKILL.md")" -gt 0 ] && echo ok || echo no)" \
+    "ok/ok"
+chk "N9: 소비자에 옛 열거의 흔적이 없다 (status/fleet)" \
+    "$(grep -cF 'M{N}-impl.md' "$ROOT/skills/status/SKILL.md")/$(grep -cF 'M{N}-impl.md' "$ROOT/skills/fleet/SKILL.md")" \
+    "0/0"
+
+# --- 자율 배선 선언 정합 (M52 리뷰 차단 1) ---------------------------------
+# 안전 바닥의 **열거 자체**는 Part L이 물지만, **스킬 쪽에서 바닥 게이트에 자율 조건을 다는 편집**은
+# 그 열거를 건드리지 않아 통과했다 — M52 리뷰가 사본 트리에서 실측했다(PR CI 확인 게이트에 한 문장을
+# 더하고 목록은 그대로 두니 221/0 초록). 그래서 **자율이 어디에 걸리는가**를 규약이
+# `autonomy-lines:`로 선언하고 실측과 대조한다. 적용 범위를 바꾸려면 선언을 함께 고쳐야 하고,
+# 그 편집이 리뷰의 눈에 걸리는 것이 이 자리의 방어다(규약이 그 한계를 함께 적는다).
+AUTLINES=$(markers_of 'autonomy-lines:' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ *$//')
+AUTDEF=$(markers_of 'autonomy-default:' | head -1)
+auton_scan() { # <skills 루트> -> "이름=줄수" 를 ordinal 정렬해 한 줄로
+    for _ad in "$1"/*/; do
+        [ -f "$_ad/SKILL.md" ] || continue
+        _ac=$(grep -c 'autonomy' "$_ad/SKILL.md")
+        [ "$_ac" -gt 0 ] && printf '%s=%s\n' "$(basename "$_ad")" "$_ac"
+    done | LC_ALL=C sort | tr '\n' ' ' | sed 's/ *$//'
+}
+auton_mismatch() { # <skills 루트> <선언 문자열> -> 다르면 1
+    [ "$(auton_scan "$1")" = "$2" ] && echo 0 || echo 1
+}
+auton_fixture() { # <모드> -> 사본 skills 루트 (clean | extra | more)
+    _af="$SBX/auton-$1"
+    rm -rf "$_af"; mkdir -p "$_af"
+    _adone=0
+    for _at in $AUTLINES; do
+        _an=${_at%%=*}; _ak=${_at##*=}
+        if [ "$1" = "more" ] && [ "$_adone" = 0 ]; then _ak=$((_ak + 1)); _adone=1; fi
+        mkdir -p "$_af/$_an"
+        : > "$_af/$_an/SKILL.md"
+        _ai=0
+        while [ "$_ai" -lt "$_ak" ]; do
+            echo 'autonomy' >> "$_af/$_an/SKILL.md"
+            _ai=$((_ai + 1))
+        done
+    done
+    if [ "$1" = "extra" ]; then
+        mkdir -p "$_af/zzz-outside"
+        echo 'autonomy' > "$_af/zzz-outside/SKILL.md"
+    fi
+    printf '%s' "$_af"
+}
+auton_default_ok() { # -> ok|no : 선언된 사이트 전부가 기본값 토큰을 문면에 갖는가
+    # **빈 기본값은 no로 고정한다** — 빈 패턴은 `grep -F`에서 «항상 일치»라 표지가 사라지면 이 검사가
+    # 조용히 통과하고, ps1의 `Contains($null)`은 반대로 0을 내 **두 사본이 갈린다**. 되돌림 `n10-key`가
+    # 그 갈림을 실측했다(sh 228/1 · ps1 227/2). 판정을 여기서 같게 못박는다.
+    [ -n "$AUTDEF" ] || { printf 'no'; return; }
+    _ar=ok
+    for _at in $AUTLINES; do
+        _an=${_at%%=*}
+        grep -qF "$AUTDEF" "$ROOT/skills/$_an/SKILL.md" || _ar=no
+    done
+    printf '%s' "$_ar"
+}
+# (N10) 부재의 의미를 선언 하나가 정하고, 그 값이 값 집합의 원소인지까지 **복합**으로 묻는다 —
+# 집합 밖의 기본값은 "파일이 없으면 무슨 뜻인가"를 미정으로 만든다.
+chk "N10: autonomy-default 선언 1개 / 값이 값 집합의 원소" \
+    "$(decl_count "$CONV" 'autonomy-default:')/$(markers_of 'autonomy-level:' | grep -cx "$AUTDEF")" "1/1"
+chk "N11: autonomy-lines 선언 줄 정확히 1개" "$(decl_count "$CONV" 'autonomy-lines:')" "1"
+# (N12) **본 검사.** 자율 토큰을 가진 스킬과 그 줄 수가 선언과 어긋나면 붉는다.
+chk "N12: 본 검사 - 자율 배선 실측 == autonomy-lines 선언" "$(auton_mismatch "$ROOT/skills" "$AUTLINES")" "0"
+# 픽스처 통제 둘 — **실제 판정을 픽스처에 건다**(M46 판례). **양쪽 방향을 각각 깬다.**
+chk "N13: 픽스처 통제 - 선언 밖 스킬이 자율 토큰을 가지면 잡는다" \
+    "$(auton_mismatch "$(auton_fixture extra)" "$AUTLINES")" "1"
+chk "N14: 픽스처 통제 - 선언된 스킬의 자율 줄이 늘면 잡는다" \
+    "$(auton_mismatch "$(auton_fixture more)" "$AUTLINES")" "1"
+chk "N15: 음성 통제 - 선언대로인 사본은 붉지 않는다" \
+    "$(auton_mismatch "$(auton_fixture clean)" "$AUTLINES")" "0"
+# (N16) 하위 호환의 계약 — **선언이 없는 저장소의 동작이 현행**임을 두 사이트가 문면에 갖는가.
+chk "N16: 기본값 계약 - 선언된 스킬 전부가 기본값 토큰을 갖는다" "$(auton_default_ok)" "ok"
+# (N17) fleet-cycle의 시작점 사본 — 참조 1 · 그 문단에 열거 0. **묻는 창은 그 문단 전체**다.
+# 첫 판본은 창을 *"표지 줄부터 빈 줄까지"* 로 열었고, 되돌림 `n17-copy`가 **표지 줄 위에** 열거를
+# 되살려 **229/0 초록으로 통과**시켰다 — 창이 한쪽으로만 열려 있으면 사본은 반대쪽에 산다.
+# 이제 빈 줄로 끊은 **문단을 통째로** 모아 그 안에 표지가 있으면 열거를 센다(양방향).
+chk "N17: fleet-cycle 시작점 - 참조 1 / 그 문단의 열거 0" \
+    "$([ "$(grep -cF 'status-items:' "$ROOT/skills/fleet-cycle/SKILL.md")" -gt 0 ] && echo ok || echo no)/$(LC_ALL=C awk '
+        function flush(   i) {
+            if (has) {
+                for (i = 1; i <= m; i++)
+                    if (substr(buf[i], 1, 2) == "- " || substr(buf[i], 1, 3) == "  -") n++
+            }
+            has = 0; m = 0
+        }
+        $0 == "" { flush(); next }
+        { buf[++m] = $0; if (index($0, "status-items:") > 0) has = 1 }
+        END { flush(); print n + 0 }' "$ROOT/skills/fleet-cycle/SKILL.md")" "ok/0"
+
+# --- 바닥 표지 공존 금지 (M52 리뷰 라운드 1 차단 1) -------------------------
+# `autonomy-lines:`가 세는 것은 **조건이 아니라 언급**이라, 조건을 한 게이트에서 다른 게이트로
+# **옮기면 수가 보존돼 초록**이었다(리뷰 실측: 프리플라이트 3의 조건을 PR CI 게이트로 옮기고 229/0).
+# 그래서 «자율이 **바닥 게이트에 붙었는가**»를 직접 묻는다 — 규약이 선언한 `floor-marks:`가 자율
+# 토큰과 **같은 항목 창**에 있으면 붉는다. 창은 목록 항목(또는 빈 줄)에서 끊는다.
+floor_marks() { # 선언 줄의 백틱 구획 토큰(공백을 포함할 수 있어 공백 분해를 쓰지 않는다)
+    decl_tail "$CONV" 'floor-marks:' | LC_ALL=C awk -v q="\`" '{
+        n = split($0, a, q)
+        for (i = 2; i <= n; i += 2) if (a[i] != "") print a[i]
+    }'
+}
+FLOORTAB=$(floor_marks | tr '\n' '\t')
+NFLOOR=$(floor_marks | grep -c .)
+floor_hits_in() { # <SKILL.md 경로> → 자율 토큰과 바닥 표지가 같은 항목 창에 있는 창 수
+    # **창은 들여쓰기를 안다**(재작업 3). 첫 판본은 «항목 줄이면 무조건 새 창»이라 **하위 불릿이 부모의
+    # 창에서 빠져나갔고**, 바닥 게이트 항목 바로 아래에 하위 불릿으로 조건을 달면 표지와 다른 창이 되어
+    # 초록이었다(리뷰 라운드 2 실측: 234/0). 이제 **더 깊은 들여쓰기의 항목은 부모 창에 남는다** —
+    # 닫는 것이 «편집의 모양»이 아니라 «항목의 부분 트리»라 그 계열 전체가 함께 닫힌다.
+    # 창은 ⑴ 같거나 얕은 들여쓰기의 항목 ⑵ 빈 줄 뒤에 오는 들여쓰기 0의 비-항목 줄에서 끊는다.
+    # 들여쓰기는 **공백만** 센다(이 저장소의 마크다운에 탭이 없다 — 있으면 그 줄은 깊이 0으로 보인다).
+    LC_ALL=C awk -v marks="$FLOORTAB" '
+        function ind(s,   n) { n = 0; while (substr(s, n + 1, 1) == " ") n++; return n }
+        function isitem(s,   t) {
+            t = substr(s, ind(s) + 1)
+            return (substr(t, 1, 2) == "- " || t ~ /^[0-9]+\. /)
+        }
+        function flush(   j) {
+            if (auto) {
+                for (j = 1; j <= nm; j++) if (MK[j] != "" && index(win, MK[j]) > 0) { hits++; break }
+            }
+            win = ""; auto = 0
+        }
+        BEGIN { nm = split(marks, MK, "\t"); cur = -1; pb = 1 }
+        {
+            if ($0 == "") { pb = 1; win = win "\n" $0; next }
+            if (isitem($0)) {
+                i = ind($0)
+                if (cur < 0 || i <= cur) { flush(); cur = i }
+            } else if (ind($0) == 0 && pb) {
+                flush(); cur = -1
+            }
+            pb = 0
+            win = win "\n" $0
+            if (index($0, "autonomy") > 0) auto = 1
+        }
+        END { flush(); print hits + 0 }
+    ' "$1"
+}
+floor_hits() { # <skills 루트> → 합계
+    _fh=0
+    for _fd in "$1"/*/; do
+        [ -f "$_fd/SKILL.md" ] || continue
+        _fh=$((_fh + $(floor_hits_in "$_fd/SKILL.md")))
+    done
+    echo "$_fh"
+}
+floor_fixture() { # <모드> → 사본 skills 루트 (clean | attach | nest)
+    # `attach`는 **같은 항목 안**에 다는 모양, `nest`는 **하위 불릿**으로 다는 모양이다 — 리뷰 두
+    # 라운드가 각각 실측한 두 형태를 픽스처가 둘 다 재현한다. 마지막 줄(프리플라이트 3)은 **표지가 없는
+    # 정당한 자율 자리**라 어느 모드에서도 붉지 않아야 한다(음성 통제의 대상이 여기다).
+    _ff="$SBX/floor-$1"
+    rm -rf "$_ff"; mkdir -p "$_ff/rel"
+    {
+        printf -- '- 게시 분기 — 머지된 PR을 마무리한다.\n'
+        printf -- '  PR CI 확인(`gh pr checks`)에서 실패가 있으면 사용자 확인을 받은 뒤 진행한다.\n'
+        [ "$1" = "attach" ] && printf -- '  단 `.tide/autonomy`가 `continuous`면 확인 없이 진행한다.\n'
+        [ "$1" = "nest" ] && printf -- '  - `.tide/autonomy`가 `continuous`면 위 확인 없이 진행한다.\n'
+        printf -- '\n'
+        printf -- '- 프리플라이트 3 — 무관 변경 확인. `.tide/autonomy`가 `continuous`면 확인 없이 진행한다.\n'
+    } > "$_ff/rel/SKILL.md"
+    printf '%s' "$_ff"
+}
+# (N18)(N19) 선언 줄 유일성과 **추출 positive-control** — 표지 추출이 비면 아래 본 검사가 «항상 0»으로
+# 공허해진다. 백틱 구획 파싱이 망가지는 것이 그 경로라 수를 직접 단언한다.
+chk "N18: floor-marks 선언 줄 정확히 1개" "$(decl_count "$CONV" 'floor-marks:')" "1"
+chk "N19: 바닥 표지 추출 positive-control(>0)" "$([ "$NFLOOR" -gt 0 ] && echo ok || echo no)" "ok"
+# (N20) **본 검사.** 자율 토큰이 바닥 표지와 같은 항목 창에 있으면 붉는다.
+chk "N20: 본 검사 - 자율 토큰이 바닥 표지와 같은 창에 0건" "$(floor_hits "$ROOT/skills")" "0"
+# 픽스처 통제 — **실제 판정을 픽스처에 건다**(M46 판례). `attach`가 리뷰가 실측한 「옮기는」 편집의 형태다.
+chk "N21: 픽스처 통제 - 바닥 게이트에 자율 조건이 붙으면 잡는다" "$(floor_hits "$(floor_fixture attach)")" "1"
+chk "N22: 음성 통제 - 붙지 않은 사본은 붉지 않는다" "$(floor_hits "$(floor_fixture clean)")" "0"
+# (N23) **하위 불릿 형태** — 리뷰 라운드 2가 실측한 모양이다. 창이 들여쓰기를 모르면 이 사본이 초록이 된다.
+chk "N23: 픽스처 통제 - 하위 불릿으로 달아도 잡는다" "$(floor_hits "$(floor_fixture nest)")" "1"
+
 chk "F1: README cases 선언 == 실제 케이스 수" "$(declared_cases)" "$((pass + fail + 1))"
 
 echo
