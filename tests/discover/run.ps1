@@ -384,7 +384,14 @@ try {
         foreach ($f in $cands) { if (Test-Path -LiteralPath $f) { $out += $f } }
         return $out
     }
-    function RelPath($f) { return (($f.Substring($ROOT.Length + 1)).Replace([string][char]92, '/')) }
+    # A path OUTSIDE the repo root is returned as-is. The .sh twin already guards this
+    # (the awk index/substr pair below its ROOT var); this copy did not, so Substring threw whenever a diagnostic
+    # named a file under the sandbox -- invisible locally because the live root is SHORTER than the
+    # sandbox path (garbage out, no throw) and fatal in a tree copy whose root is longer.
+    function RelPath($f) {
+        if (-not $f.StartsWith($ROOT, [System.StringComparison]::Ordinal)) { return $f.Replace([string][char]92, '/') }
+        return (($f.Substring($ROOT.Length + 1)).Replace([string][char]92, '/'))
+    }
     function RosterFiles {
         $hits = @()
         foreach ($f in (RosterScanFiles)) {
@@ -942,14 +949,24 @@ try {
     $dset = New-Object 'System.Collections.Generic.HashSet[string]'
     foreach ($a in $gAnchors) { if (-not $aset.Add($a)) { [void]$dset.Add($a) } }
     # a citation is OK when it resolves in the anchor set of ANY file named on its line (safe side).
-    $gMiss = 0
-    for ($i = 0; $i -lt $gCites.Count; $i++) {
-        $ok = $false
-        foreach ($k in $gCiteOwners[$i]) { if ($gAnchorSets[$k].Contains($gCites[$i])) { $ok = $true } }
-        if (-not $ok) { $gMiss++ }
+    # (M54) THE VERDICT IS A FUNCTION so the same verdict can run against a fixture. M46's precedent
+    # asks not "does the fixture meet the condition" but "does the REAL verdict run on it", and until
+    # now G1 had no such control -- breaking the verdict reddened nothing (M50 review, 3 cycles carried).
+    function CiteMissOf($cites, $owners) {
+        $n = 0
+        for ($i = 0; $i -lt $cites.Count; $i++) {
+            $ok = $false
+            foreach ($k in $owners[$i]) { if ($gAnchorSets[$k].Contains($cites[$i])) { $ok = $true } }
+            if (-not $ok) { $n++ }
+        }
+        return $n
     }
+    $gMiss = CiteMissOf $gCites $gCiteOwners
 
     Chk "G1: every live citation resolves to a real anchor" ([string]$gMiss) '0'
+    # (M54) Fixture control -- borrow a real owner index so the anchor set is genuinely opened, and
+    # point at a name that is not in it.
+    Chk "G1: fixture control -- a broken citation is actually caught" ([string](CiteMissOf @('zzz-bogus-anchor') @(, $gCiteOwners[0]))) '1'
     Chk "G2: citation extraction positive control (>0)" $(if ($gCites.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
     Chk "G2: anchor extraction positive control (>0)"   $(if ($gAnchors.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
     Chk "G2: control -- bogus anchor name (bogus-section) absent" $(if ($aset.Contains('bogus-section')) { 'yes' } else { 'no' }) 'no'
@@ -1000,9 +1017,13 @@ try {
         foreach ($b in $gConvBases) { if ($s.Contains($b)) { return $true } }
         return $false
     }
-    $gSelf = @()
+    # (M54) THE SCAN IS A FUNCTION -- same reason as CiteMissOf above. The body is unchanged; only
+    # "which files does it walk" moved into a parameter. Extracted spans go to $script:srSpans so the
+    # live call can snapshot them for the positive control below.
+    function SelfMissOf($paths) {
+    $script:srSpans = @()
     $gSelfMiss = 0
-    foreach ($p in (LivingDocs)) {
+    foreach ($p in $paths) {
         $raw = ReadUtf8 $p
         if ($null -eq $raw) { continue }
         $own = New-Object 'System.Collections.Generic.HashSet[string]'
@@ -1014,7 +1035,7 @@ try {
                 foreach ($m in [regex]::Matches($line, $srRe)) {
                     $span = ($m.Groups[1].Value -replace ' ', '')
                     if ($span -ne '' -and $span -notmatch '[{}]') {
-                        $gSelf += $span
+                        $script:srSpans += $span
                         # On failure, NAME the file and the span -- a counting assertion goes red without
                         # saying why (same reason the duplicate-anchor check prints names). The wording
                         # names BOTH causes on purpose: an unresolved self-reference, or a citation
@@ -1031,12 +1052,30 @@ try {
             $prev = $line
         }
     }
+    return $gSelfMiss
+    }
+    $gSelfMiss = SelfMissOf (LivingDocs)
+    $gSelf = $script:srSpans
+    function SelfRefFixture {
+        $f = Join-Path $sbx 'selfref-fix.md'
+        # BUILD THE LINE FIRST. Inside an array literal, ' str ' + $char + ' str ' does NOT fold into
+        # one string -- PowerShell splits it into THREE elements (measured: the fixture came out as a
+        # 5-line file and the self-reference vanished, so this control returned 0 while the .sh twin
+        # returned 1). [string] on the char is what keeps the two copies meaning the same thing.
+        $line = 'xx "zzz-missing" ' + [string]$JEOL + ' yy'
+        [System.IO.File]::WriteAllLines($f, @('## zzz-real', '', $line),
+            (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
     $selfSet = New-Object 'System.Collections.Generic.HashSet[string]'
     foreach ($s in $gSelf) { [void]$selfSet.Add($s) }
 
     Chk "G4: every self-reference resolves to its own file's anchor" ([string]$gSelfMiss) '0'
     Chk "G4: self-reference extraction positive control (>0)" $(if ($gSelf.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
     Chk "G4: control -- bogus name (bogus-section) is not a self-reference" $(if ($selfSet.Contains('bogus-section')) { 'yes' } else { 'no' }) 'no'
+    # (M54) Fixture control -- the SAME scan against a copy whose self-reference names an anchor its
+    # own file does not have. Same grounds and same return as G1's control above.
+    Chk "G4: fixture control -- an unresolved self-reference is actually caught" ([string](SelfMissOf @((SelfRefFixture)))) '1'
 
     # (G5~G7 - M42) citations pointing OUTSIDE the conventions set. G1 compares only against anchors in
     # docs/conventions*.md, so a citation naming skills/*/SKILL.md or docs/*.md was seen by NO guard --
@@ -2987,6 +3026,116 @@ try {
     # the window to the section. Without this case, REVERTING that narrowing reddens nothing (measured:
     # 240/0 green). The convention's "a landed adversarial mutation is promoted to a fixture" points here.
     Chk "N29: adversarial control -- moving the description out of the section is caught" ([string](AxisMissing (AxisFixture 'moved'))) '1'
+
+    # --- Part O: consuming the retro follow-up ledger (M54) ----------------
+    # Asks whether what the retro wrote reaches the next cycle. What is bitten is the declaration's
+    # uniqueness, the status values' set membership and the consumer's wiring -- whether a disposition
+    # is *sound* is the review's layer (the convention writes the same boundary).
+    $RETRO = Join-Path $ROOT 'docs/reports/retro.md'
+    # NORMALIZE THE TAIL -- leaving the leading space in place makes " " + "" + " " match the
+    # declaration line's own leading blank, so an EMPTY status cell slips through silently
+    # (measured: O6 came back got 0 / want 1).
+    $rStat = (((DeclTail $CONV 'retro-status:') -split '\s+') | Where-Object { $_ -ne '' }) -join ' '
+    $rStatSet = @($rStat -split ' ' | Where-Object { $_ -ne '' })
+    $rBlk = @(((DeclTail $CONV 'retro-block:') -split '\s+') | Where-Object { $_ -ne '' })[0]
+    if ($null -eq $rBlk) { $rBlk = '' }
+    $rFirst = if ($rStatSet.Count -gt 0) { $rStatSet[0] } else { '' }
+    function RetroVals([string]$path) {
+        # THE WINDOW IS AN ASCII MARKER BLOCK -- matching a (Korean) section heading would silently
+        # lose the window when the heading changes, and this copy cannot carry it under the
+        # byte>127 = 0 rule (same grounds as the epic block). Skipping the header row is structural
+        # too: inside the window only rows AFTER the separator (`---`) are data.
+        $out = New-Object System.Collections.ArrayList
+        if ($rBlk -eq '' -or -not (Test-Path $path)) { return $out.ToArray() }
+        $inb = $false
+        $sep = $false
+        foreach ($l in [System.IO.File]::ReadAllLines($path)) {
+            if ($l.Contains('<!-- ' + $rBlk + ':start -->')) { $inb = $true; $sep = $false; continue }
+            if ($l.Contains('<!-- ' + $rBlk + ':end -->')) { $inb = $false; continue }
+            if ($inb -and (-not $sep)) { if ($l.Contains('---')) { $sep = $true }; continue }
+            if ($inb -and $l.StartsWith('|', [System.StringComparison]::Ordinal)) {
+                $f = $l -split '\|'
+                if ($f.Count -lt 5) { continue }
+                $v = $f[3]
+                $v = $v.Replace([string][char]13, '').Replace('*', '').Replace(' ', '')
+                $pp = $v.IndexOf('(', [System.StringComparison]::Ordinal)
+                if ($pp -ge 0) { $v = $v.Substring(0, $pp) }
+                [void]$out.Add($v)
+            }
+        }
+        return $out.ToArray()
+    }
+    function RetroRows([string]$path) { return @(RetroVals $path).Count }
+    function RetroBad([string]$path) {
+        # AN EMPTY VALUE COUNTS AS OUTSIDE THE SET -- blanking a cell is a quieter path than
+        # deleting it, so letting it pass would make this check vacuous right there.
+        $n = 0
+        foreach ($v in (RetroVals $path)) {
+            if ($rStatSet -notcontains $v) { $n++ }
+        }
+        return $n
+    }
+    function RetroFixture([string]$mode) {
+        # Touches ONLY THE FIRST DATA ROW -- the point is whether the verdict turns on that one row.
+        # WITH NO RETRO DOCUMENT this writes an EMPTY copy instead of throwing. The .sh twin already
+        # behaves that way (awk on a missing file yields an empty output), and a copy that DIES is not
+        # the same verdict as a copy that goes RED -- the two copies must say the same thing.
+        $f = Join-Path $sbx ('retro-' + $mode + '.md')
+        $out = New-Object System.Collections.ArrayList
+        if (-not (Test-Path $RETRO)) {
+            [System.IO.File]::WriteAllLines($f, @(), (New-Object System.Text.UTF8Encoding($false)))
+            return $f
+        }
+        $inb = $false
+        $sep = $false
+        $done = $false
+        foreach ($l in [System.IO.File]::ReadAllLines($RETRO)) {
+            if ($l.Contains('<!-- ' + $rBlk + ':start -->')) { $inb = $true; $sep = $false; [void]$out.Add($l); continue }
+            if ($l.Contains('<!-- ' + $rBlk + ':end -->')) { $inb = $false; [void]$out.Add($l); continue }
+            if ($inb -and (-not $sep)) { if ($l.Contains('---')) { $sep = $true }; [void]$out.Add($l); continue }
+            if ($inb -and (-not $done) -and $l.StartsWith('|', [System.StringComparison]::Ordinal)) {
+                $f2 = $l -split '\|'
+                if ($f2.Count -ge 5 -and $mode -ne 'clean') {
+                    $done = $true
+                    if ($mode -eq 'outset') { $f2[3] = ' zzz-gone ' }
+                    elseif ($mode -eq 'blank') { $f2[3] = '  ' }
+                    elseif ($mode -eq 'paren') { $f2[3] = ' **' + $rFirst + '(zzz-note)** ' }
+                    [void]$out.Add(($f2 -join '|'))
+                    continue
+                }
+            }
+            [void]$out.Add($l)
+        }
+        [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    function MstHits {
+        # How many DISTINCT declared status values appear in the milestone skill.
+        $n = 0
+        $txt = [System.IO.File]::ReadAllText((Join-Path $ROOT 'skills/milestone/SKILL.md'))
+        foreach ($v in $rStatSet) {
+            if ($txt.Contains($v)) { $n++ }
+        }
+        return $n
+    }
+    Chk "O1: retro-status declaration line is exactly 1" (DeclCount $CONV 'retro-status:') '1'
+    Chk "O2: retro-block declaration line is exactly 1" (DeclCount $CONV 'retro-block:') '1'
+    # (O3) Extraction positive-control -- a broken marker/table parse makes the main check vacuous.
+    Chk "O3: follow-up row extraction positive-control (>0)" $(if ((RetroRows $RETRO) -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # (O4) THE MAIN CHECK. Every status value in the table must be inside the declared set.
+    Chk "O4: main check -- status values outside the declared set: 0" ([string](RetroBad $RETRO)) '0'
+    # Fixture controls -- the REAL verdict runs against the fixture (M46 precedent), both directions.
+    Chk "O5: control -- a value outside the set is caught" ([string](RetroBad (RetroFixture 'outset'))) '1'
+    Chk "O6: control -- a blanked status cell is caught too" ([string](RetroBad (RetroFixture 'blank'))) '1'
+    Chk "O7: negative control -- an untouched copy stays green" ([string](RetroBad (RetroFixture 'clean'))) '0'
+    # (O8) Absence control -- with no retro document this part stays SILENT (the noise-0 contract).
+    Chk "O8: absence control -- no retro document means 0 rows" ([string](RetroRows (Join-Path $sbx 'zzz-no-retro.md'))) '0'
+    # (O9) FALSE-POSITIVE DIRECTION. An in-set value carrying a parenthetical note is normal prose;
+    # if normalization breaks, this reddens (M49's blocker came from this direction being empty).
+    Chk "O9: false-positive direction -- in-set value with a parenthetical passes" ([string](RetroBad (RetroFixture 'paren'))) '0'
+    # (O10/O11) The consumer's wiring. It must say it reads, and must NOT re-enumerate the rules.
+    Chk "O10: the milestone skill points at the retro document" $(if ([System.IO.File]::ReadAllText((Join-Path $ROOT 'skills/milestone/SKILL.md')).Contains('docs/reports/retro.md')) { 'ok' } else { 'no' }) 'ok'
+    Chk "O11: no duplication -- the skill does not enumerate the status set" $(if ((MstHits) -le 1) { 'ok' } else { 'no' }) 'ok'
 
     Chk "F1: README cases declaration == actual case count" (DeclaredCases) ([string]($script:pass + $script:fail + 1))
 

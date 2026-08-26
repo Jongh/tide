@@ -759,7 +759,10 @@ NCITE=$(grep -c . "$SBX/cites.txt")
 # 자리다 — 막지 않으면 나머지 인용이 통째로 미검사로 남고 miss가 0으로 나온다). 지금은 **awk가
 # 앵커 집합을 한 번 읽어 조회**하므로 인용 이름이 **인자가 아니라 데이터**다 — 그 사고 경로 자체가
 # 사라졌다. 방어를 지운 것이 아니라 **방어가 필요하던 구조를 없앤 것**이다.
-cite_miss() {
+# (M54) **인자를 받는다** — 그래야 같은 판정 함수를 픽스처에 걸 수 있다. 인자가 없으면 종전대로
+# 살아 있는 인용 목록을 본다(호출부 의미 불변). M46 판례가 요구하는 것은 *"픽스처가 조건을
+# 만족하는가"* 가 아니라 **실제 판정이 픽스처 위에서 도는가**이며, 그전까지 `G1`은 그것이 없었다.
+cite_miss() { # [cites 목록 경로] → 실재하지 않는 앵커를 가리키는 인용의 수
     LC_ALL=C awk -v SBX="$SBX" '
     function loadset(i,   f, l) {
         if (i in LOADED) return
@@ -778,13 +781,23 @@ cite_miss() {
         }
         if (!ok) miss++
     }
-    END { print miss + 0 }' "$SBX/cites.txt"
+    END { print miss + 0 }' "${1:-$SBX/cites.txt}"
+}
+cite_fixture() { # → 인용 하나가 실재하지 않는 앵커를 가리키는 목록 파일
+    # 소유자 인덱스는 **살아 있는 목록의 첫 줄에서 빌린다** — 존재하는 앵커 집합을 실제로 열고도
+    # 이름이 없어서 미해소가 되는 형태여야 판정이 도는 것이 확인된다.
+    _cf="$SBX/cites-fix.txt"
+    LC_ALL=C awk 'NR == 1 { print $1 " zzz-bogus-anchor"; exit }' "$SBX/cites.txt" > "$_cf"
+    printf '%s' "$_cf"
 }
 # 가짜 이름·유일성 통제는 **집합 전체**(합친 anchors.txt)를 본다.
 has_anchor_name() { grep -qxF -- "$1" "$SBX/anchors.txt" </dev/null && echo yes || echo no; }
 odd_quote_lines() { awk '{ n = gsub(/"/, "&"); if (n % 2 == 1) c++ } END { print c + 0 }' "$SBX/citelines.txt"; }
 
 chk "G1: 살아 있는 인용이 전부 실재 앵커를 가리킴" "$(cite_miss)" "0"
+# (M54) 픽스처 통제 — **같은 판정 함수**를 실재하지 않는 앵커를 가리키는 목록에 건다. 이것이 없으면
+# `cite_miss`의 판정을 망가뜨려도 아무것도 붉지 않는다(M50 리뷰 권장 1이 연 자리, 세 사이클 이월).
+chk "G1: 픽스처 통제 — 끊긴 인용을 실제로 잡는다" "$(cite_miss "$(cite_fixture)")" "1"
 chk "G2: 인용 추출 positive-control(>0)"          "$([ "$NCITE" -gt 0 ] && echo ok || echo no)" "ok"
 chk "G2: 앵커 추출 positive-control(>0)"          "$([ "$NANCHOR" -gt 0 ] && echo ok || echo no)" "ok"
 chk "G2: 통제 — 가짜 앵커 이름(bogus-section) 부재" "$(has_anchor_name 'bogus-section')" "no"
@@ -842,10 +855,13 @@ SELFREF_JEOL=$(printf '\354\240\210')   # U+C808 — ps1은 Uni(0xC808)로 같�
 # 이식성 둘을 지킨다: `{n,m}` 인터벌을 쓰지 않고(`^## `·`^### `로 나눠 쓴다 — 오래된 one-true-awk가
 # 인터벌을 받지 않는다. `docs/reports/debug-1.md`와 같은 부류다), 배열 키에 **파일 접두**를 붙여
 # `delete`를 반복하지 않는다.
-: > "$SBX/selfrefs.txt"
+# (M54) **스캔을 함수로 묶는다** — 목록·출력 경로를 인자로 받아야 같은 판정을 픽스처에 걸 수 있다.
+# 본문은 한 글자도 바뀌지 않았고 바뀐 것은 **어디서 읽고 어디에 쓰는가**뿐이다.
+selfref_scan() { # <living 목록> <자기참조 출력> <미해소 수 출력>
+: > "$2"
 LC_ALL=C awk -v J="$SELFREF_JEOL" -v BASES="$SBX/convbases.txt" \
-    -v LIVING="$SBX/living.txt" -v OUT="$SBX/selfrefs.txt" \
-    -v CNT="$SBX/selfmiss.txt" -v ROOT="$ROOT/" '
+    -v LIVING="$1" -v OUT="$2" \
+    -v CNT="$3" -v ROOT="$ROOT/" '
 function hasbase(t,   i) { for (i = 1; i <= NB; i++) if (index(t, BASE[i])) return 1; return 0 }
 BEGIN {
     NB = 0
@@ -900,6 +916,19 @@ BEGIN {
     print miss > CNT
     close(CNT)
 }' < /dev/null
+}
+selfref_scan "$SBX/living.txt" "$SBX/selfrefs.txt" "$SBX/selfmiss.txt"
+selfref_fixture() { # → 자기참조가 자기 파일에 없는 앵커를 가리키는 사본에서의 미해소 수
+    _srf="$SBX/selfref-fix.md"
+    {
+        printf '## zzz-real\n'
+        printf '\n'
+        printf 'xx "zzz-missing" %s yy\n' "$SELFREF_JEOL"
+    } > "$_srf"
+    printf '%s\n' "$_srf" > "$SBX/living-fix.txt"
+    selfref_scan "$SBX/living-fix.txt" "$SBX/selfrefs-fix.txt" "$SBX/selfmiss-fix.txt" > /dev/null
+    cat "$SBX/selfmiss-fix.txt"
+}
 SELF_MISS=$(cat "$SBX/selfmiss.txt")
 NSELF=$(grep -c . "$SBX/selfrefs.txt")
 selfref_has() { grep -qxF -- "$1" "$SBX/selfrefs.txt" </dev/null && echo yes || echo no; }
@@ -907,6 +936,9 @@ selfref_has() { grep -qxF -- "$1" "$SBX/selfrefs.txt" </dev/null && echo yes || 
 chk "G4: 자기참조가 전부 자기 파일 앵커를 가리킴"   "$SELF_MISS" "0"
 chk "G4: 자기참조 추출 positive-control(>0)"        "$([ "$NSELF" -gt 0 ] && echo ok || echo no)" "ok"
 chk "G4: 통제 — 가짜 이름(bogus-section) 자기참조 부재" "$(selfref_has 'bogus-section')" "no"
+# (M54) 픽스처 통제 — **같은 스캔**을 자기 파일에 없는 앵커를 가리키는 사본에 건다. 위 `G1`과 같은
+# 사유이고 같은 반환에서 왔다(M50 리뷰 권장 1 · 부인 기록 있음 · 세 사이클 이월).
+chk "G4: 픽스처 통제 — 미해소 자기참조를 실제로 잡는다" "$(selfref_fixture)" "1"
 
 # === Part H — 실행 환경 축 선언 정합 (M38-T06) ===========================
 # 규약이 실행 환경의 각 축에 **이름을 붙여 선언**하고(단일 원본: `docs/conventions.md`의
@@ -2719,6 +2751,99 @@ chk "N28: 음성 통제 - 손대지 않은 사본은 붉지 않는다" "$(axis_m
 # (실측: 창 좁히기를 되돌린 변이가 240/0 초록이었다). 규약의 「성립한 적대 변이는 픽스처로 승격한다」가
 # 이 자리를 가리킨다.
 chk "N29: 적대 통제 - 서술을 절 밖으로 옮기면 잡는다" "$(axis_missing "$(axis_fixture moved)")" "1"
+
+# --- Part O: 회고 후속 항목의 소비 (M54) -------------------------------------
+# 회고가 적은 후속 항목이 다음 사이클에 닿는지를 문다. 무는 것은 **선언의 유일성 · 상태 값의 집합
+# 소속 · 소비자의 배선**까지이고, 처분이 타당한가는 리뷰의 영역이다(규약이 같은 경계를 적는다).
+RETRO="$ROOT/docs/reports/retro.md"
+# **꼬리를 정규화한다** — 앞뒤·중복 공백을 남기면 빈 값 검사에서 ` ` + `` + ` ` 가 선언 줄의
+# 선행 공백과 맞아떨어져 **빈 상태 칸이 조용히 통과한다**(실측: O6이 got 0/want 1로 붉었다).
+RSTAT=$(decl_tail "$CONV" 'retro-status:' | LC_ALL=C awk '{ $1 = $1; print }')
+RBLK=$(decl_tail "$CONV" 'retro-block:' | LC_ALL=C awk '{ print $1 }')
+RFIRST=$(printf '%s' "$RSTAT" | LC_ALL=C awk '{ print $1 }')
+retro_vals() { # <retro 경로> → 마커 창 안 데이터 행의 상태 값(정규화)을 `[값]`으로 한 줄씩
+    # **창은 ASCII 마커 블록이다** — 절 제목(한글)을 매칭하면 제목이 바뀔 때 조용히 창을 잃고
+    # `run.ps1` 사본이 byte>127=0 규율 아래 같은 판정을 쓸 수 없다(에픽 블록과 같은 근거).
+    # 머리글 건너뛰기도 구조로 한다 — 창 안에서 구분선(`---`)을 본 **뒤의** 행만 데이터다.
+    # 값을 `[ ]`로 감싸 내보내는 것은 **빈 값이 단어 분리에서 사라지지 않게** 하기 위함이다.
+    [ -f "$1" ] || return 0
+    LC_ALL=C awk -v mk="$RBLK" '
+        mk == "" { exit }
+        index($0, "<!-- " mk ":start -->") > 0 { inb = 1; sep = 0; next }
+        index($0, "<!-- " mk ":end -->") > 0 { inb = 0; next }
+        inb && sep == 0 { if (index($0, "---") > 0) sep = 1; next }
+        inb && substr($0, 1, 1) == "|" {
+            n = split($0, f, "|")
+            if (n < 5) next
+            v = f[4]
+            gsub(/\r/, "", v); gsub(/\*/, "", v); gsub(/ /, "", v)
+            pp = index(v, "(")
+            if (pp > 0) v = substr(v, 1, pp - 1)
+            print "[" v "]"
+        }
+    ' "$1"
+}
+retro_rows() { retro_vals "$1" | grep -c .; }
+retro_bad() { # <retro 경로> → 선언 집합 밖인 행의 수 (**빈 값도 밖으로 센다**)
+    # 비우는 것이 지우는 것보다 조용한 경로다 — 빈 값을 통과시키면 이 검사가 그 자리에서 공허해진다.
+    _rb=0
+    for _rv in $(retro_vals "$1"); do
+        _rt=${_rv#[}; _rt=${_rt%]}
+        case " $RSTAT " in
+            *" $_rt "*) ;;
+            *) _rb=$((_rb + 1)) ;;
+        esac
+    done
+    echo "$_rb"
+}
+retro_fixture() { # <모드> → 사본 경로 (clean | outset | blank | paren)
+    # **첫 데이터 행 하나만** 건드린다 — 판정이 그 한 행에서 갈리는지 보려는 것이다.
+    _rf="$SBX/retro-$1.md"
+    LC_ALL=C awk -v mk="$RBLK" -v mode="$1" -v ok1="$RFIRST" '
+        index($0, "<!-- " mk ":start -->") > 0 { inb = 1; sep = 0; print; next }
+        index($0, "<!-- " mk ":end -->") > 0 { inb = 0; print; next }
+        inb && sep == 0 { if (index($0, "---") > 0) sep = 1; print; next }
+        inb && done == 0 && substr($0, 1, 1) == "|" {
+            n = split($0, f, "|")
+            if (n >= 5 && mode != "clean") {
+                done = 1
+                if (mode == "outset") f[4] = " zzz-gone "
+                else if (mode == "blank") f[4] = "  "
+                else if (mode == "paren") f[4] = " **" ok1 "(zzz-note)** "
+                line = f[1]
+                for (i = 2; i <= n; i++) line = line "|" f[i]
+                print line; next
+            }
+        }
+        { print }
+    ' "$RETRO" > "$_rf"
+    printf '%s' "$_rf"
+}
+mst_hits() { # 선언된 상태 값 중 milestone 스킬에 등장하는 **서로 다른** 값의 수
+    _mh=0
+    for _mv in $RSTAT; do
+        grep -qF -- "$_mv" "$ROOT/skills/milestone/SKILL.md" && _mh=$((_mh + 1))
+    done
+    echo "$_mh"
+}
+chk "O1: retro-status 선언 줄 정확히 1개" "$(decl_count "$CONV" 'retro-status:')" "1"
+chk "O2: retro-block 선언 줄 정확히 1개" "$(decl_count "$CONV" 'retro-block:')" "1"
+# (O3) 추출 positive-control — 마커·표 파싱이 망가지면 아래 본 검사가 «행 0개»로 공허 통과한다.
+chk "O3: 후속 항목 행 추출 positive-control(>0)" "$([ "$(retro_rows "$RETRO")" -gt 0 ] && echo ok || echo no)" "ok"
+# (O4) **본 검사.** 표의 상태 값이 전부 선언 집합 안이어야 한다.
+chk "O4: 본 검사 - 선언 집합 밖 상태 값 0개" "$(retro_bad "$RETRO")" "0"
+# 픽스처 통제 — **실제 판정을 픽스처에 건다**(M46 판례). 두 방향을 각각 깬다.
+chk "O5: 픽스처 통제 - 집합 밖 값을 잡는다" "$(retro_bad "$(retro_fixture outset)")" "1"
+chk "O6: 픽스처 통제 - 상태 칸을 비워도 잡는다" "$(retro_bad "$(retro_fixture blank)")" "1"
+chk "O7: 음성 통제 - 손대지 않은 사본은 붉지 않는다" "$(retro_bad "$(retro_fixture clean)")" "0"
+# (O8) 부재 통제 — 회고 문서가 없는 저장소에서 이 파트는 **침묵**한다(소음 0 계약의 기계 확인).
+chk "O8: 부재 통제 - 회고 문서가 없으면 행 0개" "$(retro_rows "$SBX/zzz-no-retro.md")" "0"
+# (O9) **오탐 방향.** 정상 문서를 붉히지 않는가 — 집합 안 값에 괄호 주석이 붙은 형태는 정상이다.
+# 정규화가 깨지면 여기서 붉는다(M49의 차단이 이 방향의 빈자리에서 나왔다).
+chk "O9: 오탐 방향 - 괄호 주석이 붙은 집합 안 값은 통과" "$(retro_bad "$(retro_fixture paren)")" "0"
+# (O10·O11) 소비자의 배선. 읽는다는 사실은 있어야 하고, **규칙을 다시 열거하면 안 된다**.
+chk "O10: milestone 스킬이 회고 문서를 가리킨다" "$([ "$(grep -cF -- 'docs/reports/retro.md' "$ROOT/skills/milestone/SKILL.md")" -ge 1 ] && echo ok || echo no)" "ok"
+chk "O11: 복제 금지 - 스킬이 상태 값 집합을 열거하지 않는다" "$([ "$(mst_hits)" -le 1 ] && echo ok || echo no)" "ok"
 
 chk "F1: README cases 선언 == 실제 케이스 수" "$(declared_cases)" "$((pass + fail + 1))"
 
