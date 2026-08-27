@@ -2845,6 +2845,149 @@ chk "O9: 오탐 방향 - 괄호 주석이 붙은 집합 안 값은 통과" "$(re
 chk "O10: milestone 스킬이 회고 문서를 가리킨다" "$([ "$(grep -cF -- 'docs/reports/retro.md' "$ROOT/skills/milestone/SKILL.md")" -ge 1 ] && echo ok || echo no)" "ok"
 chk "O11: 복제 금지 - 스킬이 상태 값 집합을 열거하지 않는다" "$([ "$(mst_hits)" -le 1 ] && echo ok || echo no)" "ok"
 
+# --- Part P: 완료 기준 대조 (M55) --------------------------------------------
+# 마일스톤이 요구한 것을 impl이 번호로 대조했는가. 무는 것은 **빠짐과 유령**까지이고
+# *"충족이 사실인가"* 는 리뷰의 영역이다(규약이 같은 경계를 적는다).
+CRITV=$(decl_tail "$CONV" 'criteria-verdict:' | LC_ALL=C awk '{ $1 = $1; print }')
+# **선언을 잃었을 때의 기본값을 두 사본에 못박는다.** 그러지 않으면 `sh`는 `[ n -ge "" ]`가 죽어
+# 대상이 비고, `ps1`은 `[int]''`가 **0**이라 **모든 마일스톤**을 대상으로 삼는다 — 같은 트리에서
+# 다른 판정이 된다(되돌림 `p2-key` 실측: sh 263/6 vs ps1 262/7). 형식이 어긋나면 **어느 마일스톤도
+# 대상이 되지 않게** 해 추출 positive-control이 양쪽에서 붉게 한다 — fail-loud이고 동치다.
+CRITS=$(decl_tail "$CONV" 'criteria-since:' | LC_ALL=C awk '{ print $1 }')
+CRITN=999999
+case "$CRITS" in
+    M*) _cs0=${CRITS#M}
+        case "$_cs0" in
+            "" | *[!0-9]*) ;;
+            *) CRITN=$_cs0 ;;
+        esac ;;
+esac
+# 선언이 **비었을 때의 기본값도 양 사본에 못박는다**. 그냥 두면 `grep -cF -- ""`가 **모든 줄**에
+# 맞아 sh는 P15를 91로 세고, ps1은 `IndexOf('')`가 끝을 넘어가 **결과 줄에 닿기 전에 죽는다** —
+# 같은 트리에서 한쪽은 세고 한쪽은 중단한다(완료 기준 6-(1) 교란의 실측: sh 263/6 · ps1 중단).
+# 빈 선언은 이제 **어느 사본에서도 나타나지 않는 토큰**이 되고, 그 사실은 `P1`이 양쪽에서 붉혀
+# 드러낸다. `criteria-since:`의 기본값을 못박은 것과 같은 기전이다(관측 (b)).
+CRITUNSET=zzz-criteria-verdict-unset
+CRITOK=$(printf '%s' "$CRITV" | LC_ALL=C awk '{ print $1 }')
+CRITALT=$(printf '%s' "$CRITV" | LC_ALL=C awk '{ print $NF }')
+[ -n "$CRITOK" ] || CRITOK=$CRITUNSET
+[ -n "$CRITALT" ] || CRITALT=$CRITUNSET
+crit_nums() { # <마일스톤 경로> → 완료 기준의 **최상위** 번호
+    # 창은 그 절 하나다 — 파일 전역을 훑으면 다른 절의 번호 목록이 섞인다.
+    LC_ALL=C awk '
+        $0 == "## 완료 기준" { w = 1; next }
+        w && substr($0, 1, 3) == "## " { w = 0 }
+        w && $0 ~ /^[0-9]+\. / { n = $1; sub(/\./, "", n); print n }
+    ' "$1"
+}
+crit_rows() { # <impl 보고서 경로> → 대조표의 `번호|판정`(정규화) 한 줄씩
+    # 머리글 건너뛰기는 구조로 한다 — 창 안에서 구분선(`---`)을 본 **뒤의** 행만 데이터다.
+    [ -f "$1" ] || return 0
+    LC_ALL=C awk '
+        $0 == "## 완료 기준 대조" { w = 1; sep = 0; next }
+        w && substr($0, 1, 3) == "## " { w = 0 }
+        w && sep == 0 { if (index($0, "---") > 0) sep = 1; next }
+        w && substr($0, 1, 1) == "|" {
+            n = split($0, f, "|")
+            if (n < 5) next
+            a = f[2]; b = f[3]
+            gsub(/[ \r*]/, "", a); gsub(/[ \r*]/, "", b)
+            print a "|" b
+        }
+    ' "$1"
+}
+crit_targets() { # <시작 번호> → 대상 마일스톤 번호(그 번호 이상 + impl 보고서 실재)
+    for _cm0 in "$ROOT"/docs/milestones/M*.md; do
+        _cn=$(basename "$_cm0" .md | sed 's/^M//')
+        [ "$_cn" -ge "$1" ] || continue
+        [ -f "$ROOT/docs/reports/M$_cn-impl.md" ] || continue
+        echo "$_cn"
+    done
+}
+crit_rep() { # <번호> [사본 경로] → 그 번호가 대상 사본이면 사본을, 아니면 실물을
+    # `set -u` 아래에서는 **미설정 위치 인자를 그냥 참조하면 죽는다** — 옵션 인자는 `${2-}`로 받는다.
+    if [ -n "${2-}" ] && [ "$1" = "$CRITN" ]; then printf '%s' "$2"
+    else printf '%s' "$ROOT/docs/reports/M$1-impl.md"; fi
+}
+crit_mismatch() { # <시작 번호> [사본 경로] → 번호 집합이 어긋난 마일스톤 수
+    _cmm=0
+    for _cn in $(crit_targets "$1"); do
+        _crep=$(crit_rep "$_cn" "${2-}")
+        _cwant=$(crit_nums "$ROOT/docs/milestones/M$_cn.md" | LC_ALL=C sort -n | tr '\n' ' ')
+        _chave=$(crit_rows "$_crep" | cut -d'|' -f1 | LC_ALL=C sort -n | tr '\n' ' ')
+        [ "$_cwant" = "$_chave" ] || _cmm=$((_cmm + 1))
+    done
+    echo "$_cmm"
+}
+crit_bad() { # [사본 경로] → 선언 집합 밖 판정 값의 수 (**빈 값도 밖으로 센다**)
+    _cbv=0
+    for _cn in $(crit_targets "$CRITN"); do
+        _crep=$(crit_rep "$_cn" "${1-}")
+        for _cv in $(crit_rows "$_crep" | LC_ALL=C awk -F'|' '{ print "[" $2 "]" }'); do
+            _ct=${_cv#[}; _ct=${_ct%]}
+            case " $CRITV " in
+                *" $_ct "*) ;;
+                *) _cbv=$((_cbv + 1)) ;;
+            esac
+        done
+    done
+    echo "$_cbv"
+}
+crit_seen() { # <시작 번호> → 대상 마일스톤의 기준 번호 총수 (추출 positive-control용)
+    _cs=0
+    for _cn in $(crit_targets "$1"); do
+        _cs=$((_cs + $(crit_nums "$ROOT/docs/milestones/M$_cn.md" | grep -c .)))
+    done
+    echo "$_cs"
+}
+crit_fixture() { # <모드> → 사본 경로 (clean|drop|ghost|outset|blank|swap)
+    # **첫 데이터 행 하나만** 건드린다 — 판정이 그 한 행에서 갈리는지 보려는 것이다.
+    _cf="$SBX/crit-$1.md"
+    LC_ALL=C awk -v mode="$1" -v ok1="$CRITOK" -v alt="$CRITALT" '
+        $0 == "## 완료 기준 대조" { w = 1; sep = 0; print; next }
+        w && substr($0, 1, 3) == "## " { w = 0 }
+        w && sep == 0 { if (index($0, "---") > 0) sep = 1; print; next }
+        w && done == 0 && substr($0, 1, 1) == "|" {
+            n = split($0, f, "|")
+            if (n >= 5 && mode != "clean") {
+                done = 1
+                if (mode == "drop") next
+                if (mode == "ghost") { print; print "| 999 | " ok1 " | zzz |"; next }
+                if (mode == "outset") f[3] = " zzz-gone "
+                else if (mode == "blank") f[3] = "  "
+                else if (mode == "swap") f[3] = " " alt " "
+                line = f[1]
+                for (i = 2; i <= n; i++) line = line "|" f[i]
+                print line; next
+            }
+        }
+        { print }
+    ' "$ROOT/docs/reports/M$CRITN-impl.md" > "$_cf"
+    printf '%s' "$_cf"
+}
+chk "P1: criteria-verdict 선언 줄 정확히 1개" "$(decl_count "$CONV" 'criteria-verdict:')" "1"
+chk "P2: criteria-since 선언 줄 정확히 1개" "$(decl_count "$CONV" 'criteria-since:')" "1"
+# (P3) 추출 positive-control — 기준 파싱이 망가지면 «집합이 같다»가 «0 == 0»으로 공허 통과한다.
+chk "P3: 완료 기준 번호 추출 positive-control(>0)" "$([ "$(crit_seen "$CRITN")" -gt 0 ] && echo ok || echo no)" "ok"
+# (P4·P5) **본 검사 둘.** 번호 집합 일치(빠짐 0·유령 0)와 판정 값의 집합 소속.
+chk "P4: 본 검사 - 번호 집합이 어긋난 마일스톤 0개" "$(crit_mismatch "$CRITN")" "0"
+chk "P5: 본 검사 - 선언 집합 밖 판정 값 0개" "$(crit_bad)" "0"
+# 픽스처 통제 — **실제 판정을 픽스처에 건다**(M46 판례). 네 방향을 각각 깬다.
+chk "P6: 픽스처 통제 - 행이 빠지면 잡는다" "$(crit_mismatch "$CRITN" "$(crit_fixture drop)")" "1"
+chk "P7: 픽스처 통제 - 없는 번호를 적으면 잡는다" "$(crit_mismatch "$CRITN" "$(crit_fixture ghost)")" "1"
+chk "P8: 픽스처 통제 - 집합 밖 판정 값을 잡는다" "$(crit_bad "$(crit_fixture outset)")" "1"
+chk "P9: 픽스처 통제 - 판정 칸을 비워도 잡는다" "$(crit_bad "$(crit_fixture blank)")" "1"
+chk "P10: 음성 통제 - 손대지 않은 사본은 붉지 않는다" "$(crit_mismatch "$CRITN" "$(crit_fixture clean)")" "0"
+# (P11) **소급 경계가 실제로 거르는가.** 시작 번호를 1로 낮추면 이 절이 없던 시절의 보고서가
+# 대상에 들어와 어긋난다 — 경계가 장식이 아니라는 것을 이 케이스가 확인한다.
+chk "P11: 경계 통제 - 시작 번호를 1로 낮추면 어긋난다(>0)" "$([ "$(crit_mismatch 1)" -gt 0 ] && echo ok || echo no)" "ok"
+# (P12) **오탐 방향.** 집합 안 다른 값으로 바꾸는 것은 정상이다 — 여기서 붉으면 과하게 무는 것이다.
+chk "P12: 오탐 방향 - 집합 안 다른 값은 통과" "$(crit_bad "$(crit_fixture swap)")" "0"
+# (P13~P15) 소비자의 배선. 스킬·템플릿이 가리키되 **규칙을 다시 열거하지 않는다**.
+chk "P13: impl 스킬이 규약 절을 가리킨다" "$([ "$(grep -cF -- '완료 기준 대조 (impl)' "$ROOT/skills/impl/SKILL.md")" -ge 1 ] && echo ok || echo no)" "ok"
+chk "P14: impl 템플릿이 그 절을 갖는다" "$([ "$(grep -cF -- '## 완료 기준 대조' "$ROOT/skills/impl/template.md")" -ge 1 ] && echo ok || echo no)" "ok"
+chk "P15: 복제 금지 - 스킬이 판정 값을 열거하지 않는다" "$(grep -cF -- "$CRITOK" "$ROOT/skills/impl/SKILL.md")" "0"
+
 chk "F1: README cases 선언 == 실제 케이스 수" "$(declared_cases)" "$((pass + fail + 1))"
 
 echo

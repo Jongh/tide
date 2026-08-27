@@ -3137,6 +3137,181 @@ try {
     Chk "O10: the milestone skill points at the retro document" $(if ([System.IO.File]::ReadAllText((Join-Path $ROOT 'skills/milestone/SKILL.md')).Contains('docs/reports/retro.md')) { 'ok' } else { 'no' }) 'ok'
     Chk "O11: no duplication -- the skill does not enumerate the status set" $(if ((MstHits) -le 1) { 'ok' } else { 'no' }) 'ok'
 
+    # --- Part P: completion-criteria cross-check (M55) ----------------------
+    # Did impl walk its own milestone's criteria BY NUMBER? What is bitten is omissions and ghosts;
+    # whether a "met" is TRUE is the review's layer (the convention writes the same boundary).
+    # The two Korean headings are assembled from code points -- this copy stays byte>127 = 0.
+    $CRIT_H  = '## ' + (Uni 0xC644,0xB8CC) + ' ' + (Uni 0xAE30,0xC900)          # wan-ryo gi-jun
+    $CRIT_HD = $CRIT_H + ' ' + (Uni 0xB300,0xC870)                             # + dae-jo
+    $critV = (((DeclTail $CONV 'criteria-verdict:') -split '\s+') | Where-Object { $_ -ne '' }) -join ' '
+    $critSet = @($critV -split ' ' | Where-Object { $_ -ne '' })
+    $critSinceTok = @(((DeclTail $CONV 'criteria-since:') -split '\s+') | Where-Object { $_ -ne '' })[0]
+    if ($null -eq $critSinceTok) { $critSinceTok = '' }
+    # PIN THE DEFAULT IN BOTH COPIES. Left alone, [int]'' is 0 here (every milestone becomes a
+    # target) while the .sh twin's `[ n -ge "" ]` dies and NO milestone does -- same tree, two
+    # verdicts (measured by reversal p2-key: sh 263/6 vs ps1 262/7). A malformed token now means
+    # NO targets on both sides, so the extraction positive-control reddens either way.
+    $critN = if ($critSinceTok -match '^M[0-9]+$') { $critSinceTok.Substring(1) } else { '999999' }
+    # PIN THE EMPTY-DECLARATION DEFAULT TOO. Left alone, '' makes the .sh twin's `grep -cF -- ""`
+    # match EVERY line while IndexOf('') here walks off the end and ABORTS the run -- same tree,
+    # one copy counts and the other never reaches its result line (measured by disturbance (1) of
+    # completion criterion 6: sh 263/6 vs ps1 aborted). A missing declaration is now a token that
+    # appears NOWHERE on either side, and P1 is what reddens to say so.
+    $critUnset = 'zzz-criteria-verdict-unset'
+    $critOk = if ($critSet.Count -gt 0) { $critSet[0] } else { $critUnset }
+    $critAlt = if ($critSet.Count -gt 0) { $critSet[$critSet.Count - 1] } else { $critUnset }
+    function CritSortJoin($nums) {
+        # No bare Sort-Object anywhere: cast to int and use Array::Sort so the order is fixed,
+        # matching the .sh twin's `LC_ALL=C sort -n`.
+        $a = @($nums | ForEach-Object { [int]$_ })
+        [array]::Sort($a)
+        return (($a | ForEach-Object { [string]$_ }) -join ' ')
+    }
+    function CritNums([string]$path) {
+        # The window is THAT ONE SECTION -- scanning the whole file would mix in other numbered lists.
+        $out = New-Object System.Collections.ArrayList
+        if (-not (Test-Path $path)) { return $out.ToArray() }
+        $w = $false
+        foreach ($l in [System.IO.File]::ReadAllLines($path)) {
+            if ($l -eq $CRIT_H) { $w = $true; continue }
+            if ($w -and $l.StartsWith('## ', [System.StringComparison]::Ordinal)) { $w = $false }
+            if ($w -and ($l -match '^([0-9]+)\. ')) { [void]$out.Add($matches[1]) }
+        }
+        return $out.ToArray()
+    }
+    function CritRows([string]$path) {
+        # Skipping the header row is structural too: inside the window only rows AFTER the
+        # separator (`---`) are data. Column 1 is the number, column 2 the verdict.
+        $out = New-Object System.Collections.ArrayList
+        if (-not (Test-Path $path)) { return $out.ToArray() }
+        $w = $false
+        $sep = $false
+        foreach ($l in [System.IO.File]::ReadAllLines($path)) {
+            if ($l -eq $CRIT_HD) { $w = $true; $sep = $false; continue }
+            if ($w -and $l.StartsWith('## ', [System.StringComparison]::Ordinal)) { $w = $false }
+            if ($w -and (-not $sep)) { if ($l.Contains('---')) { $sep = $true }; continue }
+            if ($w -and $l.StartsWith('|', [System.StringComparison]::Ordinal)) {
+                $f = $l -split '\|'
+                if ($f.Count -lt 5) { continue }
+                $a = $f[1].Replace([string][char]13, '').Replace('*', '').Replace(' ', '')
+                $b = $f[2].Replace([string][char]13, '').Replace('*', '').Replace(' ', '')
+                [void]$out.Add($a + '|' + $b)
+            }
+        }
+        return $out.ToArray()
+    }
+    function CritTargets([int]$since) {
+        $out = New-Object System.Collections.ArrayList
+        foreach ($f in (Get-ChildItem -LiteralPath (Join-Path $ROOT 'docs/milestones') -Filter 'M*.md' -File -Force)) {
+            $n = $f.BaseName -replace '^M', ''
+            if ($n -notmatch '^[0-9]+$') { continue }
+            if ([int]$n -lt $since) { continue }
+            if (-not (Test-Path (Join-Path $ROOT ('docs/reports/M' + $n + '-impl.md')))) { continue }
+            [void]$out.Add($n)
+        }
+        return $out.ToArray()
+    }
+    function CritRep([string]$n, [string]$alt) {
+        if ($alt -ne '' -and $n -eq $critN) { return $alt }
+        return (Join-Path $ROOT ('docs/reports/M' + $n + '-impl.md'))
+    }
+    function CritMismatch([int]$since, [string]$alt) {
+        $m = 0
+        foreach ($n in (CritTargets $since)) {
+            $rep = CritRep $n $alt
+            $want = CritSortJoin (CritNums (Join-Path $ROOT ('docs/milestones/M' + $n + '.md')))
+            $have = CritSortJoin (@(CritRows $rep | ForEach-Object { ($_ -split '\|')[0] }))
+            if ($want -ne $have) { $m++ }
+        }
+        return $m
+    }
+    function CritBad([string]$alt) {
+        # AN EMPTY VERDICT COUNTS AS OUTSIDE THE SET -- blanking a cell is the quieter path.
+        $b = 0
+        foreach ($n in (CritTargets ([int]$critN))) {
+            $rep = CritRep $n $alt
+            foreach ($r in (CritRows $rep)) {
+                $v = ($r -split '\|')[1]
+                if ($critSet -notcontains $v) { $b++ }
+            }
+        }
+        return $b
+    }
+    function CritSeen([int]$since) {
+        $c = 0
+        foreach ($n in (CritTargets $since)) {
+            $c += @(CritNums (Join-Path $ROOT ('docs/milestones/M' + $n + '.md'))).Count
+        }
+        return $c
+    }
+    function CritFixture([string]$mode) {
+        # Touches ONLY THE FIRST DATA ROW -- the point is whether the verdict turns on that one row.
+        $f = Join-Path $sbx ('crit-' + $mode + '.md')
+        $src = Join-Path $ROOT ('docs/reports/M' + $critN + '-impl.md')
+        $out = New-Object System.Collections.ArrayList
+        if (-not (Test-Path $src)) {
+            [System.IO.File]::WriteAllLines($f, @(), (New-Object System.Text.UTF8Encoding($false)))
+            return $f
+        }
+        $w = $false
+        $sep = $false
+        $done = $false
+        foreach ($l in [System.IO.File]::ReadAllLines($src)) {
+            if ($l -eq $CRIT_HD) { $w = $true; $sep = $false; [void]$out.Add($l); continue }
+            if ($w -and $l.StartsWith('## ', [System.StringComparison]::Ordinal)) { $w = $false }
+            if ($w -and (-not $sep)) { if ($l.Contains('---')) { $sep = $true }; [void]$out.Add($l); continue }
+            if ($w -and (-not $done) -and $l.StartsWith('|', [System.StringComparison]::Ordinal)) {
+                $f2 = $l -split '\|'
+                if ($f2.Count -ge 5 -and $mode -ne 'clean') {
+                    $done = $true
+                    if ($mode -eq 'drop') { continue }
+                    if ($mode -eq 'ghost') {
+                        [void]$out.Add($l)
+                        [void]$out.Add('| 999 | ' + $critOk + ' | zzz |')
+                        continue
+                    }
+                    if ($mode -eq 'outset') { $f2[2] = ' zzz-gone ' }
+                    elseif ($mode -eq 'blank') { $f2[2] = '  ' }
+                    elseif ($mode -eq 'swap') { $f2[2] = ' ' + $critAlt + ' ' }
+                    [void]$out.Add(($f2 -join '|'))
+                    continue
+                }
+            }
+            [void]$out.Add($l)
+        }
+        [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    function CritFileHits([string]$rel, [string]$needle) {
+        $t = [System.IO.File]::ReadAllText((Join-Path $ROOT $rel))
+        $c = 0
+        $i = $t.IndexOf($needle, [System.StringComparison]::Ordinal)
+        while ($i -ge 0) { $c++; $i = $t.IndexOf($needle, $i + 1, [System.StringComparison]::Ordinal) }
+        return $c
+    }
+    Chk "P1: criteria-verdict declaration line is exactly 1" (DeclCount $CONV 'criteria-verdict:') '1'
+    Chk "P2: criteria-since declaration line is exactly 1" (DeclCount $CONV 'criteria-since:') '1'
+    # (P3) Extraction positive-control -- a broken parse makes "the sets match" vacuous (0 == 0).
+    Chk "P3: criteria-number extraction positive-control (>0)" $(if ((CritSeen ([int]$critN)) -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # (P4/P5) THE TWO MAIN CHECKS: number-set equality (no omissions, no ghosts) and set membership.
+    Chk "P4: main check -- milestones whose number sets differ: 0" ([string](CritMismatch ([int]$critN) '')) '0'
+    Chk "P5: main check -- verdicts outside the declared set: 0" ([string](CritBad '')) '0'
+    # Fixture controls -- the REAL verdict runs against the fixture (M46 precedent), four directions.
+    Chk "P6: control -- a dropped row is caught" ([string](CritMismatch ([int]$critN) (CritFixture 'drop'))) '1'
+    Chk "P7: control -- a ghost number is caught" ([string](CritMismatch ([int]$critN) (CritFixture 'ghost'))) '1'
+    Chk "P8: control -- a verdict outside the set is caught" ([string](CritBad (CritFixture 'outset'))) '1'
+    Chk "P9: control -- a blanked verdict cell is caught too" ([string](CritBad (CritFixture 'blank'))) '1'
+    Chk "P10: negative control -- an untouched copy stays green" ([string](CritMismatch ([int]$critN) (CritFixture 'clean'))) '0'
+    # (P11) DOES THE NON-RETROACTIVE BOUNDARY ACTUALLY FILTER? Lower the start number to 1 and the
+    # reports written before this section existed come into scope and diverge.
+    Chk "P11: boundary control -- lowering the start number to 1 diverges (>0)" $(if ((CritMismatch 1 '') -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # (P12) FALSE-POSITIVE DIRECTION. Swapping to another in-set value is normal prose.
+    Chk "P12: false-positive direction -- another in-set verdict passes" ([string](CritBad (CritFixture 'swap'))) '0'
+    # (P13-P15) The consumer's wiring: point at the rule, do NOT re-enumerate it.
+    Chk "P13: the impl skill points at the convention section" $(if ((CritFileHits 'skills/impl/SKILL.md' ($CRIT_HD.Substring(3) + ' (impl)')) -ge 1) { 'ok' } else { 'no' }) 'ok'
+    Chk "P14: the impl template carries that section" $(if ((CritFileHits 'skills/impl/template.md' $CRIT_HD) -ge 1) { 'ok' } else { 'no' }) 'ok'
+    Chk "P15: no duplication -- the skill does not enumerate the verdicts" ([string](CritFileHits 'skills/impl/SKILL.md' $critOk)) '0'
+
     Chk "F1: README cases declaration == actual case count" (DeclaredCases) ([string]($script:pass + $script:fail + 1))
 
     Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) (actual command skills N=$N) [runtime: PowerShell $($PSVersionTable.PSVersion) $($PSVersionTable.PSEdition)]"
