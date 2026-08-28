@@ -2867,28 +2867,48 @@ esac
 # 같은 트리에서 한쪽은 세고 한쪽은 중단한다(완료 기준 6-(1) 교란의 실측: sh 263/6 · ps1 중단).
 # 빈 선언은 이제 **어느 사본에서도 나타나지 않는 토큰**이 되고, 그 사실은 `P1`이 양쪽에서 붉혀
 # 드러낸다. `criteria-since:`의 기본값을 못박은 것과 같은 기전이다(관측 (b)).
+# **못은 선언 원문에 박는다**(M56 — M55 리뷰 반환 ②). 파생 토큰에만 박으면 **집합 소속을 판정하는
+# 자리**가 여전히 선언 원문을 읽어, 빈 판정 값을 sh는 **집합 안**(`case "  " in *"  "*`이 맞는다)으로
+# ps1은 **집합 밖**(`@() -notcontains ''`)으로 센다 — 같은 트리에서 다른 수다(실측: 선언을 지우고
+# 판정 칸 하나를 비우면 `P9`가 sh 10 · ps1 11). 원문에 박으면 파생 토큰이 **거기서 나오므로** 한
+# 자리로 끝난다 — 아래 두 대입에 따로 폴백을 두지 않는 이유이고, 두면 그것이 두 번째 선언처다.
 CRITUNSET=zzz-criteria-verdict-unset
+[ -n "$CRITV" ] || CRITV=$CRITUNSET
 CRITOK=$(printf '%s' "$CRITV" | LC_ALL=C awk '{ print $1 }')
 CRITALT=$(printf '%s' "$CRITV" | LC_ALL=C awk '{ print $NF }')
-[ -n "$CRITOK" ] || CRITOK=$CRITUNSET
-[ -n "$CRITALT" ] || CRITALT=$CRITUNSET
 crit_nums() { # <마일스톤 경로> → 완료 기준의 **최상위** 번호
     # 창은 그 절 하나다 — 파일 전역을 훑으면 다른 절의 번호 목록이 섞인다.
-    LC_ALL=C awk '
-        $0 == "## 완료 기준" { w = 1; next }
-        w && substr($0, 1, 3) == "## " { w = 0 }
-        w && $0 ~ /^[0-9]+\. / { n = $1; sub(/\./, "", n); print n }
+    # 창 열기는 **줄 끝 CR만 벗기고 여전히 정확히 비교**한다(`decl_lines`와 **같은 형태** — M56).
+    # `index()`로 넓히면 안 된다: `## 완료 기준 대조`가 `## 완료 기준`을 **부분 문자열로 포함**해
+    # 창이 잘못 열린다. 줄 전체 일치만 두면 CR을 레코드에 남기는 awk에서 창이 **아예 안 열린다**.
+    LC_ALL=C awk -v cr="$(printf '\r')" '
+        { s = $0; if (length(s) > 0 && substr(s, length(s), 1) == cr) s = substr(s, 1, length(s) - 1) }
+        s == "## 완료 기준" { w = 1; next }
+        w && substr(s, 1, 3) == "## " { w = 0 }
+        w && s ~ /^[0-9]+\. / { n = $1; sub(/\./, "", n); print n }
+    ' "$1"
+}
+crit_head_lines() { # <파일> → 절 제목과 **줄 전체가 같은** 줄 수
+    # **가드가 지키는 대상과 같은 형태로 본다**(M56 — `p14-template` 실측이 연 자리). 앞선 판본은
+    # `grep -cF`라 **부분 문자열**이었고, 제목을 `## 완료 기준 대조표`로 늘리면 **여전히 맞아 초록**
+    # 이었다(실측 273/0). 그런데 창을 여는 `crit_rows`는 **줄 전체 일치**라 그 템플릿에서 나온 보고서는
+    # 창이 열리지 않는다 — **가드는 초록인데 지켜야 할 것이 깨진다.** 창과 같은 형태로 맞춘다.
+    LC_ALL=C awk -v cr="$(printf '\r')" '
+        { s = $0; if (length(s) > 0 && substr(s, length(s), 1) == cr) s = substr(s, 1, length(s) - 1) }
+        s == "## 완료 기준 대조" { n++ }
+        END { print n + 0 }
     ' "$1"
 }
 crit_rows() { # <impl 보고서 경로> → 대조표의 `번호|판정`(정규화) 한 줄씩
     # 머리글 건너뛰기는 구조로 한다 — 창 안에서 구분선(`---`)을 본 **뒤의** 행만 데이터다.
     [ -f "$1" ] || return 0
-    LC_ALL=C awk '
-        $0 == "## 완료 기준 대조" { w = 1; sep = 0; next }
-        w && substr($0, 1, 3) == "## " { w = 0 }
-        w && sep == 0 { if (index($0, "---") > 0) sep = 1; next }
-        w && substr($0, 1, 1) == "|" {
-            n = split($0, f, "|")
+    LC_ALL=C awk -v cr="$(printf '\r')" '
+        { s = $0; if (length(s) > 0 && substr(s, length(s), 1) == cr) s = substr(s, 1, length(s) - 1) }
+        s == "## 완료 기준 대조" { w = 1; sep = 0; next }
+        w && substr(s, 1, 3) == "## " { w = 0 }
+        w && sep == 0 { if (index(s, "---") > 0) sep = 1; next }
+        w && substr(s, 1, 1) == "|" {
+            n = split(s, f, "|")
             if (n < 5) next
             a = f[2]; b = f[3]
             gsub(/[ \r*]/, "", a); gsub(/[ \r*]/, "", b)
@@ -2943,11 +2963,12 @@ crit_seen() { # <시작 번호> → 대상 마일스톤의 기준 번호 총수 
 crit_fixture() { # <모드> → 사본 경로 (clean|drop|ghost|outset|blank|swap)
     # **첫 데이터 행 하나만** 건드린다 — 판정이 그 한 행에서 갈리는지 보려는 것이다.
     _cf="$SBX/crit-$1.md"
-    LC_ALL=C awk -v mode="$1" -v ok1="$CRITOK" -v alt="$CRITALT" '
-        $0 == "## 완료 기준 대조" { w = 1; sep = 0; print; next }
-        w && substr($0, 1, 3) == "## " { w = 0 }
-        w && sep == 0 { if (index($0, "---") > 0) sep = 1; print; next }
-        w && done == 0 && substr($0, 1, 1) == "|" {
+    LC_ALL=C awk -v mode="$1" -v ok1="$CRITOK" -v alt="$CRITALT" -v cr="$(printf '\r')" '
+        { s = $0; if (length(s) > 0 && substr(s, length(s), 1) == cr) s = substr(s, 1, length(s) - 1) }
+        s == "## 완료 기준 대조" { w = 1; sep = 0; print; next }
+        w && substr(s, 1, 3) == "## " { w = 0 }
+        w && sep == 0 { if (index(s, "---") > 0) sep = 1; print; next }
+        w && done == 0 && substr(s, 1, 1) == "|" {
             n = split($0, f, "|")
             if (n >= 5 && mode != "clean") {
                 done = 1
@@ -2964,6 +2985,97 @@ crit_fixture() { # <모드> → 사본 경로 (clean|drop|ghost|outset|blank|swa
         { print }
     ' "$ROOT/docs/reports/M$CRITN-impl.md" > "$_cf"
     printf '%s' "$_cf"
+}
+crit_eol() { # <줄끝> → 대상 마일스톤 문서를 그 줄끝으로 다시 쓴 픽스처 경로 (lf|crlf)
+    # **CR 내성 통제의 픽스처**(M56 — M55 리뷰 반환 ③). 원본의 줄끝이 무엇이든 같은 본문을 두 줄끝으로
+    # 각각 만든다. 판정은 여기서 하지 않는다 — 아래 `crit_eol_same`이 **실제 판정 함수**(`crit_nums`)를
+    # 둘 다에 걸어 대조하므로, «픽스처가 조건을 만족하는가»가 아니라 «판정이 픽스처를 잡는가»를 묻는다.
+    _cef="$SBX/crit-eol-$1.md"
+    if [ "$1" = crlf ]; then _cee=$(printf '\r'); else _cee=''; fi
+    LC_ALL=C awk -v cr="$(printf '\r')" -v eol="$_cee" '{
+        s = $0
+        if (length(s) > 0 && substr(s, length(s), 1) == cr) s = substr(s, 1, length(s) - 1)
+        print s eol
+    }' "$ROOT/docs/milestones/M$CRITN.md" > "$_cef"
+    printf '%s' "$_cef"
+}
+crit_eol_same() { # → LF·CRLF 픽스처에서 **같은 번호**가 나오면 ok (추출이 비면 no — 공허 통과 차단)
+    _celff=$(crit_eol lf); _cecrf=$(crit_eol crlf)
+    # **픽스처 positive-control** — CRLF 사본에 CR이 실제로 있고 LF 사본에는 **없어야** 한다.
+    # 없으면 두 사본이 같아져 «같은 번호»가 **공허하게** 성립한다: 픽스처 생성기를 깨서 양쪽을 LF로
+    # 만들어도 초록이 나온다(M46 판례의 동어반복 그 자체). `awk`로 세지 않는 이유는 윈도우 gawk가
+    # 텍스트 모드로 **CR을 먼저 벗겨** 그 자리에서 볼 수 없기 때문이다 — 바이트로 센다.
+    _cecn=$(LC_ALL=C tr -dc '\r' < "$_cecrf" | wc -c | tr -d ' ')
+    _celn=$(LC_ALL=C tr -dc '\r' < "$_celff" | wc -c | tr -d ' ')
+    if [ "$_cecn" -le 0 ] || [ "$_celn" -ne 0 ]; then echo no; return; fi
+    _celf=$(crit_nums "$_celff" | tr '\n' ' ')
+    _cecr=$(crit_nums "$_cecrf" | tr '\n' ' ')
+    [ -n "$_celf" ] && [ "$_celf" = "$_cecr" ] && echo ok || echo no
+}
+# (M56 — M55 리뷰 반환 ① + 적대 축 `adv-enum-split`) **재열거의 창은 파일이다.**
+# 앞선 판본은 선언 집합의 **첫 값 하나**를 grep했다. 그 값이 둘째 값의 **부분 문자열**이라
+# 스킬이 산문에서 둘째 값을 **한 번만 써도 붉었다** — 그런 문장은 마일스톤이 **템플릿에 두라고
+# 요구한 안내문과 같은 문장**이고, 그것을 스킬로 옮기는 것은 평범한 편집이다(과하게 무는 방향).
+# 그다음 판본은 **줄 단위로** 서로 다른 값의 수를 셌고, 적대 축이 그 창을 뚫었다 — 값을 **두 줄에
+# 나눠** 적으면 어느 줄도 둘을 담지 않아 **초록으로 통과**했다(`adv-enum-split` 실측).
+# 그래서 창을 **파일 단위**로 연다. 다만 그대로 넓히면 셋째 값이 **한국어 산문의 흔한 낱말**이라
+# 같은 스킬에 이미 다른 뜻으로 여러 번 있고, 파일 어디엔가 다른 값이 하나만 있어도 붉는다.
+# 세는 대상을 **포함 관계에 있는 쌍**으로 한정하는 이유다 — 그 쌍은 **선언 집합에서 도출한다**
+# (어떤 값이 다른 값 안에 들어 있는 그 둘). 러너는 값의 위치도 낱말도 알지 않는다.
+# 쌍이 도출되지 않으면(선언에 포함 관계가 없거나 선언을 잃었을 때) 판정은 **항상 `no`**가 되고
+# `P17`이 **붉어 그 사실을 드러낸다** — 조용히 공허해지지 않는다.
+CRITPAIR=$(printf '%s' "$CRITV" | LC_ALL=C awk '{ for (i = 1; i <= NF; i++) for (j = 1; j <= NF; j++) if (i != j && index($i, $j) > 0) { print $i, $j; exit } }')
+CRITSUP=$(printf '%s' "$CRITPAIR" | LC_ALL=C awk '{ print $1 }')
+[ -n "$CRITSUP" ] || CRITSUP=$CRITOK
+CRITSUB=$(printf '%s' "$CRITPAIR" | LC_ALL=C awk '{ print $NF }')
+[ -n "$CRITSUB" ] || CRITSUB=$CRITOK
+crit_reenum() { # <파일> → 포함 쌍의 **두 값이 모두** 파일에 나타나면 yes, 아니면 no
+    [ -f "$1" ] || { echo no; return; }
+    LC_ALL=C awk -v vals="$CRITPAIR" '
+        function cnt(s, t,   n, p) {
+            if (t == "") return 0
+            n = 0; p = index(s, t)
+            while (p > 0) { n++; s = substr(s, p + length(t)); p = index(s, t) }
+            return n
+        }
+        BEGIN { nv = split(vals, v, " ") }
+        {
+            for (i = 1; i <= nv; i++) {
+                c = cnt($0, v[i])
+                for (j = 1; j <= nv; j++) if (i != j && index(v[j], v[i]) > 0) c -= cnt($0, v[j])
+                if (c > 0) seen[i] = 1
+            }
+        }
+        END { d = 0; for (i = 1; i <= nv; i++) if (seen[i]) d++; print (d >= 2) ? "yes" : "no" }
+    ' "$1"
+}
+crit_skill_base() { # → 쌍의 값이 **한 자리도 없는** 스킬 사본 (픽스처의 바닥)
+    # **픽스처를 살아 있는 파일 위에 쌓지 않는다**(M56 — 적대 축 `adv-enum-third`가 연 자리).
+    # 바닥을 `skills/impl/SKILL.md` 그대로 두면 그 파일이 쌍의 값 **하나만 갖게 되는 순간**
+    # `one` 픽스처가 나머지 하나를 얹어 **둘**이 되어 `P18`이 붉는다 — 값 하나를 산문에서 쓰는 것은
+    # 통과해야 한다는 이 계열의 계약과 **정면으로 어긋나는 오탐**이다. 바닥에서 쌍의 값을 지워
+    # `P17`·`P18`·`P19`가 **판정 함수만** 재게 한다. 살아 있는 파일을 재는 것은 `P15`의 몫이다.
+    _csb="$SBX/crit-skill-base.md"
+    LC_ALL=C awk -v vals="$CRITPAIR" '
+        BEGIN { nv = split(vals, v, " ") }
+        {
+            for (i = 1; i <= nv; i++) if (index($0, v[i]) > 0) next
+            print
+        }
+    ' "$ROOT/skills/impl/SKILL.md" > "$_csb"
+    printf '%s' "$_csb"
+}
+crit_skill_fixture() { # <모드> → 스킬 사본 경로
+    # enum: 값을 **한 줄에** 열거 · one: 값 **하나**만 · split: 쌍을 **두 줄에 나눠** 적는다.
+    # `split`은 적대 변이가 성립한 형태를 **픽스처로 승격**한 것이다(규약의 되돌림 절).
+    _csf="$SBX/crit-skill-$1.md"
+    cp "$(crit_skill_base)" "$_csf"
+    case "$1" in
+        enum)  printf '%s\n' "$CRITV" >> "$_csf" ;;
+        split) printf '%s\n' "$CRITSUP" >> "$_csf"; printf '%s\n' "$CRITSUB" >> "$_csf" ;;
+        *)     printf '%s\n' "$CRITSUP" >> "$_csf" ;;
+    esac
+    printf '%s' "$_csf"
 }
 chk "P1: criteria-verdict 선언 줄 정확히 1개" "$(decl_count "$CONV" 'criteria-verdict:')" "1"
 chk "P2: criteria-since 선언 줄 정확히 1개" "$(decl_count "$CONV" 'criteria-since:')" "1"
@@ -2985,8 +3097,23 @@ chk "P11: 경계 통제 - 시작 번호를 1로 낮추면 어긋난다(>0)" "$([
 chk "P12: 오탐 방향 - 집합 안 다른 값은 통과" "$(crit_bad "$(crit_fixture swap)")" "0"
 # (P13~P15) 소비자의 배선. 스킬·템플릿이 가리키되 **규칙을 다시 열거하지 않는다**.
 chk "P13: impl 스킬이 규약 절을 가리킨다" "$([ "$(grep -cF -- '완료 기준 대조 (impl)' "$ROOT/skills/impl/SKILL.md")" -ge 1 ] && echo ok || echo no)" "ok"
-chk "P14: impl 템플릿이 그 절을 갖는다" "$([ "$(grep -cF -- '## 완료 기준 대조' "$ROOT/skills/impl/template.md")" -ge 1 ] && echo ok || echo no)" "ok"
-chk "P15: 복제 금지 - 스킬이 판정 값을 열거하지 않는다" "$(grep -cF -- "$CRITOK" "$ROOT/skills/impl/SKILL.md")" "0"
+chk "P14: impl 템플릿이 그 절을 갖는다(줄 전체 일치, 정확히 1)" "$(crit_head_lines "$ROOT/skills/impl/template.md")" "1"
+chk "P15: 복제 금지 - 스킬이 포함 쌍을 다시 열거하지 않는다" "$(crit_reenum "$ROOT/skills/impl/SKILL.md")" "no"
+# (P16) **CR 내성 통제**(M56 — M55 리뷰 반환 ③). 창 열기가 **줄 전체 일치**뿐이면 CR을 레코드에
+# 남기는 awk(mawk 등)에서 창이 열리지 않는다 — 선언된 네 환경에서는 윈도우 gawk가 CR을 선벗기고
+# 우분투는 LF 체크아웃이라 발화하지 않았고, 그래서 **CRLF 픽스처를 명시로 세워** 그 자리를 문다.
+# `run.ps1` 사본은 `ReadAllLines`가 CRLF를 이미 벗기므로 **고칠 것이 없고 케이스만 동형**이다.
+chk "P16: CR 내성 - CRLF 픽스처에서도 창이 열리고 번호가 같다" "$(crit_eol_same)" "ok"
+# (P17) 픽스처 통제 — **실제 판정을 픽스처에 건다**. 값을 한 줄에 열거하면 잡아야 한다.
+# 쌍이 도출되지 않으면 이 자리가 붉는다 — **공허 통과를 막는 자리**이기도 하다.
+chk "P17: 픽스처 통제 - 값을 한 줄에 열거하면 잡는다" "$(crit_reenum "$(crit_skill_fixture enum)")" "yes"
+# (P18) **오탐 방향**(M55 리뷰 반환 ①). 값 **하나**를 산문에서 쓰는 것은 열거가 아니다 —
+# 여기서 붉으면 과하게 무는 것이고, 그 문장은 템플릿에 실재한다.
+chk "P18: 오탐 방향 - 값 하나만 쓰는 줄은 통과" "$(crit_reenum "$(crit_skill_fixture one)")" "no"
+# (P19) 픽스처 통제 — **적대 변이의 승격**(M56). 값을 **두 줄에 나눠** 적는 것도 재열거다.
+# 줄 단위 창이던 시절 이 형태가 초록으로 통과했다(`adv-enum-split`). 창이 줄로 되돌아가면
+# 여기서 붉는다 — 되돌림이 아니라 **상시로** 무는 자리다.
+chk "P19: 픽스처 통제 - 두 줄에 나눠 적은 열거도 잡는다" "$(crit_reenum "$(crit_skill_fixture split)")" "yes"
 
 chk "F1: README cases 선언 == 실제 케이스 수" "$(declared_cases)" "$((pass + fail + 1))"
 
