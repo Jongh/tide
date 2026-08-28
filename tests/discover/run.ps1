@@ -3143,7 +3143,21 @@ try {
     # The two Korean headings are assembled from code points -- this copy stays byte>127 = 0.
     $CRIT_H  = '## ' + (Uni 0xC644,0xB8CC) + ' ' + (Uni 0xAE30,0xC900)          # wan-ryo gi-jun
     $CRIT_HD = $CRIT_H + ' ' + (Uni 0xB300,0xC870)                             # + dae-jo
+    # PIN THE EMPTY-DECLARATION DEFAULT ON THE DECLARATION ITSELF. Left alone, '' makes the .sh
+    # twin's `grep -cF -- ""` match EVERY line while IndexOf('') here walks off the end and ABORTS
+    # the run -- same tree, one copy counts and the other never reaches its result line (measured
+    # by disturbance (1) of completion criterion 6: sh 263/6 vs ps1 aborted). A missing declaration
+    # is now a token that appears NOWHERE on either side, and P1 is what reddens to say so.
+    # M56 (M55 review return (2)) MOVED THE PIN ONTO THE RAW DECLARATION. Pinned only on the
+    # DERIVED tokens, the set-membership test still read the raw declaration, so a blanked verdict
+    # cell counted as INSIDE the set in the .sh twin (`case "  " in *"  "*` matches) and OUTSIDE
+    # here (`@() -notcontains ''`) -- same tree, two numbers (measured: drop the declaration and
+    # blank one cell and P9 counts sh 10 vs ps1 11). Pinning the declaration makes the derived
+    # tokens fall out of it, so there is exactly ONE place; a second fallback below would be a
+    # second declaration site.
+    $critUnset = 'zzz-criteria-verdict-unset'
     $critV = (((DeclTail $CONV 'criteria-verdict:') -split '\s+') | Where-Object { $_ -ne '' }) -join ' '
+    if ($critV -eq '') { $critV = $critUnset }
     $critSet = @($critV -split ' ' | Where-Object { $_ -ne '' })
     $critSinceTok = @(((DeclTail $CONV 'criteria-since:') -split '\s+') | Where-Object { $_ -ne '' })[0]
     if ($null -eq $critSinceTok) { $critSinceTok = '' }
@@ -3152,14 +3166,25 @@ try {
     # verdicts (measured by reversal p2-key: sh 263/6 vs ps1 262/7). A malformed token now means
     # NO targets on both sides, so the extraction positive-control reddens either way.
     $critN = if ($critSinceTok -match '^M[0-9]+$') { $critSinceTok.Substring(1) } else { '999999' }
-    # PIN THE EMPTY-DECLARATION DEFAULT TOO. Left alone, '' makes the .sh twin's `grep -cF -- ""`
-    # match EVERY line while IndexOf('') here walks off the end and ABORTS the run -- same tree,
-    # one copy counts and the other never reaches its result line (measured by disturbance (1) of
-    # completion criterion 6: sh 263/6 vs ps1 aborted). A missing declaration is now a token that
-    # appears NOWHERE on either side, and P1 is what reddens to say so.
-    $critUnset = 'zzz-criteria-verdict-unset'
-    $critOk = if ($critSet.Count -gt 0) { $critSet[0] } else { $critUnset }
-    $critAlt = if ($critSet.Count -gt 0) { $critSet[$critSet.Count - 1] } else { $critUnset }
+    # The derived tokens fall out of the PINNED declaration above -- no fallback of their own.
+    $critOk = $critSet[0]
+    # M56 -- the value that CONTAINS another declared value, derived from the set itself (no
+    # positions, no words baked in). The .sh twin derives the same token the same way.
+    # M56 -- the PAIR in a containment relation, derived from the set itself. Both members are
+    # needed: the file-wide re-enumeration window counts exactly this pair (see CritReenum).
+    # Empty when the declared set has no containment -- the verdict is then always 'no' and P17
+    # reddens, so the control never goes quietly vacuous.
+    $critSup = ''
+    $critSub = ''
+    foreach ($a in $critSet) {
+        foreach ($b in $critSet) {
+            if ($critSup -eq '' -and (-not [string]::Equals($a, $b, [System.StringComparison]::Ordinal)) -and $a.IndexOf($b, [System.StringComparison]::Ordinal) -ge 0) { $critSup = $a; $critSub = $b }
+        }
+    }
+    $critPair = @(@($critSup, $critSub) | Where-Object { $_ -ne '' })
+    if ($critSup -eq '') { $critSup = $critOk }
+    if ($critSub -eq '') { $critSub = $critOk }
+    $critAlt = $critSet[$critSet.Count - 1]
     function CritSortJoin($nums) {
         # No bare Sort-Object anywhere: cast to int and use Array::Sort so the order is fixed,
         # matching the .sh twin's `LC_ALL=C sort -n`.
@@ -3289,6 +3314,99 @@ try {
         while ($i -ge 0) { $c++; $i = $t.IndexOf($needle, $i + 1, [System.StringComparison]::Ordinal) }
         return $c
     }
+    function CritHeadLines([string]$rel) {
+        # -> lines EQUAL to the section heading. Opened by the `p14-template` measurement (M56):
+        # the earlier form was a SUBSTRING hit count, so lengthening the heading to
+        # "## <heading>-plus" still matched and stayed GREEN (measured 273/0) -- while the window
+        # opener (CritRows) uses WHOLE-LINE equality, so reports made from that template never open
+        # a window. The guard was green while the guarded thing broke. Same shape as the window now.
+        $n = 0
+        foreach ($l in [System.IO.File]::ReadAllLines((Join-Path $ROOT $rel))) { if ($l -eq $CRIT_HD) { $n++ } }
+        return $n
+    }
+    function CritEol([string]$eol) {
+        # THE CR-TOLERANCE FIXTURE (M56 -- M55 review return (3)). Rewrite the same milestone body
+        # once with LF and once with CRLF endings, whatever the source uses. No verdict is made
+        # here: CritEolSame below runs THE REAL verdict function (CritNums) over both and compares,
+        # so the question is "does the verdict catch the fixture", not "does the fixture qualify".
+        $f = Join-Path $sbx ('crit-eol-' + $eol + '.md')
+        $src = Join-Path $ROOT ('docs/milestones/M' + $critN + '.md')
+        $lines = @()
+        if (Test-Path $src) { $lines = @([System.IO.File]::ReadAllLines($src)) }
+        $sep = if ($eol -eq 'crlf') { "`r`n" } else { "`n" }
+        $text = ''
+        if ($lines.Count -gt 0) { $text = ($lines -join $sep) + $sep }
+        [System.IO.File]::WriteAllText($f, $text, (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    function CritEolSame() {
+        $lf = CritEol 'lf'
+        $cr = CritEol 'crlf'
+        # FIXTURE POSITIVE-CONTROL -- the crlf copy must really carry CR bytes and the lf copy
+        # must carry none. Without this the two copies can be made identical and "same numbers"
+        # holds VACUOUSLY: break the fixture writer so both come out LF and this still returns ok
+        # (the M46 precedent's tautology exactly). Counted as BYTES, not lines.
+        $crN = @([System.IO.File]::ReadAllBytes($cr) | Where-Object { $_ -eq 13 }).Count
+        $lfN = @([System.IO.File]::ReadAllBytes($lf) | Where-Object { $_ -eq 13 }).Count
+        if ($crN -le 0 -or $lfN -ne 0) { return 'no' }
+        $a = @(CritNums $lf) -join ' '
+        $b = @(CritNums $cr) -join ' '
+        if ($a -ne '' -and $a -eq $b) { return 'ok' }
+        return 'no'
+    }
+    # M56 (M55 review return (1) + adversarial axis `adv-enum-split`) -- THE WINDOW IS THE FILE.
+    # The earliest form grepped the FIRST declared value alone. That value is a SUBSTRING of the
+    # second one, so the skill reddened for writing the second value ONCE in prose -- and that is
+    # the very sentence the milestone required the TEMPLATE to carry (over-biting). The next form
+    # counted DISTINCT values PER LINE, and the adversarial axis went through it: split the values
+    # over TWO lines and no single line carries two, so it passed GREEN (`adv-enum-split`).
+    # So the window is now the WHOLE FILE. Widened naively that would over-bite, because the third
+    # declared value is a common Korean word already present in this skill with other meanings.
+    # Hence only the PAIR IN A CONTAINMENT RELATION is counted, and that pair is DERIVED from the
+    # declared set. The runner knows no positions and no words. No pair -> always 'no', P17 reddens.
+    function CritCount([string]$s, [string]$t) {
+        if ($t -eq '') { return 0 }
+        $n = 0
+        $i = $s.IndexOf($t, [System.StringComparison]::Ordinal)
+        while ($i -ge 0) { $n++; $i = $s.IndexOf($t, $i + $t.Length, [System.StringComparison]::Ordinal) }
+        return $n
+    }
+    function CritReenum([string]$path) {
+        # -> 'yes' when BOTH members of the containment pair appear anywhere in the file.
+        if (-not (Test-Path $path)) { return 'no' }
+        $seen = @{}
+        foreach ($l in [System.IO.File]::ReadAllLines($path)) {
+            foreach ($a in $critPair) {
+                $c = CritCount $l $a
+                foreach ($b in $critPair) {
+                    if ((-not [string]::Equals($a, $b, [System.StringComparison]::Ordinal)) -and $b.IndexOf($a, [System.StringComparison]::Ordinal) -ge 0) { $c -= (CritCount $l $b) }
+                }
+                if ($c -gt 0) { $seen[$a] = 1 }
+            }
+        }
+        if ($seen.Count -ge 2) { return 'yes' }
+        return 'no'
+    }
+    function CritSkillFixture([string]$mode) {
+        # enum: append ONE line carrying every declared value. one: ONE line with a single value.
+        # split: the pair spread over TWO lines -- the adversarial mutation PROMOTED to a fixture.
+        # THE BASE IS STRIPPED OF THE PAIR (M56 -- opened by adversarial axis `adv-enum-third`).
+        # Building on the live file means that the moment it carries ONE pair value, the 'one'
+        # fixture adds the other and P18 reddens -- the exact over-bite this family contracts
+        # against. Stripped, P17/P18/P19 measure the VERDICT alone; the live file is P15's job.
+        $f = Join-Path $sbx ('crit-skill-' + $mode + '.md')
+        $out = New-Object System.Collections.ArrayList
+        foreach ($l in [System.IO.File]::ReadAllLines((Join-Path $ROOT 'skills/impl/SKILL.md'))) {
+            $skip = $false
+            foreach ($a in $critPair) { if ($l.IndexOf($a, [System.StringComparison]::Ordinal) -ge 0) { $skip = $true } }
+            if (-not $skip) { [void]$out.Add($l) }
+        }
+        if ($mode -eq 'enum') { [void]$out.Add(($critSet -join ' ')) }
+        elseif ($mode -eq 'split') { [void]$out.Add($critSup); [void]$out.Add($critSub) }
+        else { [void]$out.Add($critSup) }
+        [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
     Chk "P1: criteria-verdict declaration line is exactly 1" (DeclCount $CONV 'criteria-verdict:') '1'
     Chk "P2: criteria-since declaration line is exactly 1" (DeclCount $CONV 'criteria-since:') '1'
     # (P3) Extraction positive-control -- a broken parse makes "the sets match" vacuous (0 == 0).
@@ -3309,8 +3427,23 @@ try {
     Chk "P12: false-positive direction -- another in-set verdict passes" ([string](CritBad (CritFixture 'swap'))) '0'
     # (P13-P15) The consumer's wiring: point at the rule, do NOT re-enumerate it.
     Chk "P13: the impl skill points at the convention section" $(if ((CritFileHits 'skills/impl/SKILL.md' ($CRIT_HD.Substring(3) + ' (impl)')) -ge 1) { 'ok' } else { 'no' }) 'ok'
-    Chk "P14: the impl template carries that section" $(if ((CritFileHits 'skills/impl/template.md' $CRIT_HD) -ge 1) { 'ok' } else { 'no' }) 'ok'
-    Chk "P15: no duplication -- the skill does not enumerate the verdicts" ([string](CritFileHits 'skills/impl/SKILL.md' $critOk)) '0'
+    Chk "P14: the impl template carries that section (whole-line, exactly 1)" ([string](CritHeadLines 'skills/impl/template.md')) '1'
+    Chk "P15: no duplication -- the skill does not re-enumerate the pair" (CritReenum (Join-Path $ROOT 'skills/impl/SKILL.md')) 'no'
+    # (P16) CR-TOLERANCE CONTROL (M56 -- M55 review return (3)). With window opening done by
+    # whole-line equality only, an awk that leaves the CR on the record never opens the window.
+    # This copy needs NO FIX -- ReadAllLines already strips CRLF -- but it carries the SAME case,
+    # so the two copies stay isomorphic and a future switch to a raw-text split would redden here.
+    Chk "P16: CR tolerance -- the window opens on a CRLF fixture too" (CritEolSame) 'ok'
+    # (P17) control -- the REAL verdict runs on the fixture. Enumerating on one line must be caught.
+    # This is also the anti-vacuity seat: with no containment pair derived, it reddens.
+    Chk "P17: control -- values enumerated on one line are caught" (CritReenum (CritSkillFixture 'enum')) 'yes'
+    # (P18) FALSE-POSITIVE DIRECTION (M55 review return (1)). Writing ONE value in prose is not an
+    # enumeration -- reddening here would be over-biting, and that sentence lives in the template.
+    Chk "P18: false-positive direction -- a line with a single value passes" (CritReenum (CritSkillFixture 'one')) 'no'
+    # (P19) control -- the ADVERSARIAL MUTATION PROMOTED (M56). Values split over TWO lines are
+    # still a re-enumeration. Under the per-line window this shape passed green; narrowing the
+    # window back to a line reddens here. It bites ALWAYS, not only under reversal.
+    Chk "P19: control -- an enumeration split over two lines is caught" (CritReenum (CritSkillFixture 'split')) 'yes'
 
     Chk "F1: README cases declaration == actual case count" (DeclaredCases) ([string]($script:pass + $script:fail + 1))
 
