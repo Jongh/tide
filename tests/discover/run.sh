@@ -3115,6 +3115,78 @@ chk "P18: 오탐 방향 - 값 하나만 쓰는 줄은 통과" "$(crit_reenum "$(
 # 여기서 붉는다 — 되돌림이 아니라 **상시로** 무는 자리다.
 chk "P19: 픽스처 통제 - 두 줄에 나눠 적은 열거도 잡는다" "$(crit_reenum "$(crit_skill_fixture split)")" "yes"
 
+# --- Part Q: 판정 비교의 Ordinal 고정 (M57) -----------------------------------
+# M42-T03이 *"이 파일의 모든 단언이 여기를 지난다"* 며 판정 비교를 Ordinal로 못박았다. 그 처방이
+# **일곱 러너 중 다섯에만** 적용돼 있었고 `tests/mutation`은 `-eq`로 남아 있었다 — 그리고
+# **아무것도 붉지 않았다.** 「분담해서 집행한다」가 「일부에서만 돈다」를 가린 자리이고, 이 사이클이
+# 무는 부류 그 자체다. 이제 기계가 문다.
+#
+# **무는 것은 판정 자리의 비교 형태다** — `$script:pass++`가 있는 줄과 그 **직전 두 줄** 안에
+# Ordinal 비교가 있거나 `verdict-exempt: <사유>` 선언이 있어야 한다. 창을 세 줄로 잡는 이유는
+# 판정이 `if (…) { $script:pass++ }` 두 줄 형태와 한 줄 형태 **둘 다**로 쓰이기 때문이다.
+# **면제는 침묵이 아니라 선언이다** — `locale-exempt:`와 같은 기전이고 규약이 사유를 선언한다.
+VERDICT_MARK='$script:pass++'
+VERDICT_ORD='StringComparison]::Ordinal'
+VERDICT_EXEMPT='verdict-exempt:'
+vq_scan() { # <파일> → 그 파일에서 **미고정·미선언**인 판정 자리 수
+    [ -f "$1" ] || { echo 0; return; }
+    LC_ALL=C awk -v mark="$VERDICT_MARK" -v ord="$VERDICT_ORD" -v ex="$VERDICT_EXEMPT" '
+        { l[NR] = $0 }
+        # 주석 줄은 판정 자리가 아니다 — 토큰을 **말하는** 줄과 **쓰는** 줄을 가른다
+        # (이 파트의 설명 주석이 자기 자신에게 잡힌 실측이 이 한 줄을 낳았다).
+        { t = $0; sub(/^[ 	]+/, "", t); if (substr(t, 1, 1) == "#") next }
+        index($0, mark) > 0 {
+            ok = 0
+            for (i = NR - 2; i <= NR; i++)
+                if (i >= 1 && (index(l[i], ord) > 0 || index(l[i], ex) > 0)) ok = 1
+            if (!ok) n++
+        }
+        END { print n + 0 }
+    ' "$1"
+}
+vq_sites() { # → 전 러너의 판정 자리 총수 (추출 positive-control — 0이면 검사가 공허하다)
+    _vqs=0
+    for _vf in "$ROOT"/tests/*/run.ps1; do
+        _vqs=$((_vqs + $(LC_ALL=C grep -vE '^[[:space:]]*#' "$_vf" | LC_ALL=C grep -cF -- "$VERDICT_MARK")))
+    done
+    echo "$_vqs"
+}
+vq_total() { # → 전 러너의 미고정·미선언 자리 총수
+    _vqt=0
+    for _vf in "$ROOT"/tests/*/run.ps1; do
+        _vqt=$((_vqt + $(vq_scan "$_vf")))
+    done
+    echo "$_vqt"
+}
+vq_fixture() { # <모드> → 사본 경로
+    # unpin: Ordinal 토큰을 지운다 · nodecl: 면제 선언을 지운다 · redecl: unpin 자리에 면제를 선언한다
+    _vqf="$SBX/vq-$1.ps1"
+    case "$1" in
+        nodecl) _vqsrc="$ROOT/tests/multi-repo/run.ps1" ;;
+        *)      _vqsrc="$ROOT/tests/mutation/run.ps1" ;;
+    esac
+    LC_ALL=C awk -v mode="$1" -v mark="$VERDICT_MARK" -v ord="$VERDICT_ORD" -v ex="$VERDICT_EXEMPT" '
+        {
+            s = $0
+            if (mode != "nodecl" && index(s, ord) > 0) {
+                p = index(s, ord); s = substr(s, 1, p - 1) "zzz-unpinned" substr(s, p + length(ord))
+                if (mode == "redecl") s = s "   # " ex " zzz-fixture"
+            }
+            if (mode == "nodecl") { p = index(s, ex); if (p > 0) s = substr(s, 1, p - 1) }
+            print s
+        }
+    ' "$_vqsrc" > "$_vqf"
+    printf '%s' "$_vqf"
+}
+chk "Q1: 판정 자리 추출 positive-control(>0)" "$([ "$(vq_sites)" -gt 0 ] && echo ok || echo no)" "ok"
+chk "Q2: 본 검사 - 미고정·미선언 판정 자리 0건" "$(vq_total)" "0"
+# 픽스처 통제 — **실제 판정을 사본에 건다**(M46 판례). 두 방향을 각각 깬다.
+chk "Q3: 픽스처 통제 - Ordinal을 잃으면 잡는다" "$(vq_scan "$(vq_fixture unpin)")" "1"
+chk "Q4: 픽스처 통제 - 면제 선언을 잃으면 잡는다" "$(vq_scan "$(vq_fixture nodecl)")" "1"
+# 오탐 방향 — **선언한 자리는 통과한다**. 여기서 붉으면 면제 경로가 죽은 것이고, 그러면 규약이
+# 「선언하면 된다」고 적는 것이 거짓이 된다.
+chk "Q5: 오탐 방향 - 미고정이어도 선언하면 통과" "$(vq_scan "$(vq_fixture redecl)")" "0"
+
 chk "F1: README cases 선언 == 실제 케이스 수" "$(declared_cases)" "$((pass + fail + 1))"
 
 echo

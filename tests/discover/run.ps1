@@ -3198,7 +3198,7 @@ try {
         if (-not (Test-Path $path)) { return $out.ToArray() }
         $w = $false
         foreach ($l in [System.IO.File]::ReadAllLines($path)) {
-            if ($l -eq $CRIT_H) { $w = $true; continue }
+            if ([string]::Equals($l, $CRIT_H, [System.StringComparison]::Ordinal)) { $w = $true; continue }
             if ($w -and $l.StartsWith('## ', [System.StringComparison]::Ordinal)) { $w = $false }
             if ($w -and ($l -match '^([0-9]+)\. ')) { [void]$out.Add($matches[1]) }
         }
@@ -3212,7 +3212,7 @@ try {
         $w = $false
         $sep = $false
         foreach ($l in [System.IO.File]::ReadAllLines($path)) {
-            if ($l -eq $CRIT_HD) { $w = $true; $sep = $false; continue }
+            if ([string]::Equals($l, $CRIT_HD, [System.StringComparison]::Ordinal)) { $w = $true; $sep = $false; continue }
             if ($w -and $l.StartsWith('## ', [System.StringComparison]::Ordinal)) { $w = $false }
             if ($w -and (-not $sep)) { if ($l.Contains('---')) { $sep = $true }; continue }
             if ($w -and $l.StartsWith('|', [System.StringComparison]::Ordinal)) {
@@ -3282,7 +3282,7 @@ try {
         $sep = $false
         $done = $false
         foreach ($l in [System.IO.File]::ReadAllLines($src)) {
-            if ($l -eq $CRIT_HD) { $w = $true; $sep = $false; [void]$out.Add($l); continue }
+            if ([string]::Equals($l, $CRIT_HD, [System.StringComparison]::Ordinal)) { $w = $true; $sep = $false; [void]$out.Add($l); continue }
             if ($w -and $l.StartsWith('## ', [System.StringComparison]::Ordinal)) { $w = $false }
             if ($w -and (-not $sep)) { if ($l.Contains('---')) { $sep = $true }; [void]$out.Add($l); continue }
             if ($w -and (-not $done) -and $l.StartsWith('|', [System.StringComparison]::Ordinal)) {
@@ -3314,6 +3314,11 @@ try {
         while ($i -ge 0) { $c++; $i = $t.IndexOf($needle, $i + 1, [System.StringComparison]::Ordinal) }
         return $c
     }
+    # M57: the four comparisons that match REPOSITORY CONTENT against the section heading are
+    # pinned to ORDINAL. `-eq` is a CULTURE comparison while the .sh twin's awk `==` is byte-exact
+    # -- measured on an ASCII-heading fixture: sh counted 1/0 for "## Completion Check" vs
+    # "## completion check", ps1 `-eq` counted 1/1 (DIVERGED), ps1 Ordinal counts 1/0 (agrees).
+    # Today's heading is Korean-only so it cannot fire; the fix removes the axis, not the symptom.
     function CritHeadLines([string]$rel) {
         # -> lines EQUAL to the section heading. Opened by the `p14-template` measurement (M56):
         # the earlier form was a SUBSTRING hit count, so lengthening the heading to
@@ -3321,7 +3326,7 @@ try {
         # opener (CritRows) uses WHOLE-LINE equality, so reports made from that template never open
         # a window. The guard was green while the guarded thing broke. Same shape as the window now.
         $n = 0
-        foreach ($l in [System.IO.File]::ReadAllLines((Join-Path $ROOT $rel))) { if ($l -eq $CRIT_HD) { $n++ } }
+        foreach ($l in [System.IO.File]::ReadAllLines((Join-Path $ROOT $rel))) { if ([string]::Equals($l, $CRIT_HD, [System.StringComparison]::Ordinal)) { $n++ } }
         return $n
     }
     function CritEol([string]$eol) {
@@ -3444,6 +3449,80 @@ try {
     # still a re-enumeration. Under the per-line window this shape passed green; narrowing the
     # window back to a line reddens here. It bites ALWAYS, not only under reversal.
     Chk "P19: control -- an enumeration split over two lines is caught" (CritReenum (CritSkillFixture 'split')) 'yes'
+
+    # --- Part Q: the verdict comparison is pinned to Ordinal (M57) ------------
+    # M42-T03 pinned the verdict comparison saying "every assertion in this file flows through
+    # here". That prescription reached FIVE of the seven runners; tests/mutation stayed on `-eq`
+    # -- and nothing reddened. "Enforced by sharing it out" hid "enforced in only some places",
+    # which is exactly the class this cycle bites. A machine bites it now.
+    #
+    # What is bitten is the SHAPE at each verdict site: the line carrying `$script:pass++`, or
+    # one of the two lines above it, must hold an Ordinal comparison or a declared
+    # `verdict-exempt: <reason>`. Three lines because the verdict is written both as a one-liner
+    # and as `if (...) {` + body. Exemption is DECLARED, never silent (same idiom as locale-exempt).
+    $VERDICT_MARK = (Uni 0x24) + 'script:pass++'
+    $VERDICT_ORD = 'StringComparison]::Ordinal'
+    $VERDICT_EXEMPT = 'verdict-exempt:'
+    function VqScan([string]$path) {
+        if (-not (Test-Path $path)) { return 0 }
+        $lines = [System.IO.File]::ReadAllLines($path)
+        $n = 0
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i].IndexOf($VERDICT_MARK, [System.StringComparison]::Ordinal) -lt 0) { continue }
+            # A comment line is not a verdict site -- separate lines that TALK about the token
+            # from lines that USE it (this part's own explanatory comment got caught, measured).
+            if ($lines[$i].TrimStart().StartsWith('#', [System.StringComparison]::Ordinal)) { continue }
+            $ok = $false
+            for ($j = [Math]::Max(0, $i - 2); $j -le $i; $j++) {
+                if ($lines[$j].IndexOf($VERDICT_ORD, [System.StringComparison]::Ordinal) -ge 0) { $ok = $true }
+                if ($lines[$j].IndexOf($VERDICT_EXEMPT, [System.StringComparison]::Ordinal) -ge 0) { $ok = $true }
+            }
+            if (-not $ok) { $n++ }
+        }
+        return $n
+    }
+    function VqRunners() { @(Get-ChildItem -Path (Join-Path $ROOT 'tests') -Directory | ForEach-Object { Join-Path $_.FullName 'run.ps1' } | Where-Object { Test-Path $_ }) }
+    function VqSites() {
+        $n = 0
+        foreach ($f in VqRunners) {
+            foreach ($l in [System.IO.File]::ReadAllLines($f)) {
+                if ($l.TrimStart().StartsWith('#', [System.StringComparison]::Ordinal)) { continue }
+                if ($l.IndexOf($VERDICT_MARK, [System.StringComparison]::Ordinal) -ge 0) { $n++ }
+            }
+        }
+        return $n
+    }
+    function VqTotal() { $n = 0; foreach ($f in VqRunners) { $n += (VqScan $f) }; return $n }
+    function VqFixture([string]$mode) {
+        # unpin: strip the Ordinal token / nodecl: strip the exemption / redecl: unpin then declare
+        $f = Join-Path $sbx ('vq-' + $mode + '.ps1')
+        $src = if ($mode -eq 'nodecl') { Join-Path $ROOT 'tests/multi-repo/run.ps1' } else { Join-Path $ROOT 'tests/mutation/run.ps1' }
+        $out = New-Object System.Collections.ArrayList
+        foreach ($l in [System.IO.File]::ReadAllLines($src)) {
+            $s = $l
+            if ($mode -ne 'nodecl') {
+                $p = $s.IndexOf($VERDICT_ORD, [System.StringComparison]::Ordinal)
+                if ($p -ge 0) {
+                    $s = $s.Substring(0, $p) + 'zzz-unpinned' + $s.Substring($p + $VERDICT_ORD.Length)
+                    if ($mode -eq 'redecl') { $s = $s + '   # ' + $VERDICT_EXEMPT + ' zzz-fixture' }
+                }
+            } else {
+                $p = $s.IndexOf($VERDICT_EXEMPT, [System.StringComparison]::Ordinal)
+                if ($p -ge 0) { $s = $s.Substring(0, $p) }
+            }
+            [void]$out.Add($s)
+        }
+        [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    Chk "Q1: verdict-site extraction positive-control (>0)" $(if ((VqSites) -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "Q2: main check -- verdict sites neither pinned nor declared: 0" ([string](VqTotal)) '0'
+    # Fixture controls -- the REAL verdict runs on the copy (M46 precedent), two directions.
+    Chk "Q3: control -- losing the Ordinal pin is caught" ([string](VqScan (VqFixture 'unpin'))) '1'
+    Chk "Q4: control -- losing the exemption declaration is caught" ([string](VqScan (VqFixture 'nodecl'))) '1'
+    # False-positive direction -- a DECLARED site passes. Reddening here would make the
+    # convention's "declare it and you are done" a lie.
+    Chk "Q5: false-positive direction -- unpinned but declared passes" ([string](VqScan (VqFixture 'redecl'))) '0'
 
     Chk "F1: README cases declaration == actual case count" (DeclaredCases) ([string]($script:pass + $script:fail + 1))
 

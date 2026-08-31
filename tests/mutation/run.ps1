@@ -43,7 +43,13 @@ trap {
 $script:pass = 0
 $script:fail = 0
 function Chk([string]$desc, [string]$got, [string]$want) {
-    if ($got -eq $want) { $script:pass++; "PASS  {0,-56} ({1})" -f $desc, $got | Write-Host }
+    # M57: the verdict is pinned to ORDINAL. M42-T03 pinned every OTHER runner and this one was
+    # left out -- the claim "every assertion flows through here" held for five of seven copies.
+    # PowerShell's `-eq` on strings is a CULTURE comparison while the .sh twin's `[ "$2" = "$3" ]`
+    # is byte-exact, so a case-only or canonically-equivalent difference would pass here and fail
+    # there. Part Q of tests/discover now bites any verdict site that is neither pinned nor
+    # DECLARED exempt.
+    if ([string]::Equals([string]$got, [string]$want, [System.StringComparison]::Ordinal)) { $script:pass++; "PASS  {0,-56} ({1})" -f $desc, $got | Write-Host }
     else { $script:fail++; "FAIL  {0,-56} (got {1}, want {2})" -f $desc, $got, $want | Write-Host }
 }
 

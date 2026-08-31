@@ -213,6 +213,134 @@ function DeclaredCases($path) {
     $m = [regex]::Match($raw, 'cases:[^0-9\r\n]*([0-9]+)')
     if ($m.Success) { return $m.Groups[1].Value } else { return '' }
 }
+# --- sandbox (M57 -- workflow fixtures live here) -----------------------
+$sbx = Join-Path ([System.IO.Path]::GetTempPath()) "tide-site-includes-live.$PID"
+if (Test-Path $sbx) { Remove-Item -Recurse -Force $sbx }
+New-Item -ItemType Directory -Force -Path $sbx | Out-Null
+
+# === CI build-output scan wiring (M57) ==================================
+# Of the shares the convention declares, only the CI scan step bites the BUILD OUTPUT's
+# excluded terms -- (1) is a human, (2) is render only, (3) is this harness on the SOURCE.
+# If that step is dropped, or slides AFTER the upload, it stops being a gate -- and until
+# now nothing reddened either way. What is bitten here is the WIRING: does the step exist
+# and is the order right. It is located NOT by step name but by the fact that it reads the
+# single source of the term derivation (names change; the file it reads is the contract).
+$PAGES_WF = Join-Path $ROOT '.github/workflows/deploy-pages.yml'
+$SCAN_REF = 'tests/lib/excluded-terms.sh'
+$UPLOAD_REF = 'upload-pages-artifact'
+
+function WfLine([string]$path, [string]$token) {
+    # -> 1-based line number of the token's first occurrence on a NON-COMMENT line, 0 when absent.
+    # A comment is not wiring (opened by adversarial axis `adv-scan-commented`: commenting the
+    # scan line out left the token in place and the harness stayed green at 41/0). Separate the
+    # lines that TALK about the token from the lines that USE it. Inside a YAML `run: |` block a
+    # leading `#` is a shell comment, so the same rule holds on both sides.
+    if (-not (Test-Path $path)) { return 0 }
+    $lines = [System.IO.File]::ReadAllLines($path)
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i].TrimStart().StartsWith('#', [System.StringComparison]::Ordinal)) { continue }
+        if ($lines[$i].IndexOf($token, [System.StringComparison]::Ordinal) -ge 0) { return ($i + 1) }
+    }
+    return 0
+}
+function WfOrder([string]$path) {
+    # -> 'ok' when the scan precedes the upload; 'no' when either is missing or out of order.
+    $sc = WfLine $path $SCAN_REF
+    $up = WfLine $path $UPLOAD_REF
+    if ($sc -le 0 -or $up -le 0) { return 'no' }
+    if ($sc -lt $up) { return 'ok' }
+    return 'no'
+}
+function WfFixture([string]$mode) {
+    # drop: remove the scan / after: move it past the upload / noise: add an unrelated step.
+    $f = Join-Path $sbx ('pages-' + $mode + '.yml')
+    $out = New-Object System.Collections.ArrayList
+    $held = ''
+    foreach ($l in [System.IO.File]::ReadAllLines($PAGES_WF)) {
+        if ($l.IndexOf($SCAN_REF, [System.StringComparison]::Ordinal) -ge 0) {
+            if ($mode -eq 'drop') { continue }
+            if ($mode -eq 'after') { $held = $l; continue }
+        }
+        if ($mode -eq 'after' -and $held -ne '' -and $l.IndexOf($UPLOAD_REF, [System.StringComparison]::Ordinal) -ge 0) {
+            [void]$out.Add($l); [void]$out.Add($held); $held = ''; continue
+        }
+        [void]$out.Add($l)
+    }
+    if ($mode -eq 'noise') { [void]$out.Add('      - run: echo zzz-unrelated-step') }
+    [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+    return $f
+}
+Chk "ci-scan: workflow reads the excluded-term single source" $(if ((WfLine $PAGES_WF $SCAN_REF) -gt 0) { 'ok' } else { 'no' }) 'ok'
+Chk "ci-scan: the scan sits BEFORE the artifact upload" (WfOrder $PAGES_WF) 'ok'
+# Fixture controls -- the REAL verdict runs on the copy (M46 precedent), two directions.
+Chk "ci-scan: control -- removing the scan step is caught" (WfOrder (WfFixture 'drop')) 'no'
+Chk "ci-scan: control -- moving it after the upload is caught" (WfOrder (WfFixture 'after')) 'no'
+# False-positive direction -- unrelated steps do not change the wiring.
+Chk "ci-scan: false-positive direction -- an unrelated step passes" (WfOrder (WfFixture 'noise')) 'ok'
+# A hardcoded term in the workflow would be a SECOND declaration site and leak into the source.
+$wfLiteral = 0
+$wfText = [System.IO.File]::ReadAllText($PAGES_WF, [System.Text.Encoding]::UTF8)
+foreach ($term in $TERMS) {
+    $i = $wfText.IndexOf($term, [System.StringComparison]::OrdinalIgnoreCase)
+    while ($i -ge 0) { $wfLiteral++; $i = $wfText.IndexOf($term, $i + 1, [System.StringComparison]::OrdinalIgnoreCase) }
+}
+Chk "ci-scan: no excluded-term literal in the workflow" ([string]$wfLiteral) '0'
+
+# === Workflow block-scalar integrity (M57 -- opened by measurement during impl) =========
+# A LITERAL newline inside a command argument in a `run: |` block forces the next line to
+# start at COLUMN 0. That ends the YAML block scalar right there and the WHOLE workflow
+# fails to parse. That state actually entered the tree once, and all six wiring cases above
+# stayed GREEN -- "the step exists and precedes the upload" was true while the workflow
+# would not load at all, so there was NO gate. That is this cycle's class exactly.
+# A YAML parser cannot be required of all four runtimes, so the COLUMN-0 rule is bitten
+# instead: a non-empty line at column 0 is either a top-level key or a comment.
+function WfCol0Bad([string]$path) {
+    if (-not (Test-Path $path)) { return 999 }
+    $n = 0
+    foreach ($l in [System.IO.File]::ReadAllLines($path)) {
+        $s = $l.TrimEnd([char]13)
+        if ($s.Length -eq 0) { continue }
+        if ($s.StartsWith(' ', [System.StringComparison]::Ordinal)) { continue }
+        if ($s.StartsWith([string][char]9, [System.StringComparison]::Ordinal)) { continue }
+        if ($s.StartsWith('#', [System.StringComparison]::Ordinal)) { continue }
+        if ($s -cmatch '^[A-Za-z_][A-Za-z0-9_.-]*:') { continue }
+        $n++
+    }
+    return $n
+}
+function WfCol0Keys([string]$path) {
+    if (-not (Test-Path $path)) { return 0 }
+    $n = 0
+    foreach ($l in [System.IO.File]::ReadAllLines($path)) {
+        if ($l.TrimEnd([char]13) -cmatch '^[A-Za-z_][A-Za-z0-9_.-]*:') { $n++ }
+    }
+    return $n
+}
+function WfWorkflows() { @(Get-ChildItem -Path (Join-Path $ROOT '.github/workflows') -Filter '*.yml' -File | ForEach-Object { $_.FullName }) }
+function WfCol0Total() { $n = 0; foreach ($f in WfWorkflows) { $n += (WfCol0Bad $f) }; return $n }
+function WfKeyTotal() { $n = 0; foreach ($f in WfWorkflows) { $n += (WfCol0Keys $f) }; return $n }
+function WfYamlFixture([string]$mode) {
+    # break: plant a column-0 line inside the run block / addkey: append a legit top-level key
+    $f = Join-Path $sbx ('pages-yaml-' + $mode + '.yml')
+    $out = New-Object System.Collections.ArrayList
+    $hit = $false
+    foreach ($l in [System.IO.File]::ReadAllLines($PAGES_WF)) {
+        [void]$out.Add($l)
+        if ($mode -eq 'break' -and -not $hit -and $l.IndexOf('run: |', [System.StringComparison]::Ordinal) -ge 0) {
+            [void]$out.Add('zzz-broken-continuation'); $hit = $true
+        }
+    }
+    if ($mode -eq 'addkey') { [void]$out.Add('zzz-extra-key: 1') }
+    [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+    return $f
+}
+Chk "wf-yaml: top-level key extraction positive-control(>0)" $(if ((WfKeyTotal) -gt 0) { 'ok' } else { 'no' }) 'ok'
+Chk "wf-yaml: no column-0 line outside the YAML top level" ([string](WfCol0Total)) '0'
+# Fixture control -- the REAL verdict runs on the copy (M46 precedent); a broken block reddens.
+Chk "wf-yaml: control -- a column-0 continuation is caught" ([string](WfCol0Bad (WfYamlFixture 'break'))) '1'
+# False-positive direction -- a legitimate new top-level key stays green.
+Chk "wf-yaml: false-positive direction -- a new top-level key passes" ([string](WfCol0Bad (WfYamlFixture 'addkey'))) '0'
+
 Chk "case-count: README cases declaration == actual" (DeclaredCases (Join-Path $ROOT 'tests\site-includes\README.md')) ([string]($script:pass + $script:fail + 1))
 
 Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) (shells=$shells includes=$includesTotal terms=[$($TERMS -join ',')]) [runtime: PowerShell $($PSVersionTable.PSVersion) $($PSVersionTable.PSEdition)]"
