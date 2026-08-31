@@ -29,6 +29,36 @@ jobs:
           cache-dependency-path: site/requirements.txt
       - run: pip install -r site/requirements.txt
       - run: mkdocs build -f site/mkdocs.yml --strict
+      # 빌드 산출물의 제외 용어 스캔 (M57). 이 스텝이 **업로드 앞**에 있어야 검출 시
+      # 아티팩트가 올라가지 않고 `deploy` 잡(needs: build)이 아예 돌지 않는다 — 뒤에 두면
+      # 배포가 이미 끝난 뒤라 게이트가 아니다. 규약의 단일 원본은 `docs/conventions.md`의
+      # "릴리즈 빌드 출력 검증" 절이고, 용어는 하드코딩하지 않고 sh 쪽 단일 원본에서 읽는다.
+      - name: Excluded-term scan on build output
+        shell: sh {0}
+        run: |
+          set -u
+          . tests/lib/excluded-terms.sh
+          terms=$(excluded_terms "$PWD")
+          # 공허 통과 차단 — 도출이 0건이면 «검출 0»이 아무것도 뜻하지 않는다.
+          if [ -z "$terms" ]; then
+            echo "::error::no excluded term derived -- the scan would pass vacuously"
+            exit 1
+          fi
+          # 용어 자체는 로그에 내지 않는다 - 검출 메시지가 용어를 숨기는 것과 같은 결정이다.
+          # 개행을 인자에 **리터럴로** 쓰지 않는다: 그 줄이 열 0에서 시작해야 하므로
+          # `run: |` 블록 스칼라가 거기서 끊기고 **워크플로 전체가 YAML로 파싱되지 않는다**
+          # (M57 impl 실측 - 배선 검사는 그 상태에서도 초록이었다).
+          echo "derived term count: $(echo $terms | wc -w)"
+          rc=0
+          for t in $terms; do
+            hits=$(LC_ALL=C grep -ril -- "$t" site/_build 2>/dev/null || true)
+            if [ -n "$hits" ]; then
+              echo "::error::excluded term leaked into build output (term hidden; see paths)"
+              echo "$hits" | sed 's/^/  /'
+              rc=1
+            fi
+          done
+          exit $rc
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site/_build

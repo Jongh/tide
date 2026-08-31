@@ -165,7 +165,7 @@ function Invoke-Guard($cpd, $cwd, $cmd, $bom = $false) {
 
 function Check($desc, $cpd, $cwd, $cmd, $want, $bom = $false) {
     $got = Invoke-Guard $cpd $cwd $cmd $bom
-    if ($got -eq $want) {
+    if ($got -eq $want) {   # verdict-exempt: exit-code (both operands are process exit codes, no string axis)
         $script:pass++; Write-Host ("PASS  {0,-50} (exit {1})" -f $desc, $got)
     } else {
         $script:fail++; Write-Host ("FAIL  {0,-50} (got {1}, want {2})" -f $desc, $got, $want)
