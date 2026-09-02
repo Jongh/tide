@@ -16,7 +16,7 @@ M21 **오케스트레이션 발견성**의 **결정적 핵심**과, 그와 같�
 ⑪ **하니스 공통 통제 보유 대조**(M48 — 새 하니스가 기존 하니스의 공통 통제를 빠뜨렸는지),
 ⑫ **게시 가용성 축·게시 불가 종료 선언 정합**(M59 — Part S).
 
-**현재 케이스 수 (cases: 299)** — Part A 7 + Part B 14 + Part C 30 + Part D 20 + Part E 26 + Part F 28 + Part G 18 + Part H 18 + Part I 20 + Part J 6 + Part K 6 + Part L 13 + Part M 14 + Part N 29 + Part O 14 + Part P 19 + Part Q 5 + Part R 5 + Part S 7.
+**현재 케이스 수 (cases: 313)** — Part A 7 + Part B 14 + Part C 30 + Part D 20 + Part E 26 + Part F 28 + Part G 18 + Part H 18 + Part I 20 + Part J 6 + Part K 6 + Part L 13 + Part M 14 + Part N 29 + Part O 14 + Part P 19 + Part Q 5 + Part R 5 + Part S 7 + Part T 7 + Part U 7.
 `run.sh` @ **dash**(우분투 `/bin/sh`) · `run.sh` @ **bash**(Git Bash) · `run.ps1` @ **Windows
 PowerShell 5.1** · `run.ps1` @ **pwsh 7** — **네 실행 환경 모두** 같은 수, FAIL 0.
 "양 셸 동일"로만 적지 않는다. 두 축이 그 표현 뒤에 숨어 있었다: ⑴ `.ps1`은 **런타임에 따라** 다르게

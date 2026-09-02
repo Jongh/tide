@@ -3302,6 +3302,120 @@ chk "S6: 배선 - release 스킬이 push 축 이름을 갖는다" "$(has_token "
 # (S7) 픽스처 통제 — **실제 판정을 사본에 건다**(M46 판례). 이름이 빠지면 S4가 잡아야 한다.
 chk "S7: 픽스처 통제 - 이름이 빠지면 잡는다" "$(has_token "$(ts_fixture)" "$(ts_token)")" "no"
 
+# --- Part T: 러너 소스 개행 계약 (M59 리뷰 차단 1 → M60) --------------------
+# `.gitattributes`가 `*.sh`를 `eol=lf`로 못박고 사유까지 적어 두었는데 확인하는 기계가 0개였다.
+# M59에서 `run.sh`가 CRLF가 되자 **dash만** 즉사하고 bash·양 PowerShell은 초록이었다 — 「양 사본
+# 동일」도 「네 환경 동수」도 이 형태를 덮지 못한다. 패턴의 선언처는 `.gitattributes` 한 곳이고
+# 러너는 읽기만 한다(규약의 `source-eol:` 선언이 그 자리를 가리킨다).
+EOL_KEY='source-eol:'
+GITATTR="$ROOT/.gitattributes"
+eol_globs() { # [경로] → `.gitattributes`에서 eol=lf를 건 패턴 토큰(줄당 첫 낱말) 한 줄씩
+    # 경로를 인자로 받는 이유는 `T7`이 **다른 파일을 먹여** 추출이 상수가 아니라 파일을 읽는지
+    # 확인하기 때문이다 — 그러지 않으면 「하드코딩하지 않았다」가 주장으로만 남는다.
+    _ega="${1:-$GITATTR}"
+    [ -f "$_ega" ] || return 0
+    LC_ALL=C awk '
+        { s = $0; sub(/\r$/, "", s) }
+        s ~ /^[[:space:]]*#/ { next }
+        s ~ /eol=lf/ { n = split(s, f, /[ 	]+/); for (i = 1; i <= n; i++) if (f[i] != "") { print f[i]; break } }
+    ' "$_ega"
+}
+eol_ga_fixture() { # → 다른 패턴을 담은 `.gitattributes` 사본
+    _egf="$SBX/gitattr-probe"
+    printf '# probe
+*.zzz text eol=lf
+' > "$_egf"
+    printf '%s' "$_egf"
+}
+eol_files() { # → 그 패턴에 걸리는 추적 파일 경로 한 줄씩 (중복 제거)
+    for _eg in $(eol_globs); do
+        git -C "$ROOT" ls-files "$_eg" 2>/dev/null
+    done | LC_ALL=C sort -u
+}
+crlf_in() { # <file> -> yes when the file carries any CR byte
+    # **awk must not be used here.** Measured (M60): Git Bash's gawk reads files in TEXT mode and
+    # strips the trailing CR before the record is seen, so `index($0, cr)` returns 0 for a real
+    # CRLF file -- the check would be VACUOUS on exactly the shell pair this repo runs. `tr` and
+    # `cmp` are byte-oriented in both shells (verified: dash and bash agree), so the judgment is
+    # "does stripping CR change the bytes". A CRLF checker that cannot see CRLF is its own first
+    # failure, so the detection method is measured, not assumed.
+    [ -f "$1" ] || { echo no; return; }
+    _cn="$SBX/crlf-probe.$$"
+    LC_ALL=C tr -d '\r' < "$1" > "$_cn"
+    if cmp -s "$1" "$_cn"; then rm -f "$_cn"; echo no
+    else rm -f "$_cn"; echo yes; fi
+}
+eol_bad() { # [extra file] -> number of target files that carry CRLF
+    _eb=0
+    for _ef in $(eol_files); do
+        [ "$(crlf_in "$ROOT/$_ef")" = yes ] && _eb=$((_eb + 1))
+    done
+    if [ -n "${1-}" ]; then
+        [ "$(crlf_in "$1")" = yes ] && _eb=$((_eb + 1))
+    fi
+    echo "$_eb"
+}
+eol_fixture() { # <lf|crlf> -> sandbox copy (the REAL verdict runs on the copy)
+    _efx="$SBX/eol-$1.sh"
+    if [ "$1" = crlf ]; then
+        printf 'a%sb%s' "$(printf '\r')" "$(printf '\r')" > "$_efx"
+    else
+        printf 'a
+b
+' > "$_efx"
+    fi
+    printf '%s' "$_efx"
+}
+chk "T1: source-eol 선언 줄 정확히 1개" "$(decl_count "$CONV" "$EOL_KEY")" "1"
+# (T2) 추출 positive-control — 패턴이 0개면 아래 「검출 0」이 공허하다.
+chk "T2: eol=lf 패턴 추출 positive-control(>0)" "$([ "$(eol_globs | grep -c .)" -gt 0 ] && echo ok || echo no)" "ok"
+# (T3) 대상 positive-control — 패턴은 있는데 걸리는 추적 파일이 0개여도 같은 공허가 된다.
+chk "T3: 대상 추적 파일 positive-control(>0)" "$([ "$(eol_files | grep -c .)" -gt 0 ] && echo ok || echo no)" "ok"
+# (T4) **본 검사.** 선언된 계약을 실제 트리가 지키는가.
+chk "T4: 본 검사 - CRLF를 가진 대상 파일 0개" "$(eol_bad)" "0"
+# (T5) 픽스처 통제 — **실제 판정 함수**를 사본에 건다(M46 판례).
+chk "T5: 픽스처 통제 - CRLF 사본을 잡는다" "$(crlf_in "$(eol_fixture crlf)")" "yes"
+# (T6) 음성 통제 — LF만 있는 사본은 붉지 않는다(오탐 방향).
+chk "T6: 음성 통제 - LF 사본은 통과" "$(crlf_in "$(eol_fixture lf)")" "no"
+# (T7) 배선 — **패턴이 상수가 아니라 파일에서 온다**는 것을 픽스처로 문다. 반증(M60 리뷰)이 이
+# 자리를 열었다: 앞선 판본은 `has_token "$GITATTR" 'eol=lf'`라 **주석 처리된 선언에도 초록**이었고
+# T2보다 약해 **독립으로 붉을 수 없었다** — 검사가 아니라 주장이었다.
+chk "T7: 배선 - 다른 .gitattributes를 주면 추출이 그것을 따른다" "$(eol_globs "$(eol_ga_fixture)")" "*.zzz"
+
+# --- Part U: 측정 시점 규율 + 대조의 조용한 제외 노출 (M60) ------------------
+# 하니스는 impl 보고서를 **입력으로 읽는데**(Part P), `crit_targets`가 보고서 없는 마일스톤을
+# 조용히 건너뛴다. 그래서 보고서 이전에 잰 값은 「그 사이클을 아예 보지 않은 초록」이었고,
+# M59가 정확히 그 순서로 돌아 차단 둘이 리뷰까지 살아남았다. **필터는 유지한다** — 없애면 impl
+# 작업 중 늘 붉어 하니스가 진행 신호로 못 쓰인다. 고치는 것은 **침묵**이다.
+MO_KEY='measure-order:'
+IMPL_SKILL="$ROOT/skills/impl/SKILL.md"
+IMPL_TPL="$ROOT/skills/impl/template.md"
+mo_name() { decl_tail "$CONV" "$MO_KEY" | LC_ALL=C awk '{ print $1; exit }'; }
+# `criteria-since` 이상인데 impl 보고서가 없어 대조에서 빠진 마일스톤 번호(한 줄씩).
+skipped_ms() { # [추가 마일스톤 번호] → 제외된 번호
+    for _sm0 in "$ROOT"/docs/milestones/M*.md; do
+        _sn=$(basename "$_sm0" .md | sed 's/^M//')
+        [ "$_sn" -ge "$CRITN" ] || continue
+        [ -f "$ROOT/docs/reports/M$_sn-impl.md" ] || echo "$_sn"
+    done
+    [ -n "${1-}" ] && echo "$1"
+    return 0
+}
+skipped_n() { skipped_ms "${1-}" | grep -c .; }
+chk "U1: measure-order 선언 줄 정확히 1개" "$(decl_count "$CONV" "$MO_KEY")" "1"
+# (U2) 추출 positive-control — 꼬리가 비면 아래 결합이 빈 토큰으로 공허하게 성립한다.
+chk "U2: 병기어 추출 positive-control" "$([ -n "$(mo_name)" ] && echo ok || echo no)" "ok"
+# (U3~U5) **본 검사** — 규율이 재서술되는 세 자리에 병기어가 실제로 가 있는가.
+chk "U3: 본 검사 - impl 스킬이 병기어를 갖는다" "$(has_token "$IMPL_SKILL" "$(mo_name)")" "yes"
+chk "U4: 본 검사 - impl 템플릿이 병기어를 갖는다" "$(has_token "$IMPL_TPL" "$(mo_name)")" "yes"
+chk "U5: 본 검사 - release 스킬이 병기어를 갖는다" "$(has_token "$REL_SKILL" "$(mo_name)")" "yes"
+# (U6) **조용한 제외 노출.** 대조에서 빠진 마일스톤이 있으면 그 수가 여기 드러난다 — 보고서 이전에
+# 잰 측정은 이 값이 0이 아니고, 그것이 「그 사이클을 보지 않았다」의 기계적 신호다.
+chk "U6: 대조에서 제외된 마일스톤 0개" "$(skipped_n)" "0"
+# (U7) 픽스처 통제 — 노출이 공허하지 않다. **차이로 묻는다**: 기준선이 0이 아닐 수 있고(작업 중
+# 사이클이 정확히 그 상태다) 절대값으로 물으면 그때 통제가 기준선을 재게 된다.
+chk "U7: 픽스처 통제 - 제외가 하나 늘면 수도 하나 는다" "$(( $(skipped_n 9999) - $(skipped_n) ))" "1"
+
 
 chk "F1: README cases 선언 == 실제 케이스 수" "$(declared_cases)" "$((pass + fail + 1))"
 

@@ -3650,6 +3650,117 @@ try {
     # (S7) fixture control -- the REAL verdict runs on the copy (M46 precedent).
     Chk "S7: control -- a missing name is caught" (HasToken (TsFixture) (TsToken)) 'no'
 
+    # --- Part T: runner source EOL contract (M59 review blocker 1 -> M60) -------
+    # `.gitattributes` pins `*.sh` to `eol=lf` and even writes the reason in a comment
+    # ("CRLF breaks sh execution"), yet ZERO machines checked it. In M59 `run.sh` turned CRLF and
+    # **only dash died** (`set: Illegal option -`, 0 seconds) while bash, Windows PowerShell 5.1
+    # and pwsh 7 all went green -- neither "both copies agree" nor "four environments, same count"
+    # covers a copy that dies in ONE shell. The pattern's single declaration site is
+    # `.gitattributes`; the runner only READS it (the conventions' `source-eol:` line points there).
+    $EOL_KEY = 'source-eol:'
+    $GITATTR = Join-Path $ROOT '.gitattributes'
+    function EolGlobs([string]$path = '') {
+        # The path is a parameter so that T7 can FEED A DIFFERENT FILE and prove the extraction
+        # reads the file rather than a constant; otherwise "not hardcoded" stays a claim.
+        $src = $GITATTR
+        if ($path -ne '') { $src = $path }
+        if (-not (Test-Path $src)) { return @() }
+        $out = New-Object System.Collections.ArrayList
+        foreach ($l in [System.IO.File]::ReadAllLines($src)) {
+            $s = $l.TrimEnd("`r")
+            if ($s -match '^\s*#') { continue }
+            if ($s -notmatch 'eol=lf') { continue }
+            $tok = @($s -split '\s+' | Where-Object { $_ -ne '' })
+            if ($tok.Count -gt 0) { [void]$out.Add($tok[0]) }
+        }
+        return $out.ToArray()
+    }
+    function EolFiles {
+        $acc = New-Object System.Collections.ArrayList
+        foreach ($g in EolGlobs) {
+            $r = & git -C $ROOT ls-files $g 2>$null
+            foreach ($f in @($r)) { if ($f -ne '' -and -not $acc.Contains($f)) { [void]$acc.Add($f) } }
+        }
+        return $acc.ToArray()
+    }
+    function CrlfIn([string]$path) {
+        # .NET reads raw bytes, so the text-mode CR stripping that makes an awk-based judgment
+        # vacuous under Git Bash (measured in M60, see the sh copy) does not apply here. The two
+        # copies still ask the same question: does the file carry any CR byte.
+        if (-not (Test-Path $path)) { return 'no' }
+        $b = [System.IO.File]::ReadAllBytes($path)
+        foreach ($x in $b) { if ($x -eq 13) { return 'yes' } }
+        return 'no'
+    }
+    function EolBad([string]$extra) {
+        $n = 0
+        foreach ($f in EolFiles) { if ((CrlfIn (Join-Path $ROOT $f)) -eq 'yes') { $n++ } }
+        if ($extra -ne '' -and (CrlfIn $extra) -eq 'yes') { $n++ }
+        return $n
+    }
+    function EolFixture([string]$kind) {
+        $f = Join-Path $sbx ("eol-" + $kind + ".sh")
+        if ($kind -eq 'crlf') { $bytes = [byte[]](97,13,10,98,13,10) } else { $bytes = [byte[]](97,10,98,10) }
+        [System.IO.File]::WriteAllBytes($f, $bytes)
+        return $f
+    }
+    Chk "T1: source-eol declaration line is exactly 1" (DeclCount $CONV $EOL_KEY) '1'
+    # (T2) extraction positive-control -- zero patterns makes "0 detected" vacuous.
+    Chk "T2: eol=lf pattern extraction positive-control (>0)" $(if (@(EolGlobs).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # (T3) target positive-control -- patterns but zero tracked files is the same vacuum.
+    Chk "T3: target tracked-file positive-control (>0)" $(if (@(EolFiles).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # (T4) MAIN CHECK -- does the real tree keep the declared contract.
+    Chk "T4: main check -- target files carrying CRLF: 0" ([string](EolBad '')) '0'
+    # (T5) fixture control -- the REAL verdict runs on the copy (M46 precedent).
+    Chk "T5: control -- a CRLF copy is caught" (CrlfIn (EolFixture 'crlf')) 'yes'
+    # (T6) negative control -- an LF-only copy must not redden (false-positive direction).
+    Chk "T6: negative control -- an LF copy passes" (CrlfIn (EolFixture 'lf')) 'no'
+    function EolGaFixture {
+        $f = Join-Path $sbx 'gitattr-probe'
+        [System.IO.File]::WriteAllLines($f, @('# probe','*.zzz text eol=lf'), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    # (T7) wiring -- prove the pattern comes FROM THE FILE, not from a constant, by feeding a
+    # different one. A refutation pass (M60 review) opened this: the earlier form was
+    # `HasToken $GITATTR 'eol=lf'`, which stayed green even for a COMMENTED-OUT declaration and
+    # was strictly weaker than T2 -- it could never redden on its own. That is a claim, not a check.
+    Chk "T7: wiring -- a different .gitattributes changes the extraction" (@(EolGlobs (EolGaFixture)) -join ',') '*.zzz'
+
+    # --- Part U: measurement-order rule + exposing the silent skip (M60) --------
+    # The harness READS the impl report (Part P), yet `crit_targets` silently skips milestones
+    # that have no report. So a run taken BEFORE the report is written is "green while never
+    # looking at this cycle at all" -- M59 ran in exactly that order and two blockers survived
+    # to review. **The filter stays** (dropping it would keep the tree red through all of impl
+    # and the harness would stop being a progress signal). What gets fixed is the SILENCE.
+    $MO_KEY = 'measure-order:'
+    $IMPL_SKILL = Join-Path $ROOT 'skills/impl/SKILL.md'
+    $IMPL_TPL   = Join-Path $ROOT 'skills/impl/template.md'
+    function MoName { $t = @((DeclTail $CONV $MO_KEY) -split '\s+' | Where-Object { $_ -ne '' }); if ($t.Count -gt 0) { return $t[0] } else { return '' } }
+    function SkippedMs([string]$extra) {
+        $out = New-Object System.Collections.ArrayList
+        foreach ($f in Get-ChildItem -Path (Join-Path $ROOT 'docs/milestones') -Filter 'M*.md') {
+            $n = $f.BaseName.Substring(1)
+            if (-not ($n -match '^\d+$')) { continue }
+            if ([int]$n -lt [int]$CRITN) { continue }
+            if (-not (Test-Path (Join-Path $ROOT ("docs/reports/M" + $n + "-impl.md")))) { [void]$out.Add($n) }
+        }
+        if ($extra -ne '') { [void]$out.Add($extra) }
+        return $out.ToArray()
+    }
+    function SkippedN([string]$extra) { return @(SkippedMs $extra).Count }
+    Chk "U1: measure-order declaration line is exactly 1" (DeclCount $CONV $MO_KEY) '1'
+    # (U2) extraction positive-control -- an empty tail would bind the empty token everywhere.
+    Chk "U2: alias extraction positive-control" $(if ((MoName) -ne '') { 'ok' } else { 'no' }) 'ok'
+    # (U3-U5) MAIN CHECKS -- the alias must actually be present in all three restatement sites.
+    Chk "U3: main check -- impl skill carries the alias" (HasToken $IMPL_SKILL (MoName)) 'yes'
+    Chk "U4: main check -- impl template carries the alias" (HasToken $IMPL_TPL (MoName)) 'yes'
+    Chk "U5: main check -- release skill carries the alias" (HasToken $REL_SKILL (MoName)) 'yes'
+    # (U6) EXPOSING THE SILENT SKIP. A non-zero count is the machine signal for "this run did not
+    # look at that cycle" -- exactly the state a pre-report measurement is in.
+    Chk "U6: milestones skipped by the criteria cross-check: 0" ([string](SkippedN '')) '0'
+    # (U7) fixture control -- the exposure is not vacuous: adding a report-less number raises it.
+    Chk "U7: control -- a new skip raises the count by one" ([string]((SkippedN '9999') - (SkippedN ''))) '1'
+
 
     Chk "F1: README cases declaration == actual case count" (DeclaredCases) ([string]($script:pass + $script:fail + 1))
 
