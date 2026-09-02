@@ -22,7 +22,8 @@ impl/review가 남긴 보고서는 다음 `release` 커밋에 함께 포함됩�
   전제조건을 먼저 검사하는 커맨드는 그 검사를 통과한 뒤에 기록하므로, 검사에서 중단되면 phase가
   기록되지 않습니다. 어느 커맨드가 어느 시점에 쓰는지는 **해당 SKILL이 단일 원본**입니다.
   나머지 6종은 이 저장소의 phase를 쓰지 않습니다 — `status`·`fleet`은 읽기 전용, `retro`는 회고
-  문서만, `fleet-verify`는 verification-only이고, `kickoff`는 `.gitignore` 항목만 손대며,
+  문서와(`처분`이 생겼을 때) 이월 원장의 처분 행만, `fleet-verify`는 verification-only이고,
+  `kickoff`는 `.gitignore` 항목만 손대며,
   `fleet-cycle`은 **자식 저장소의** phase만 씁니다.
 - `.gitignore` 대상은 `.tide/phase`와 `.tide/debug-session` **두 파일**입니다 — `.tide/` 전체가
   아니라서 `.tide/deps`·`.tide/release-mode`는 커밋됩니다.

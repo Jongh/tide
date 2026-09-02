@@ -28,7 +28,7 @@ tide는 12종의 슬래시 커맨드를 제공합니다. 호출은 모두 `/tide
 | `/tide:review` | 비판적 리뷰 + 반증 시도(refutation) 후 릴리즈 판정 — **차단 등급은 고치지 않고 `불가` + impl 반환** | `docs/reports/M{N}-review.md` (판정 계측 줄 포함) | ✗ |
 | `/tide:cycle [주제/M번호]` | `milestone→impl→review` 자동 체이닝 (`.tide/autonomy`가 `continuous`면 release의 편집 층까지 — 커밋 앞 정지) | 위 단계들의 산출물 + 릴리즈 안내 | ✗ |
 | `/tide:release vX.Y.Z [pr/release]` | 프리플라이트 → 버전 범프 → CHANGELOG → commit → tag → push. `gh` 있으면 GitHub 릴리즈/PR 게시 택1(옵트인) | 릴리즈 커밋·태그 (+선택 gh 릴리즈/PR) | ✓ |
-| `/tide:retro` | 누적 사이클 회고 (읽기 전용) | `docs/reports/retro.md` | ✗ |
+| `/tide:retro` | 누적 사이클 회고 (읽기 전용 — 아래 예외 한 자리) | `docs/reports/retro.md` (+ `처분` 발생 시 `docs/project-context.md` 이월 원장 한 줄) | ✗ |
 | `/tide:status` | 현재 상태 + 다음 권장 커맨드 (읽기 전용) | (없음 — 보고만) | ✗ |
 | `/tide:debug [증상 / done]` | 발견한 에러를 세션으로 묶어 수정·누적 + 릴리즈 판정 (사이클 밖, 발견 우선) | `docs/reports/debug-{N}.md` | ✗ |
 | `/tide:fleet [부모 경로]` | 상위 폴더의 여러 자식 tide 레포 교차 개요 (읽기 전용, 멀티 레포) | (없음 — 보고만) | ✗ |
@@ -124,7 +124,10 @@ tide는 12종의 슬래시 커맨드를 제공합니다. 호출은 모두 `/tide
   "후속"의 반영/미반영, 릴리즈 판정·버전 추이를 집계합니다.
 - **인자**: 없음
 - **산출물**: `docs/reports/retro.md` (갱신형 단일 문서 — 회고 시점마다 최상단 누적)
-- **금지**: 회고 문서 외 파일 생성·수정 / `.tide/phase` 변경 / git 작업 (읽기 전용)
+- **금지**: 아래 두 자리 밖의 파일 생성·수정 / `.tide/phase` 변경 / git 작업 (읽기 전용)
+- **쓰기가 열린 두 자리**: ⑴ 회고 문서 ⑵ 이번 회고가 `처분`을 만들었을 때 `docs/project-context.md`
+  이월 원장의 **처분 행 추가**. ⑵는 규약의 «같은 편집에서 사유 한 줄» 의무를 지킬 수단이며
+  범위의 단일 원본은 `docs/conventions.md`의 "회고 후속 항목의 소비" 절이다(M58).
 
 ## `/tide:status`
 

@@ -720,6 +720,19 @@ try {
     Chk "E10: metrics-line skeleton carries streak field (conventions)" (SameLine $CONV $MEAS_TOK "($STREAK_TOK)") 'yes'
     Chk "E10: metrics-line skeleton carries streak field (template)"    (SameLine $REV_TPL $MEAS_TOK "($STREAK_TOK)") 'yes'
 
+    # (E11 / M58) precedent-waiver metric. E7 already binds `precedent-waiver` across the three
+    # files, but that guards the `next steps` RECORDING slot -- it never asks whether the token
+    # reached the METRICS LINE. E7 stayed green while four cycles of waivers (six of them) went
+    # uncounted (measured by the 2026-08-31 retro). Two things are bitten here: (1) the waiver
+    # COUNT field sits inside the metrics line (a different layer than E7) and (2) the streak
+    # field's ASCII term binds across all three files (same shape as E10).
+    $WAIVER_STREAK_TOK = 'waiver-streak'
+    Chk "E11: waiver streak ($WAIVER_STREAK_TOK) present in all three files" (InAllThree $WAIVER_STREAK_TOK $CONV $REV_SKILL $REV_TPL) 'yes'
+    Chk "E11: metrics-line skeleton carries waiver-count field (conventions)" (SameLine $CONV $MEAS_TOK "($WAIVER_TOK)") 'yes'
+    Chk "E11: metrics-line skeleton carries waiver-count field (template)"    (SameLine $REV_TPL $MEAS_TOK "($WAIVER_TOK)") 'yes'
+    Chk "E11: metrics-line skeleton carries waiver-streak field (conventions)" (SameLine $CONV $MEAS_TOK "($WAIVER_STREAK_TOK)") 'yes'
+    Chk "E11: metrics-line skeleton carries waiver-streak field (template)"    (SameLine $REV_TPL $MEAS_TOK "($WAIVER_STREAK_TOK)") 'yes'
+
     # negative control: a bogus exit-condition token must NOT appear in conventions (same shape as the
     # bogus precedent token control below -- proves this new bind discriminates).
     Chk "E: control -- conventions has no bogus exit-condition token" (HasToken $CONV "$RESIDUAL_TOK-bogus") 'no'
@@ -736,6 +749,7 @@ try {
 
     # negative control: a bogus streak token must NOT appear in conventions (same shape as E8's control).
     Chk "E: control -- conventions has no bogus streak token" (HasToken $CONV "$STREAK_TOK-bogus") 'no'
+    Chk "E: control -- conventions has no bogus waiver-streak token" (HasToken $CONV "$WAIVER_STREAK_TOK-bogus") 'no'
 
     # negative control: a bogus token must NOT appear in conventions (same intent as B1's N+1 absence).
     Chk "E: control -- conventions has no bogus refutation token" (HasToken $CONV "$REFUT_TOK-bogus") 'no'
@@ -3106,8 +3120,31 @@ try {
             }
             [void]$out.Add($l)
         }
+        if ($mode -eq 'dup') {
+            [void]$out.Add('')
+            [void]$out.Add('<!-- ' + $rBlk + ':start -->')
+            [void]$out.Add('')
+            [void]$out.Add('| item | source | status | where |')
+            [void]$out.Add('|---|---|---|---|')
+            [void]$out.Add('| zzz-dup | zzz | ' + $rFirst + ' | zzz |')
+            [void]$out.Add('<!-- ' + $rBlk + ':end -->')
+        }
         [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
         return $f
+    }
+    function RetroBlocks([string]$path) {
+        # -> how many marker windows the document has. The window MUST be unique: the
+        # convention says "the read range is the topmost section table only", but RetroVals
+        # above reads EVERY marker block in the file. Leave the previous section marker in
+        # place when stamping a new one and already-disposed rows come back to life while
+        # O4 stays GREEN (every value is still in the declared set). Opened by measurement
+        # during the 2026-08-31 retro run.
+        if (-not (Test-Path $path)) { return 0 }
+        $n = 0
+        foreach ($l in [System.IO.File]::ReadAllLines($path)) {
+            if ($l.Contains('<!-- ' + $rBlk + ':start -->')) { $n++ }
+        }
+        return $n
     }
     function MstHits {
         # How many DISTINCT declared status values appear in the milestone skill.
@@ -3136,6 +3173,13 @@ try {
     # (O10/O11) The consumer's wiring. It must say it reads, and must NOT re-enumerate the rules.
     Chk "O10: the milestone skill points at the retro document" $(if ([System.IO.File]::ReadAllText((Join-Path $ROOT 'skills/milestone/SKILL.md')).Contains('docs/reports/retro.md')) { 'ok' } else { 'no' }) 'ok'
     Chk "O11: no duplication -- the skill does not enumerate the status set" $(if ((MstHits) -le 1) { 'ok' } else { 'no' }) 'ok'
+    # (O12-O14 / M58) UNIQUENESS OF THE CONSUMER WINDOW. RetroVals reads every block, so a second
+    # window makes the cross-history read the convention forbids succeed silently. Redden it here.
+    Chk "O12: main check -- exactly one marker window" ([string](RetroBlocks $RETRO)) '1'
+    # Fixture control -- the REAL verdict runs on the copy (M46 precedent): a second window is caught.
+    Chk "O13: control -- two windows are caught" ([string](RetroBlocks (RetroFixture 'dup'))) '2'
+    # False-positive direction -- an untouched copy still has exactly one.
+    Chk "O14: false-positive direction -- untouched copy has one window" ([string](RetroBlocks (RetroFixture 'clean'))) '1'
 
     # --- Part P: completion-criteria cross-check (M55) ----------------------
     # Did impl walk its own milestone's criteria BY NUMBER? What is bitten is omissions and ghosts;
@@ -3523,6 +3567,46 @@ try {
     # False-positive direction -- a DECLARED site passes. Reddening here would make the
     # convention's "declare it and you are done" a lie.
     Chk "Q5: false-positive direction -- unpinned but declared passes" ([string](VqScan (VqFixture 'redecl'))) '0'
+
+    # --- Part R: release-coverage bookkeeping declaration (M58) ---------------
+    # The set the coverage check subtracts lived in TWO places (conventions and the release
+    # skill) with no machine tying them -- fix one and the other goes stale, the very class this
+    # repo already closed for command counts, status-value sets and the phase roster. The single
+    # declaration is the conventions' `coverage-bookkeeping:` line; consumers only POINT at it.
+    # The tokens are abstract (`bk-...`) because the version file differs per project and a path
+    # token would read as duplication whenever a consumer mentions that path for another reason.
+    $BK_KEY = 'coverage-bookkeeping:'
+    function BkTokens { return ((DeclTail $CONV $BK_KEY) -split '\s+' | Where-Object { $_ -ne '' }) }
+    function BkDupIn([string]$path) {
+        $n = 0
+        foreach ($tok in BkTokens) { if ((HasToken $path $tok) -eq 'yes') { $n++ } }
+        return $n
+    }
+    function BkFixture {
+        $f = Join-Path $sbx 'rel-bk.md'
+        $lines = New-Object System.Collections.ArrayList
+        foreach ($l in [System.IO.File]::ReadAllLines($REL_SKILL)) { [void]$lines.Add($l) }
+        # An empty declaration must degrade the way the sh copy does (R4 red on a completed
+        # run), not throw: indexing [0] into an empty array aborts the whole harness and the
+        # two copies stop giving the same verdict on the same tree (M55 Part P precedent).
+        $bkAll = @(BkTokens)
+        $bkFirst = ''
+        if ($bkAll.Count -gt 0) { $bkFirst = $bkAll[0] }
+        [void]$lines.Add('zzz ' + $bkFirst + ' zzz')
+        [System.IO.File]::WriteAllLines($f, $lines.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    Chk "R1: coverage-bookkeeping declaration line is exactly 1" (DeclCount $CONV $BK_KEY) '1'
+    # (R2) extraction positive-control -- zero tokens would make the main check vacuously green.
+    Chk "R2: token extraction positive-control (>0)" $(if (@(BkTokens).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # (R3) MAIN CHECK -- a consumer that re-enumerates becomes a second declaration site.
+    Chk "R3: main check -- the release skill does not re-enumerate" ([string](BkDupIn $REL_SKILL)) '0'
+    # Fixture control -- the REAL verdict runs on the copy (M46 precedent): a leaked token is caught.
+    Chk "R4: control -- a leaked token is caught" ([string](BkDupIn (BkFixture))) '1'
+    # (R5) wiring -- not re-enumerating is not enough: DELETING the reference also scores 0, so ask
+    # whether the consumer points at the declaration name (otherwise this check goes vacuous).
+    Chk "R5: wiring -- the release skill points at the declaration name" (HasToken $REL_SKILL $BK_KEY) 'yes'
+
 
     Chk "F1: README cases declaration == actual case count" (DeclaredCases) ([string]($script:pass + $script:fail + 1))
 
