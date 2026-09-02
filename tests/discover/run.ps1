@@ -3607,6 +3607,49 @@ try {
     # whether the consumer points at the declaration name (otherwise this check goes vacuous).
     Chk "R5: wiring -- the release skill points at the declaration name" (HasToken $REL_SKILL $BK_KEY) 'yes'
 
+    # --- Part S: publish-availability axis / unpublishable terminal state (M59) -
+    # The release procedure assumed a reachable remote, so a correct tree (add/commit/tag done)
+    # was reported as a failure whenever push could not run. M59 closed that by NAMING two things
+    # -- `push-availability` (the push axis, split from the gh publish axis) and
+    # `unpublished-release` (the success terminal state when that axis does not pass). Names get
+    # RESTATED in the skill and the catalog, so a split declaration site goes stale silently --
+    # the class Part E and Part R already closed. One declaration in the conventions fragment;
+    # consumers only POINT at it.
+    $PA_KEY = 'push-availability:'
+    $TS_KEY = 'terminal-state:'
+    $CMD_CANON = Join-Path $ROOT 'docs/commands.md'
+    function TsToken { $t = @((DeclTail $CONV_REL $TS_KEY) -split '\s+' | Where-Object { $_ -ne '' }); if ($t.Count -gt 0) { return $t[0] } else { return '' } }
+    function PaToken { $t = @((DeclTail $CONV_REL $PA_KEY) -split '\s+' | Where-Object { $_ -ne '' }); if ($t.Count -gt 0) { return $t[0] } else { return '' } }
+    function TsFixture {
+        $f = Join-Path $sbx 'rel-ts.md'
+        $tok = TsToken
+        $lines = New-Object System.Collections.ArrayList
+        # An empty token must not turn the control into a no-op that reads green: leave the copy
+        # untouched so S7 goes RED, and let S3's extraction control name the cause.
+        foreach ($l in [System.IO.File]::ReadAllLines($REL_SKILL)) {
+            if ($tok -ne '') { [void]$lines.Add($l.Replace($tok, 'zzz')) } else { [void]$lines.Add($l) }
+        }
+        [System.IO.File]::WriteAllLines($f, $lines.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    Chk "S1: push-availability declaration line is exactly 1" (DeclCount $CONV_REL $PA_KEY) '1'
+    Chk "S2: terminal-state declaration line is exactly 1" (DeclCount $CONV_REL $TS_KEY) '1'
+    # (S3) extraction positive-control -- an empty tail would make the checks below split on an
+    # empty token and pass vacuously.
+    Chk "S3: both declaration tails extract (positive-control)" $(if ((PaToken) -ne '' -and (TsToken) -ne '') { 'ok' } else { 'no' }) 'ok'
+    # (S4/S5) MAIN CHECKS -- is the terminal-state name actually present in both consumers.
+    # Change the value in the conventions and these go red, so restatement sites get fixed too.
+    Chk "S4: main check -- release skill carries the terminal-state name" (HasToken $REL_SKILL (TsToken)) 'yes'
+    Chk "S5: main check -- command catalog carries the terminal-state name" (HasToken $CMD_CANON (TsToken)) 'yes'
+    # (S6) wiring -- asking only about the terminal state leaves the AXIS name free to vanish
+    # while staying green, and the axis is what triggers that state. What is bound is not the
+    # declaration KEY but the ASCII alias it names (the key minus its trailing colon) -- the alias
+    # is what gets restated in consumers (the conventions' ASCII-alias rule).
+    function PaName { return $PA_KEY.TrimEnd(':') }
+    Chk "S6: wiring -- release skill carries the push axis name" (HasToken $REL_SKILL (PaName)) 'yes'
+    # (S7) fixture control -- the REAL verdict runs on the copy (M46 precedent).
+    Chk "S7: control -- a missing name is caught" (HasToken (TsFixture) (TsToken)) 'no'
+
 
     Chk "F1: README cases declaration == actual case count" (DeclaredCases) ([string]($script:pass + $script:fail + 1))
 

@@ -109,13 +109,16 @@ tide는 12종의 슬래시 커맨드를 제공합니다. 호출은 모두 `/tide
   **아직 커밋되지 않은 변경**(`git status --porcelain`) **둘 다**입니다 — release는 프리플라이트를
   통과한 뒤에 스테이징·커밋하므로 미커밋 변경도 그대로 태그에 실리기 때문입니다. 전부 커버되면
   조용합니다.
-- **동작**: 버전 범프 → `CHANGELOG.md`·`README.md` 갱신 → commit → tag → push.
+- **동작**: 버전 범프 → `CHANGELOG.md` 갱신 → commit → tag → **(원격이 있고 닿으면)** push.
 - **게시 모드(`gh` 옵트인)**: 우선순위 = 명시 인자 > `.tide/release-mode` 저장값 > (검증 통과 시)
   대화형 질문. `release` = push 후 `gh release create`(가산), `pr` = 릴리즈 브랜치 + `gh pr create`로
   PR을 연 뒤 **머지 후 같은 명령을 다시 실행하면 태그·릴리즈로 자동 마무리**(상태 인지·멱등 — merged면
   finalize, open이면 대기). 게시 전 `git`·`gh`·인증·원격 GitHub 등록을 검증하고, `gh` 부재/검증 실패면
   현행 push-only로 **바이트 동일**. 단일 원본은 `docs/conventions-release.md`의 "릴리즈 게시 (gh)" 절.
   tide-guard는 `gh`로 확장하지 않습니다.
+- **게시 불가 환경**: 원격이 없거나(`push-availability` 불통과) push가 실패하면 commit·tag까지 끝난
+  상태로 **성공 종료**하고(`unpublished-release`) 남은 push 두 줄과 사유를 보고합니다 — 실패가
+  아닙니다. 규약은 `docs/conventions-release.md`의 "게시 불가 종료 (push 축)" 절.
 - **커밋 메시지**: `Release {버전}: {핵심 변경사항 한 줄 요약}`
 
 ## `/tide:retro`
