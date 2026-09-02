@@ -563,6 +563,19 @@ chk "E10: 연속 폴백($STREAK_TOK) 세 파일 전부에 등장" "$(in_all_thre
 chk "E10: 계측 줄 골격에 연속 폴백 필드(규약)"   "$(same_line "$CONV" "$MEAS_TOK" "($STREAK_TOK)")" "yes"
 chk "E10: 계측 줄 골격에 연속 폴백 필드(템플릿)" "$(same_line "$REV_TPL" "$MEAS_TOK" "($STREAK_TOK)")" "yes"
 
+# (E11 · M58) 부인 기록 계측. `precedent-waiver`는 E7이 이미 **세 파일에 있는가**를 무는데,
+# 그것은 `다음 단계`의 기록 슬롯이 성립하는 조건이라 **계측 줄에 들어갔는지는 보지 않는다** —
+# 실제로 E7이 초록인 채로 네 사이클 동안 부인 6건이 세어지지 않았다(2026-08-31 회고의 표제 실측).
+# 그래서 무는 것은 둘이다: ⑴ **계측 줄 안에** 부인 건수 필드가 있는가(E7과 층이 다르다)
+# ⑵ 연속 부인 필드의 병기어가 세 파일에 있는가(E10과 같은 3곳 결합).
+WAIVER_STREAK_TOK='waiver-streak'
+chk "E11: 연속 부인($WAIVER_STREAK_TOK) 세 파일 전부에 등장" "$(in_all_three "$WAIVER_STREAK_TOK" "$CONV" "$REV_SKILL" "$REV_TPL")" "yes"
+# 계측 줄 골격 안에 두 필드가 실제로 들어갔는지 — 규약·템플릿 두 자리(E10과 같은 형태).
+chk "E11: 계측 줄 골격에 부인 건수 필드(규약)"   "$(same_line "$CONV" "$MEAS_TOK" "($WAIVER_TOK)")" "yes"
+chk "E11: 계측 줄 골격에 부인 건수 필드(템플릿)" "$(same_line "$REV_TPL" "$MEAS_TOK" "($WAIVER_TOK)")" "yes"
+chk "E11: 계측 줄 골격에 연속 부인 필드(규약)"   "$(same_line "$CONV" "$MEAS_TOK" "($WAIVER_STREAK_TOK)")" "yes"
+chk "E11: 계측 줄 골격에 연속 부인 필드(템플릿)" "$(same_line "$REV_TPL" "$MEAS_TOK" "($WAIVER_STREAK_TOK)")" "yes"
+
 # 음성 통제 — 가짜 종료 조건 토큰은 규약에 없어야 한다(아래 판례 토큰 통제와 동형, 구별력 입증).
 chk "E: 통제 — conventions에 가짜 종료조건 토큰 없음" "$(has_token "$CONV" "${RESIDUAL_TOK}-bogus")" "no"
 
@@ -577,6 +590,7 @@ chk "E: 통제 — impl 템플릿에 계측 줄 골격 없음" "$(same_line "$IM
 
 # 음성 통제 — 가짜 연속 폴백 토큰은 규약에 없어야 한다(E8 통제와 동형, 구별력 입증).
 chk "E: 통제 — conventions에 가짜 연속폴백 토큰 없음" "$(has_token "$CONV" "${STREAK_TOK}-bogus")" "no"
+chk "E: 통제 — conventions에 가짜 연속부인 토큰 없음" "$(has_token "$CONV" "${WAIVER_STREAK_TOK}-bogus")" "no"
 
 # 음성 통제 — 존재하지 않는 가짜 토큰은 규약에 없어야 한다(B1의 N+1종 부재·Part D 가짜 토큰과 동형).
 chk "E: 통제 — conventions에 가짜 반증 토큰 없음" "$(has_token "$CONV" "${REFUT_TOK}-bogus")" "no"
@@ -2796,7 +2810,7 @@ retro_bad() { # <retro 경로> → 선언 집합 밖인 행의 수 (**빈 값도
     done
     echo "$_rb"
 }
-retro_fixture() { # <모드> → 사본 경로 (clean | outset | blank | paren)
+retro_fixture() { # <모드> → 사본 경로 (clean | outset | blank | paren | dup)
     # **첫 데이터 행 하나만** 건드린다 — 판정이 그 한 행에서 갈리는지 보려는 것이다.
     _rf="$SBX/retro-$1.md"
     LC_ALL=C awk -v mk="$RBLK" -v mode="$1" -v ok1="$RFIRST" '
@@ -2816,6 +2830,17 @@ retro_fixture() { # <모드> → 사본 경로 (clean | outset | blank | paren)
             }
         }
         { print }
+        END {
+            if (mode == "dup") {
+                print ""
+                print "<!-- " mk ":start -->"
+                print ""
+                print "| item | source | status | where |"
+                print "|---|---|---|---|"
+                print "| zzz-dup | zzz | " ok1 " | zzz |"
+                print "<!-- " mk ":end -->"
+            }
+        }
     ' "$RETRO" > "$_rf"
     printf '%s' "$_rf"
 }
@@ -2843,7 +2868,26 @@ chk "O8: 부재 통제 - 회고 문서가 없으면 행 0개" "$(retro_rows "$SB
 chk "O9: 오탐 방향 - 괄호 주석이 붙은 집합 안 값은 통과" "$(retro_bad "$(retro_fixture paren)")" "0"
 # (O10·O11) 소비자의 배선. 읽는다는 사실은 있어야 하고, **규칙을 다시 열거하면 안 된다**.
 chk "O10: milestone 스킬이 회고 문서를 가리킨다" "$([ "$(grep -cF -- 'docs/reports/retro.md' "$ROOT/skills/milestone/SKILL.md")" -ge 1 ] && echo ok || echo no)" "ok"
+retro_blocks() { # <retro 경로> → 마커 시작 표지의 수 (창이 몇 개인가)
+    # **창은 문서 전체에서 하나여야 한다.** 규약이 *"읽는 범위는 최상단 회고 섹션의 그 표뿐"*
+    # 이라 못박는데 위 `retro_vals`의 파서는 **파일 안 마커 블록을 전부** 읽는다 — 새 섹션에
+    # 마커를 달면서 직전 섹션 마커를 두면 **이미 처분된 것이 되살아나고 그래도 `O4`는 초록**이다
+    # (값이 전부 선언 집합 안이므로). 2026-08-31 회고 실행이 그 자리를 실측으로 열었다.
+    [ -f "$1" ] || { echo 0; return; }
+    LC_ALL=C awk -v mk="$RBLK" '
+        mk == "" { exit }
+        index($0, "<!-- " mk ":start -->") > 0 { n++ }
+        END { print n + 0 }
+    ' "$1"
+}
 chk "O11: 복제 금지 - 스킬이 상태 값 집합을 열거하지 않는다" "$([ "$(mst_hits)" -le 1 ] && echo ok || echo no)" "ok"
+# (O12~O14 · M58) **소비 창의 유일성.** 위 파서가 전부 읽으므로 창이 둘이 되면 규약이 금지한
+# *"이력을 가로질러 세기"* 가 그대로 성립한다. 그 상태를 여기서 붉힌다.
+chk "O12: 본 검사 - 마커 창이 정확히 1개" "$(retro_blocks "$RETRO")" "1"
+# 픽스처 통제 — **실제 판정을 사본에 건다**(M46 판례). 창을 하나 더 붙이면 잡아야 한다.
+chk "O13: 픽스처 통제 - 창이 둘이면 잡는다" "$(retro_blocks "$(retro_fixture dup)")" "2"
+# 오탐 방향 — 손대지 않은 사본은 그대로 1이다. 여기서 갈리면 픽스처 생성이 창을 건드린 것이다.
+chk "O14: 오탐 방향 - 손대지 않은 사본은 창이 1개" "$(retro_blocks "$(retro_fixture clean)")" "1"
 
 # --- Part P: 완료 기준 대조 (M55) --------------------------------------------
 # 마일스톤이 요구한 것을 impl이 번호로 대조했는가. 무는 것은 **빠짐과 유령**까지이고
@@ -3186,6 +3230,39 @@ chk "Q4: 픽스처 통제 - 면제 선언을 잃으면 잡는다" "$(vq_scan "$(
 # 오탐 방향 — **선언한 자리는 통과한다**. 여기서 붉으면 면제 경로가 죽은 것이고, 그러면 규약이
 # 「선언하면 된다」고 적는 것이 거짓이 된다.
 chk "Q5: 오탐 방향 - 미고정이어도 선언하면 통과" "$(vq_scan "$(vq_fixture redecl)")" "0"
+
+# --- Part R: 릴리즈 커버리지 bookkeeping 선언 정합 (M58) ---------------------
+# 커버리지 체크가 대상에서 빼는 집합이 **규약과 릴리즈 스킬 두 곳**에 적혀 있었고 기계가 둘을
+# 묶지 않았다 — 한쪽만 고치면 조용히 갈라지는 부류이고, 이 저장소가 커맨드 수·상태 값 집합·
+# phase 명단에서 이미 닫은 형태다. 단일 선언처는 규약의 `coverage-bookkeeping:` 한 줄이고
+# 소비자는 **가리키기만** 한다. 토큰을 추상 이름(`bk-…`)으로 둔 이유는 버전 파일이 프로젝트마다
+# 다르고, 경로를 토큰으로 쓰면 소비자가 다른 뜻으로 그 경로를 말하기만 해도 복제로 오인되기
+# 때문이다(규약이 같은 사유를 적는다).
+BK_KEY='coverage-bookkeeping:'
+bk_tokens() { decl_tail "$CONV" "$BK_KEY"; }
+bk_dup_in() { # <파일> → 그 파일에 등장하는 **서로 다른** bk 토큰 수
+    _bkn=0
+    for _bkt in $(bk_tokens); do
+        [ "$(has_token "$1" "$_bkt")" = yes ] && _bkn=$((_bkn + 1))
+    done
+    echo "$_bkn"
+}
+bk_fixture() { # → 릴리즈 스킬 사본에 토큰 하나를 심은 것 (실제 판정을 사본에 건다)
+    _bkf="$SBX/rel-bk.md"
+    { cat "$REL_SKILL"; printf 'zzz %s zzz\n' "$(bk_tokens | LC_ALL=C awk '{ print $1; exit }')"; } > "$_bkf"
+    printf '%s' "$_bkf"
+}
+chk "R1: coverage-bookkeeping 선언 줄 정확히 1개" "$(decl_count "$CONV" "$BK_KEY")" "1"
+# (R2) 추출 positive-control — 토큰이 0개면 아래 본 검사가 «복제 0»으로 공허하게 통과한다.
+chk "R2: 토큰 추출 positive-control(>0)" "$([ "$(bk_tokens | LC_ALL=C awk '{ print NF }')" -gt 0 ] && echo ok || echo no)" "ok"
+# (R3) **본 검사.** 소비자가 목록을 다시 열거하면 그 자리가 두 번째 선언처가 된다.
+chk "R3: 본 검사 - release 스킬이 목록을 다시 열거하지 않는다" "$(bk_dup_in "$REL_SKILL")" "0"
+# 픽스처 통제 — **실제 판정을 사본에 건다**(M46 판례). 토큰이 새면 잡아야 한다.
+chk "R4: 픽스처 통제 - 토큰이 새면 잡는다" "$(bk_dup_in "$(bk_fixture)")" "1"
+# (R5) 배선 — 열거하지 않는 것만으로는 부족하다. **목록을 통째로 지워도** R3은 0이라 초록이므로,
+# 소비자가 선언 이름을 **가리키는지**를 함께 문다(그러지 않으면 이 검사가 공허해진다).
+chk "R5: 배선 - release 스킬이 선언 이름을 가리킨다" "$(has_token "$REL_SKILL" "$BK_KEY")" "yes"
+
 
 chk "F1: README cases 선언 == 실제 케이스 수" "$(declared_cases)" "$((pass + fail + 1))"
 
