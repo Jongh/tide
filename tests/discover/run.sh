@@ -3263,6 +3263,45 @@ chk "R4: 픽스처 통제 - 토큰이 새면 잡는다" "$(bk_dup_in "$(bk_fixtu
 # 소비자가 선언 이름을 **가리키는지**를 함께 문다(그러지 않으면 이 검사가 공허해진다).
 chk "R5: 배선 - release 스킬이 선언 이름을 가리킨다" "$(has_token "$REL_SKILL" "$BK_KEY")" "yes"
 
+# --- Part S: 게시 가용성 축 · 게시 불가 종료 선언 정합 (M59) ------------------
+# release 절차가 「닿는 원격이 있다」를 전제해 원격 불가 환경에서 정상 결과가 실패로 보고되던
+# 자리를 M59가 닫았다. 세운 것은 축 둘의 **이름**이고(`push-availability`가 게시 축과 분리된
+# push 축, `unpublished-release`가 그 축이 불통과일 때의 성공 종료), 이름은 스킬·카탈로그에
+# **재서술**되므로 선언처가 갈리면 조용히 낡는다 — Part E·R이 이미 닫은 형태다. 선언은 규약
+# 조각 한 곳이고 소비자는 **가리키기만** 한다.
+PA_KEY='push-availability:'
+TS_KEY='terminal-state:'
+CMD_CANON="$ROOT/docs/commands.md"
+ts_token() { decl_tail "$CONV_REL" "$TS_KEY" | LC_ALL=C awk '{ print $1; exit }'; }
+pa_token() { decl_tail "$CONV_REL" "$PA_KEY" | LC_ALL=C awk '{ print $1; exit }'; }
+ts_fixture() { # → 종료 상태 토큰을 **지운** 릴리즈 스킬 사본(실제 판정을 사본에 건다)
+    _tsf="$SBX/rel-ts.md"
+    _tst=$(ts_token)
+    # 토큰이 비면 `sed s///`가 모든 줄을 건드려 통제가 뜻을 잃는다 — 그때는 원본을 그대로 둬
+    # S7이 붉게 두고(공허한 초록 금지), 원인은 S3의 추출 통제가 지목한다.
+    if [ -n "$_tst" ]; then
+        LC_ALL=C sed "s/$_tst/zzz/g" "$REL_SKILL" > "$_tsf"
+    else
+        cat "$REL_SKILL" > "$_tsf"
+    fi
+    printf '%s' "$_tsf"
+}
+chk "S1: push-availability 선언 줄 정확히 1개" "$(decl_count "$CONV_REL" "$PA_KEY")" "1"
+chk "S2: terminal-state 선언 줄 정확히 1개" "$(decl_count "$CONV_REL" "$TS_KEY")" "1"
+# (S3) 추출 positive-control — 꼬리가 비면 아래 본 검사가 빈 토큰을 찾아 **공허하게** 갈린다.
+chk "S3: 두 선언 꼬리 추출 positive-control"     "$([ -n "$(pa_token)" ] && [ -n "$(ts_token)" ] && echo ok || echo no)" "ok"
+# (S4·S5) **본 검사** — 종료 상태 이름이 소비자 둘에 실제로 가 있는가. 규약에서 값을 바꾸면
+# 여기가 붉어 재서술처가 함께 고쳐진다.
+chk "S4: 본 검사 - release 스킬이 종료 상태 이름을 갖는다" "$(has_token "$REL_SKILL" "$(ts_token)")" "yes"
+chk "S5: 본 검사 - 커맨드 카탈로그가 종료 상태 이름을 갖는다" "$(has_token "$CMD_CANON" "$(ts_token)")" "yes"
+# (S6) 배선 — 종료 상태만 물으면 **축 이름**이 사라져도 초록이다(축이 종료 상태의 트리거다).
+# 무는 것은 선언 **키**가 아니라 그 키가 이름 붙인 **병기어**다(키의 꼬리 콜론을 벗긴 것) —
+# 소비자에 재서술되는 것이 병기어이기 때문이다(규약의 ASCII 병기어 규율).
+pa_name() { printf '%s' "${PA_KEY%:}"; }
+chk "S6: 배선 - release 스킬이 push 축 이름을 갖는다" "$(has_token "$REL_SKILL" "$(pa_name)")" "yes"
+# (S7) 픽스처 통제 — **실제 판정을 사본에 건다**(M46 판례). 이름이 빠지면 S4가 잡아야 한다.
+chk "S7: 픽스처 통제 - 이름이 빠지면 잡는다" "$(has_token "$(ts_fixture)" "$(ts_token)")" "no"
+
 
 chk "F1: README cases 선언 == 실제 케이스 수" "$(declared_cases)" "$((pass + fail + 1))"
 

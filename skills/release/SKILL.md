@@ -1,6 +1,6 @@
 ---
-description: "[tide] 프리플라이트 → 버전 범프 → CHANGELOG → commit → tag → push (+gh 게시 옵트인)"
-argument-hint: "v0.1.0 [pr|release] (모드 생략 시 push-only / 저장된 선호도)"
+description: "[tide] 프리플라이트 → 버전 범프 → CHANGELOG → commit → tag → (가능하면) push (+gh 게시 옵트인)"
+argument-hint: "v0.1.0 [pr|release] (모드 생략 시 push-only — 원격 불가면 unpublished-release로 종료)"
 ---
 릴리즈를 진행해줘. "$ARGUMENTS"로 버전과 (선택) 게시 모드를 지정할 수 있어
 (예: `/tide:release v0.1.0`, `/tide:release v0.1.0 pr`, `/tide:release v0.1.0 release`).
@@ -88,9 +88,11 @@ git 쓰기 직전이다** — 버전 파일·CHANGELOG 편집은 git이 아니�
      대화형 질문(`release`/`pr`/"이번엔 그냥 push"). `gh` 부재·검증 실패면 모드 질문 없이 push-only로
      가고 불가 사유를 한 줄 알린다. 인자·저장값 없이 첫 대화형 선택을 했으면 직후 "이후에도 같은
      모드를 쓸지"를 물어 예이면 `.tide/release-mode`에 한 줄 기록한다.
-   - **검증 게이트**: `git`·`gh` 가용·서브커맨드·인증(`gh auth status`)·대상 원격 GitHub 등록
-     (`gh repo view`). **모드를 명시했는데 검증이 실패하면 — 파일 편집 전에 중단하고 사유를 보고한다**
-     (작업 트리 무변경 · 조용한 강등 금지).
+   - **검증 게이트 — 축이 둘이다**. **push 축**(`push-availability`): 대상 레포에 원격이 설정돼
+     있는가(`git remote`가 비었는지만 본다 — **닿는지는 미리 재지 않는다**). **게시 축**: `git`·`gh`
+     가용·서브커맨드·인증(`gh auth status`)·대상 원격 GitHub 등록(`gh repo view`). 둘은 별개다 —
+     GitLab 원격이면 게시 축은 실패해도 push 축은 통과한다. **모드를 명시했는데 어느 축이든 실패하면
+     — 파일 편집 전에 중단하고 사유를 보고한다**(작업 트리 무변경 · 조용한 강등 금지).
    - **`pr` 모드 상태 인지**: mode=`pr`이면 검증 후·**파일 편집 전에** 릴리즈 PR(`release/v{버전}` 또는
      제목 `Release v{버전}`)을 `gh`로 조회해 분기한다 — **merged**→마무리 / **open**→대기 /
      **closed(미머지)**→중단 / **없음**→생성. **마무리·대기·중단은 아래 2·3을 건너뛴다**(머지로 이미
@@ -105,11 +107,19 @@ git 쓰기 직전이다** — 버전 파일·CHANGELOG 편집은 git이 아니�
      스테이징**이다(추적 파일의 수정·삭제 + 미추적 파일, `.gitignore` 존중). **프리플라이트 5가 범위
      ⑵로 본 집합이 그대로 커밋·태그에 실린다.** 좁혀야 하면 임의로 줄이지 말고 프리플라이트 3·5의
      보고를 근거로 사용자가 판단한다.
-   - **push-only**: git add → commit(`Release {버전}: {핵심 변경 한 줄}`) → `git tag {버전}` →
-     `git push {remote} {기본 브랜치}` → `git push {remote} {버전}`.
+   - **push-only — 두 단계다**. ⑴ **릴리즈 성립**: git add → commit(`Release {버전}: {핵심 변경 한
+     줄}`) → `git tag {버전}`. **항상 돈다.** ⑵ **게시**: `git push {remote} {기본 브랜치}` →
+     `git push {remote} {버전}`. **push 축이 통과할 때만 돈다.**
+     - ⑵를 못 하거나(원격 미설정) 시도했다 실패하면(닿지 않음) **`unpublished-release`로 성공
+       종료**하고 보고 셋(일어난 것 · 남은 push 두 줄 · **두 사유를 구분한** 까닭)을 낸다. 실패로
+       보고하지 않는다 — ⑴이 끝난 시점에 릴리즈는 이미 성립했다. 규약은
+       `docs/conventions-release.md`의 "게시 불가 종료 (push 축)" 절.
    - **`release` 모드**: push-only를 그대로 하고 **그 뒤** `gh release create {버전}`(노트 = CHANGELOG
-     발췌 · 제외 용어 규약 준수). 이미 push된 태그를 참조해 중복 생성을 피한다.
-   - **`pr` 모드**: 기본 브랜치에 **직접 push하지 않는다**. 1에서 조회한 상태로 분기한다.
+     발췌 · 제외 용어 규약 준수). 이미 push된 태그를 참조해 중복 생성을 피한다. **push가 없었으면
+     릴리즈 객체도 만들지 않는다** — `unpublished-release`로 종료하며 게시가 일어나지 않았음을 함께
+     보고한다.
+   - **`pr` 모드**: 기본 브랜치에 **직접 push하지 않는다**. push 없이 성립하지 않으므로 push 축이
+     불통과면 **1의 모드 해석 단계에서 중단**되고 여기 오지 않는다. 1에서 조회한 상태로 분기한다.
      - **없음 → 생성**: `release/v{버전}` 브랜치에 add → commit → push → `gh pr create`(제목
        `Release v{버전}: …`, 본문 = CHANGELOG 발췌). **태그·릴리즈는 머지 후로 미루고** PR URL과
        "머지 후 같은 명령 재실행" 안내를 남긴다.

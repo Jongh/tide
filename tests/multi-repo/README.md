@@ -96,7 +96,8 @@ pwsh           -File tests\multi-repo\run.ps1   # PowerShell 7
   PR CI, 아니면 기본 브랜치 push 이후의 CI). **M40이 그 조회를 `pr` 모드 마무리에 배선했다** —
   태그 전에 PR 체크를 조회해 사용자 확인을 받는다(게이트가 아니다). push-only·`release` 모드는
   PR도 머지 전 CI도 없어 그 경로에서는 여전히 닫히지 않으며, 근거와 잔여의 단일 원본은
-  `docs/conventions.md`의 "실행 환경 축" 절이다.
+  `docs/conventions.md`의 "실행 환경 축" 절이다. **push 자체가 불가능한 환경에서는 세 경로 어디에도
+  CI가 없다** — 그 종료 상태는 `docs/conventions-release.md`의 "게시 불가 종료 (push 축)" 절이 정한다.
 
 실행 환경 축의 단일 원본은 `docs/conventions.md`의 "실행 환경 축" 절이며 이 절은 그 표의
 **기동 맥락** 행이 가리키는 집행처다.
