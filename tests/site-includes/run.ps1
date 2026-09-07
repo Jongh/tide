@@ -286,6 +286,163 @@ foreach ($term in $TERMS) {
 }
 Chk "ci-scan: no excluded-term literal in the workflow" ([string]$wfLiteral) '0'
 
+# === Does the scan step ACTUALLY sweep? (M61) ==========================================
+# The six wiring cases above bite only the step's EXISTENCE and ORDER. So leaving the
+# reference line in place and commenting the WHOLE detection loop out kept the harness at
+# 45/0 green (M57 review minor 3 -- carried unaddressed for four cycles). "Enforced by
+# sharing it out, and nobody actually does it" came back at the very enforcement that
+# cycle built. What is bitten here is whether the step SWEEPS THE OUTPUT: two things must
+# sit together INSIDE one step -- (1) the build-output path, (2) a loop over the derived
+# terms. The path is NOT hardcoded: it is read from the value the workflow DECLARES on the
+# upload step (hardcode it and the target stops following the declaration, and the check
+# ages silently -- same shape as M60's `source-eol-contract` reading .gitattributes).
+# BOUNDARY -- this asks about FORM, not whether the step actually runs in CI. Run
+# confirmation stays with the `Deploy docs site` run alone; the convention says the same.
+function SweepFn() {
+    # -> first PUBLIC function name exposed by the derivation single source (name not known here).
+    foreach ($l in [System.IO.File]::ReadAllLines((Join-Path $ROOT $SCAN_REF))) {
+        if ($l -match '^([a-z][A-Za-z0-9_]*)\(\)[ \t]*\{') { return $Matches[1] }
+    }
+    return ''
+}
+function WfOutPath([string]$path) {
+    # -> the build-output path DECLARED on the upload step (empty when absent).
+    if (-not (Test-Path $path)) { return '' }
+    $seen = $false
+    foreach ($l in [System.IO.File]::ReadAllLines($path)) {
+        $t = $l.TrimStart()
+        if ($t.StartsWith('#', [System.StringComparison]::Ordinal)) { continue }
+        if (-not $seen) {
+            if ($l.IndexOf($UPLOAD_REF, [System.StringComparison]::Ordinal) -ge 0) { $seen = $true }
+            continue
+        }
+        if ($t -match '^path:[ \t]*(\S.*)$') { return $Matches[1] }
+    }
+    return ''
+}
+function WfStepBody([string]$path) {
+    # -> the lines of the step block that USES SCAN_REF (comment lines kept as-is).
+    # The block runs from the `- ` step that owns the line to the next `- ` at the same
+    # indent (or the first shallower line).
+    if (-not (Test-Path $path)) { return @() }
+    $lines = [System.IO.File]::ReadAllLines($path)
+    $hit = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i].TrimStart().StartsWith('#', [System.StringComparison]::Ordinal)) { continue }
+        if ($lines[$i].IndexOf($SCAN_REF, [System.StringComparison]::Ordinal) -ge 0) { $hit = $i; break }
+    }
+    if ($hit -lt 0) { return @() }
+    $st = -1
+    for ($i = $hit; $i -ge 0; $i--) {
+        if ($lines[$i].TrimStart().StartsWith('- ', [System.StringComparison]::Ordinal)) { $st = $i; break }
+    }
+    if ($st -lt 0) { return @() }
+    $ind = $lines[$st].Length - $lines[$st].TrimStart().Length
+    $out = New-Object System.Collections.ArrayList
+    [void]$out.Add($lines[$st])
+    for ($i = $st + 1; $i -lt $lines.Count; $i++) {
+        $l = $lines[$i]
+        if ($l.Trim().Length -eq 0) { [void]$out.Add($l); continue }
+        $u = $l.TrimStart()
+        $c = $l.Length - $u.Length
+        if ($c -lt $ind) { break }
+        if ($c -eq $ind -and $u.StartsWith('- ', [System.StringComparison]::Ordinal)) { break }
+        [void]$out.Add($u)
+    }
+    return $out.ToArray()
+}
+function SweepHasVar([string]$s, [string]$v) {
+    # `$v` as a VARIABLE REFERENCE -- an identifier char right after it means another name
+    # (`$t` matching inside `$terms`).
+    $i = $s.IndexOf('$' + $v, [System.StringComparison]::Ordinal)
+    while ($i -ge 0) {
+        $j = $i + 1 + $v.Length
+        if ($j -ge $s.Length) { return $true }
+        if ($s[$j] -notmatch '[A-Za-z0-9_]') { return $true }
+        $i = $s.IndexOf('$' + $v, $i + 1, [System.StringComparison]::Ordinal)
+    }
+    return $false
+}
+function WfSweeps([string]$path) {
+    # -> 'ok' when that step sweeps the DECLARED output path with the DERIVED terms.
+    $bodyRaw = @(WfStepBody $path)
+    if ($bodyRaw.Count -eq 0) { return 'no' }
+    $out = WfOutPath $path
+    if ($out -eq '') { return 'no' }
+    $fn = SweepFn
+    if ($fn -eq '') { return 'no' }
+    $body = New-Object System.Collections.ArrayList
+    foreach ($l in $bodyRaw) {
+        $t = $l.TrimStart()
+        if ($t.StartsWith('#', [System.StringComparison]::Ordinal)) { continue }
+        [void]$body.Add($t)
+    }
+    $var = ''
+    foreach ($l in $body) {
+        $p = $l.IndexOf('$(' + $fn, [System.StringComparison]::Ordinal)
+        if ($p -lt 0) { continue }
+        $q = $l.IndexOf('=', [System.StringComparison]::Ordinal)
+        if ($q -gt 0 -and $q -lt $p) { $var = $l.Substring(0, $q); break }
+    }
+    if ($var -eq '') { return 'no' }
+    $lv = ''
+    foreach ($l in $body) {
+        if (-not $l.StartsWith('for ', [System.StringComparison]::Ordinal)) { continue }
+        if (-not (SweepHasVar $l $var)) { continue }
+        $f = $l -split ' +'
+        if ($f.Count -ge 2) { $lv = $f[1]; break }
+    }
+    if ($lv -eq '') { return 'no' }
+    foreach ($l in $body) {
+        if ((SweepHasVar $l $lv) -and $l.IndexOf($out, [System.StringComparison]::Ordinal) -ge 0) { return 'ok' }
+    }
+    return 'no'
+}
+function WfSweepFixture([string]$mode) {
+    # comment: comment the detection loop out / path: change ONLY the declared output path.
+    $f = Join-Path $sbx ('pages-sweep-' + $mode + '.yml')
+    $out = New-Object System.Collections.ArrayList
+    $loop = 0; $seen = 0
+    foreach ($l in [System.IO.File]::ReadAllLines($PAGES_WF)) {
+        $t = $l.TrimStart()
+        if ($mode -eq 'comment') {
+            if ($loop -eq 0 -and $t.StartsWith('for ', [System.StringComparison]::Ordinal)) { $loop = 1 }
+            if ($loop -eq 1) {
+                [void]$out.Add('#' + $l)
+                if ($t.StartsWith('done', [System.StringComparison]::Ordinal)) { $loop = 2 }
+                continue
+            }
+        }
+        if ($mode -eq 'path') {
+            if ($seen -eq 0 -and $l.IndexOf($UPLOAD_REF, [System.StringComparison]::Ordinal) -ge 0) { $seen = 1 }
+            elseif ($seen -eq 1 -and $t -match '^path:[ \t]*\S') { [void]$out.Add($l + '-zzz'); $seen = 2; continue }
+        }
+        [void]$out.Add($l)
+    }
+    [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+    return $f
+}
+# Two extraction positive-controls -- either one empty and the main check below reddens LOUD.
+Chk "ci-sweep1: build-output path extraction positive-control" $(if ((WfOutPath $PAGES_WF) -ne '') { 'ok' } else { 'no' }) 'ok'
+Chk "ci-sweep2: derivation function name extraction positive-control" $(if ((SweepFn) -ne '') { 'ok' } else { 'no' }) 'ok'
+# MAIN CHECK -- does the scan step really sweep the declared output with the derived terms?
+Chk "ci-sweep3: the scan step sweeps the declared build output" (WfSweeps $PAGES_WF) 'ok'
+# Fixture control -- the REAL verdict runs on the copy (M46). THIS is the copy that used to pass.
+# THE BASELINE IS A STRUCTURAL CONSTANT `no`: this copy has no loop at all, so the verdict cannot
+# come out any other way (the convention's `control-form:` exception, form (2)). Whatever state
+# the real workflow is in, this value does not move -- hence an absolute, not a delta.
+Chk "ci-sweep4: control -- commenting out the detection loop is caught" (WfSweeps (WfSweepFixture 'comment')) 'no'
+# Wiring control -- change the DECLARATION and the target follows. A hardcoded path greens here.
+# THE BASELINE IS A STRUCTURAL CONSTANT `no`: this copy's declared path is a string the step body
+# does not contain, so no other verdict is reachable (same exception form), independent of the real tree.
+Chk "ci-sweep5: control -- the target follows the declared output path" (WfSweeps (WfSweepFixture 'path')) 'no'
+# False-positive direction -- an unrelated step must not CHANGE THE VERDICT. Asked as a DELTA
+# (the convention's `control-reads-delta`, applied to a NON-NUMERIC verdict). As an absolute
+# (`= ok`) this control co-reddens whenever the main check reddens, so the main check could
+# never own a solo row in the reversal table -- and Part V would name it. What is bitten here
+# is one thing: does something unrelated move the verdict.
+Chk "ci-sweep6: an unrelated step does not change the verdict" $(if ((WfSweeps (WfFixture 'noise')) -ceq (WfSweeps $PAGES_WF)) { 'same' } else { 'differs' }) 'same'
+
 # === Workflow block-scalar integrity (M57 -- opened by measurement during impl) =========
 # A LITERAL newline inside a command argument in a `run: |` block forces the next line to
 # start at COLUMN 0. That ends the YAML block scalar right there and the WHOLE workflow

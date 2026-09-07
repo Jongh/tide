@@ -3129,16 +3129,23 @@ chk "P3: 완료 기준 번호 추출 positive-control(>0)" "$([ "$(crit_seen "$C
 chk "P4: 본 검사 - 번호 집합이 어긋난 마일스톤 0개" "$(crit_mismatch "$CRITN")" "0"
 chk "P5: 본 검사 - 선언 집합 밖 판정 값 0개" "$(crit_bad)" "0"
 # 픽스처 통제 — **실제 판정을 픽스처에 건다**(M46 판례). 네 방향을 각각 깬다.
-chk "P6: 픽스처 통제 - 행이 빠지면 잡는다" "$(crit_mismatch "$CRITN" "$(crit_fixture drop)")" "1"
-chk "P7: 픽스처 통제 - 없는 번호를 적으면 잡는다" "$(crit_mismatch "$CRITN" "$(crit_fixture ghost)")" "1"
-chk "P8: 픽스처 통제 - 집합 밖 판정 값을 잡는다" "$(crit_bad "$(crit_fixture outset)")" "1"
-chk "P9: 픽스처 통제 - 판정 칸을 비워도 잡는다" "$(crit_bad "$(crit_fixture blank)")" "1"
-chk "P10: 음성 통제 - 손대지 않은 사본은 붉지 않는다" "$(crit_mismatch "$CRITN" "$(crit_fixture clean)")" "0"
+# **차이로 묻는다**(M61 — 규약의 `control-reads-delta:`). 앞선 판본은 절대값(`1`·`0`)을 물어
+# **기준선이 0이라고 가정**했다. 기준선은 0이 아닐 수 있고(대조 대상 보고서가 실제로 어긋난 동안이
+# 그 상태다) 그때 통제는 **자기가 무는 반응이 아니라 기준선을 재게 된다** — 실측으로 `P6`·`P7`이
+# `got 2, want 1`, `P10`이 `got 1, want 0`으로 붉었다(M60 반증 ⑴ · 이 사이클이 재현). `P8`·`P9`·
+# `P12`도 같은 부류임을 실측으로 확인했다(판정 칸 하나를 집합 밖 값으로 두면 `got 2, want 1` ·
+# `got 1, want 0`). **판정 함수를 무력화하면 차이가 0이 되어 여전히 붉는다** — 무는 힘은 그대로다.
+chk "P6: 픽스처 통제 - 행이 빠지면 잡는다" "$(( $(crit_mismatch "$CRITN" "$(crit_fixture drop)") - $(crit_mismatch "$CRITN") ))" "1"
+chk "P7: 픽스처 통제 - 없는 번호를 적으면 잡는다" "$(( $(crit_mismatch "$CRITN" "$(crit_fixture ghost)") - $(crit_mismatch "$CRITN") ))" "1"
+chk "P8: 픽스처 통제 - 집합 밖 판정 값을 잡는다" "$(( $(crit_bad "$(crit_fixture outset)") - $(crit_bad) ))" "1"
+chk "P9: 픽스처 통제 - 판정 칸을 비워도 잡는다" "$(( $(crit_bad "$(crit_fixture blank)") - $(crit_bad) ))" "1"
+chk "P10: 음성 통제 - 손대지 않은 사본은 붉지 않는다" "$(( $(crit_mismatch "$CRITN" "$(crit_fixture clean)") - $(crit_mismatch "$CRITN") ))" "0"
 # (P11) **소급 경계가 실제로 거르는가.** 시작 번호를 1로 낮추면 이 절이 없던 시절의 보고서가
 # 대상에 들어와 어긋난다 — 경계가 장식이 아니라는 것을 이 케이스가 확인한다.
 chk "P11: 경계 통제 - 시작 번호를 1로 낮추면 어긋난다(>0)" "$([ "$(crit_mismatch 1)" -gt 0 ] && echo ok || echo no)" "ok"
 # (P12) **오탐 방향.** 집합 안 다른 값으로 바꾸는 것은 정상이다 — 여기서 붉으면 과하게 무는 것이다.
-chk "P12: 오탐 방향 - 집합 안 다른 값은 통과" "$(crit_bad "$(crit_fixture swap)")" "0"
+# 여기도 차이다 — 기준선이 0이 아니면 절대값은 오탐 방향을 판정하지 못한다.
+chk "P12: 오탐 방향 - 집합 안 다른 값은 통과" "$(( $(crit_bad "$(crit_fixture swap)") - $(crit_bad) ))" "0"
 # (P13~P15) 소비자의 배선. 스킬·템플릿이 가리키되 **규칙을 다시 열거하지 않는다**.
 chk "P13: impl 스킬이 규약 절을 가리킨다" "$([ "$(grep -cF -- '완료 기준 대조 (impl)' "$ROOT/skills/impl/SKILL.md")" -ge 1 ] && echo ok || echo no)" "ok"
 chk "P14: impl 템플릿이 그 절을 갖는다(줄 전체 일치, 정확히 1)" "$(crit_head_lines "$ROOT/skills/impl/template.md")" "1"
@@ -3416,6 +3423,436 @@ chk "U6: 대조에서 제외된 마일스톤 0개" "$(skipped_n)" "0"
 # 사이클이 정확히 그 상태다) 절대값으로 물으면 그때 통제가 기준선을 재게 된다.
 chk "U7: 픽스처 통제 - 제외가 하나 늘면 수도 하나 는다" "$(( $(skipped_n 9999) - $(skipped_n) ))" "1"
 
+
+# --- Part V: 되돌림 표를 기계가 읽는다 (M61) ---------------------------------
+# 체크리스트의 **되돌림 실측**은 *"각 케이스를 개별로 되돌려 그 케이스가 붉어지는 것을 확인한다"* 를
+# 요구하는데, **그것이 지켜졌는지를 아무도 묻지 않았다.** M60의 `T7`이 실례다 — 문서에는 배선을
+# 검사한다고 적혀 있었으나 구현은 토큰 존재만 보아 `T2`보다 엄격히 약했고, 되돌림 여덟 행에서
+# **단독으로 붉은 적이 없었다**(항상 `T2`·`T3`과 함께만). **표를 읽을 수 있었다면 기계가 지목했을
+# 것이다.** 그 표를 **선언 형식**으로 만들고 여기서 읽는다. 형식의 단일 원본은 규약이다.
+RVB_KEY='reversal-block:'
+RVC_KEY='reversal-columns:'
+RVS_KEY='reversal-sep:'
+RVN_KEY='reversal-since:'
+RVA_KEY='mutation-axes:'
+# **선언을 잃었을 때의 기본값을 두 사본에 못박는다**(`criteria-since:`와 같은 기전). 그냥 두면 빈
+# 마커가 **모든 줄**에 맞아 창이 통째로 열리고, 빈 구분자는 쪼개기를 무한 루프로 만든다 — 같은
+# 트리에서 두 사본이 다른 값을 낸다. 나타나지 않는 토큰으로 두면 **행이 0이 되어 `V6`이 붉는다.**
+# **양 사본이 같은 형태로 폴백해야 한다**(M61 리뷰 권장 2): ps1 사본이 `null`에서 죽으면 그 트리는
+# sh에서 「케이스를 이름으로 지목」인데 ps1에서 「완주 못 함」이 된다 — 같은 트리, 다른 형태다.
+RVBLK=$(decl_tail "$CONV" "$RVB_KEY" | LC_ALL=C awk '{ print $1 }')
+[ -n "$RVBLK" ] || RVBLK=zzz-reversal-block-unset
+RVSEP=$(decl_tail "$CONV" "$RVS_KEY" | LC_ALL=C awk '{ print $1 }')
+[ -n "$RVSEP" ] || RVSEP=zzz-reversal-sep-unset
+RVCOL=$(decl_tail "$CONV" "$RVC_KEY" | LC_ALL=C awk '{ $1 = $1; print }')
+# 축 값 집합은 `mutation-axes:` 선언에서 온다 — 러너는 축의 **이름을 알지 않는다**. 선언에서
+# 백틱을 걷어낸 것이 곧 집합이고, 비면 아래 축 판정이 **모든 칸을 집합 밖으로 세어 붉는다**.
+RVAX=$(decl_tail "$CONV" "$RVA_KEY" | LC_ALL=C tr -d '`' | LC_ALL=C awk '{ $1 = $1; print }')
+RVN=999999
+_rvs0=$(decl_tail "$CONV" "$RVN_KEY" | LC_ALL=C awk '{ print $1 }')
+case "$_rvs0" in
+    M*) _rvs1=${_rvs0#M}
+        case "$_rvs1" in
+            "" | *[!0-9]*) ;;
+            *) RVN=$_rvs1 ;;
+        esac ;;
+esac
+rv_col() { # <토큰> → 선언된 열 순서에서 그 열의 1-기반 위치 (없으면 0)
+    printf '%s\n' "$RVCOL" | LC_ALL=C awk -v t="$1" '{ for (i = 1; i <= NF; i++) if ($i == t) { print i; exit } ; print 0; exit }'
+}
+rv_targets() { # <시작 번호> → 대상 마일스톤 번호 (그 번호 이상 + impl 보고서 실재)
+    for _rm0 in "$ROOT"/docs/milestones/M*.md; do
+        _rn0=$(basename "$_rm0" .md | sed 's/^M//')
+        [ "$_rn0" -ge "$1" ] || continue
+        [ -f "$ROOT/docs/reports/M$_rn0-impl.md" ] || continue
+        echo "$_rn0"
+    done
+}
+rv_rep() { # <번호> [사본] → 그 번호가 대상 사본이면 사본을, 아니면 실물을
+    if [ -n "${2-}" ] && [ "$1" = "$RVN" ]; then printf '%s' "$2"
+    else printf '%s' "$ROOT/docs/reports/M$1-impl.md"; fi
+}
+rv_colcells() { # <보고서> <열 토큰> [마커 이름] → 마커 구획 표에서 그 열의 칸(정규화) 한 줄씩
+    # 머리글 건너뛰기는 구조로 한다 — 창 안에서 구분선(`---`)을 본 **뒤의** 행만 데이터다.
+    # **창은 줄 전체 일치로 연다 — 언급은 마커가 아니다**(M61 impl 실측이 연 자리). `index()`로
+    # 넓히면 **보고서 산문이 마커 이름을 말하는 순간 창이 거기서 열려** 엉뚱한 표(완료 기준 대조)를
+    # 되돌림 행으로 읽는다. 실제로 이 사이클의 보고서가 근거 칸에서 마커를 인용해 그 상태가 됐고,
+    # 그때 `V6`이 **초록인 채** `V8`만 붉었다 — 즉 추출 positive-control이 **공허**했다. 같은 판례가
+    # `tests/site-includes`에도 있다(`--8<-- ` 접두가 있어야 진짜 섹션 마커다).
+    # **열은 이름으로 고르고 위치는 선언에서 온다** — 그래야 머리글을 한국어로 쓰면서 러너가 한글
+    # 리터럴을 갖지 않는다.
+    [ -f "$1" ] || return 0
+    _rvm=${3-}
+    [ -n "$_rvm" ] || _rvm=$RVBLK
+    LC_ALL=C awk -v cr="$(printf '\r')" -v s="<!-- $_rvm:start -->" -v e="<!-- $_rvm:end -->" -v ci="$(rv_col "$2")" '
+        { t = $0; if (length(t) > 0 && substr(t, length(t), 1) == cr) t = substr(t, 1, length(t) - 1) }
+        w != 1 && t == s { w = 1; sep = 0; next }
+        w == 1 && t == e { w = 0; next }
+        w == 1 && substr(t, 1, 1) == "|" {
+            if (sep == 0) { if (index(t, "---") > 0) sep = 1; next }
+            n = split(t, f, "|")
+            if (ci < 1 || n < ci + 2) next
+            a = f[ci + 1]
+            gsub(/[ \r*]/, "", a)
+            if (a == "") next
+            print a
+        }
+    ' "$1"
+}
+rv_rows() { # <보고서> [마커 이름] → `reddened` 칸(정규화) 한 줄씩
+    rv_colcells "$1" reddened "${2-}"
+}
+rv_main() { # <보고서> [마커 이름] → 블록 안 선언 줄이 든 「본 검사」 케이스 이름 한 줄씩
+    [ -f "$1" ] || return 0
+    _rvm1=${2-}
+    [ -n "$_rvm1" ] || _rvm1=$RVBLK
+    LC_ALL=C awk -v cr="$(printf '\r')" -v s="<!-- $_rvm1:start -->" -v e="<!-- $_rvm1:end -->" -v k="<!-- $_rvm1-main:" '
+        { t = $0; if (length(t) > 0 && substr(t, length(t), 1) == cr) t = substr(t, 1, length(t) - 1) }
+        w != 1 && t == s { w = 1; next }
+        w == 1 && t == e { w = 0; next }
+        w == 1 {
+            p = index(t, k)
+            if (p == 0) next
+            r = substr(t, p + length(k))
+            q = index(r, "-->")
+            if (q > 0) r = substr(r, 1, q - 1)
+            n = split(r, f, " ")
+            for (i = 1; i <= n; i++) if (f[i] != "") print f[i]
+            exit
+        }
+    ' "$1"
+}
+rv_solo() { # <칸 목록> <케이스 이름> → 그 케이스 **하나뿐인** 칸이 있으면 yes
+    # 구분자로 쪼개 **필드가 하나이고 그것이 그 케이스**인 칸을 찾는다. 여럿을 붉힌 행은 여기서
+    # 세지 않는다 — 그것이 `T7`이 여덟 행 내내 있던 자리이고, 이 절이 무는 것 자체다.
+    printf '%s\n' "$1" | LC_ALL=C awk -v sep="$RVSEP" -v c="$2" '
+        found == 0 {
+            n = 0; hit = 0; s = $0
+            while (1) {
+                p = index(s, sep)
+                if (p == 0) { u = s } else { u = substr(s, 1, p - 1) }
+                if (u != "") { n++; if (u == c) hit = 1 }
+                if (p == 0) break
+                s = substr(s, p + length(sep))
+            }
+            if (n == 1 && hit == 1) found = 1
+        }
+        END { print (found == 1) ? "yes" : "no" }
+    '
+}
+rv_lonely() { # [사본] [마커 이름] → 단독 행이 없는 「본 검사」 케이스 수
+    _rvl=0
+    for _rn1 in $(rv_targets "$RVN"); do
+        _rrep=$(rv_rep "$_rn1" "${1-}")
+        _rmain=$(rv_main "$_rrep" "${2-}")
+        [ -n "$_rmain" ] || continue
+        _rrows=$(rv_rows "$_rrep" "${2-}")
+        for _rc in $_rmain; do
+            [ "$(rv_solo "$_rrows" "$_rc")" = yes ] || _rvl=$((_rvl + 1))
+        done
+    done
+    echo "$_rvl"
+}
+rv_rows_n() { # [사본] [마커 이름] → 대상 전체의 되돌림 행 수
+    _rvr=0
+    for _rn2 in $(rv_targets "$RVN"); do
+        _rvr=$((_rvr + $(rv_rows "$(rv_rep "$_rn2" "${1-}")" "${2-}" | grep -c .)))
+    done
+    echo "$_rvr"
+}
+rv_main_n() { # → 대상 전체의 선언된 「본 검사」 케이스 수
+    for _rn3 in $(rv_targets "$RVN"); do rv_main "$ROOT/docs/reports/M$_rn3-impl.md"; done | grep -c .
+}
+rv_unread() { # <보고서> → 단독 판정이 **읽을 수 없는** 보고서면 1 (행이 0이거나 목록이 비었다)
+    # **세는 침묵과 건너뛰는 침묵을 같은 집합으로 둔다**(M61 리뷰 라운드 1의 차단). 앞선 판본은
+    # `rv_lonely`가 **`-main` 줄이 빈 것**을 건너뛰면서 여기서는 **행이 0인 것**만 셌다 — 두 집합이
+    # 어긋나 「표는 있고 `-main` 줄만 없는 보고서」가 **차집합에 그대로 남았다.** 조건을 합친다.
+    [ "$(rv_rows "$1" | grep -c .)" -gt 0 ] || { echo 1; return; }
+    [ -n "$(rv_main "$1")" ] || { echo 1; return; }
+    echo 0
+}
+rv_noblock() { # <시작 번호> [추가 보고서 경로] → 단독 판정이 읽지 못하는 보고서 수
+    # `rv_lonely`가 그런 보고서를 **건너뛰므로**(그래야 작업 중 사이클이 늘 붉지 않는다) 그 침묵을
+    # 여기서 센다 — `criteria-since:` 쪽의 `U6`와 **같은 형태**다.
+    _rvb=0
+    for _rn4 in $(rv_targets "$1"); do
+        _rvb=$((_rvb + $(rv_unread "$ROOT/docs/reports/M$_rn4-impl.md")))
+    done
+    if [ -n "${2-}" ]; then
+        _rvb=$((_rvb + $(rv_unread "$2")))
+    fi
+    echo "$_rvb"
+}
+rv_mainbad() { # <보고서> [마커 이름] → 목록 선언이 **규정된 한 줄의 형태**가 아니면 1
+    # **부정 검사를 더하지 않고 한 줄의 형태를 통째로 단언한다**(M61 리뷰 라운드 4의 차단). 이 자리는
+    # 다섯 라운드에 걸쳐 **같은 줄의 변종**으로 다섯 번 열렸다 — ⑴ 블록 부재 ⑵ 두 침묵의 차집합
+    # ⑶ 줄 복제 ⑷ 줄 접기 ⑸ **닫는 태그 뒤에 남은 이름**. 매번 처방이 **금지 조건을 하나 더하는**
+    # 형태였고 그래서 다음 변종이 남았다. 마지막 변종의 실측이 그것을 못박는다: 마지막 이름을
+    # `-->` **뒤로** 옮기면 그 줄은 「닫힌 선언」이라 종전 판정이 통과하는데, `rv_main`은 `-->`에서
+    # 끊으므로 그 이름은 **단독 행 판정의 대상에서 사라지고 `V8`이 거짓 초록**이 됐다(345/0 전 축 초록).
+    # **형태를 통째로 물으면 넷이 한 판정에 걸리고, 형태를 벗어나는 다음 변종도 그 순간 걸린다.**
+    #
+    # **규정**(규약이 단일 원본): 창 안에 목록 줄은 **정확히 하나**이고, 그 줄은 앞뒤 공백을 뺀
+    # 나머지가 **키로 시작해 `-->`로 끝나며** 그 사이는 **ASCII 영숫자·하이픈 이름을 공백으로 가른
+    # 목록**뿐이다(빈 목록도 형태로는 유효하다 — 비어 있다는 사실은 `rv_unread`가 따로 센다).
+    # **이름 규칙을 상수 정규식으로 둔다** — 마커 이름은 고정 문자열 비교로만 쓰므로 두 사본이
+    # 정규식 방언(POSIX ERE ↔ .NET)으로 갈릴 자리가 없다.
+    # **0줄은 `rv_unread`가 이미 세므로** 여기서는 세지 않는다(두 판정이 같은 상태를 두 번 세지 않는다).
+    # 이 판정이 곧 **`nosolo` 픽스처가 기대는 전제의 집행**이다 — 그 픽스처는 `-main` 줄에 `-->`가
+    # 같은 줄에 있을 때만 동작하고, 없으면 **무동작이 되어 통제가 붉는데 깨진 것은 통제의 대상이
+    # 아니다**(M61 리뷰 라운드 3의 권장 3). 전제를 규약이 선언하고 여기서 문다.
+    [ -f "$1" ] || { echo 0; return; }
+    _rvml=${2-}
+    [ -n "$_rvml" ] || _rvml=$RVBLK
+    LC_ALL=C awk -v cr="$(printf '\r')" -v s="<!-- $_rvml:start -->" -v e="<!-- $_rvml:end -->" -v k="<!-- $_rvml-main:" '
+        { t = $0; if (length(t) > 0 && substr(t, length(t), 1) == cr) t = substr(t, 1, length(t) - 1) }
+        w != 1 && t == s { w = 1; next }
+        w == 1 && t == e { w = 0; next }
+        w == 1 {
+            p = index(t, k)
+            if (p == 0) next
+            n++
+            u = t
+            gsub(/^[ \t]+/, "", u); gsub(/[ \t]+$/, "", u)
+            if (substr(u, 1, length(k)) != k) { bad++; next }
+            if (length(u) < length(k) + 3 || substr(u, length(u) - 2) != "-->") { bad++; next }
+            mid = substr(u, length(k) + 1, length(u) - length(k) - 3)
+            if (mid !~ /^([ \t]+[A-Za-z0-9-]+)*[ \t]*$/) bad++
+        }
+        END { print (n >= 2 || bad > 0) ? 1 : 0 }
+    ' "$1"
+}
+rv_mainbadn() { # <시작 번호> [추가 보고서] → 목록 선언의 형태가 깨진 대상 보고서 수
+    _rvmm=0
+    for _rn7 in $(rv_targets "$1"); do
+        _rvmm=$((_rvmm + $(rv_mainbad "$ROOT/docs/reports/M$_rn7-impl.md")))
+    done
+    if [ -n "${2-}" ]; then
+        _rvmm=$((_rvmm + $(rv_mainbad "$2")))
+    fi
+    echo "$_rvmm"
+}
+rv_axisbad() { # [사본] → 축 칸이 **선언 집합 밖**이거나 **비어 있는** 수
+    # 축을 열로 두고 값 집합을 `mutation-axes:`에서 읽는다. 열만 만들고 값을 안 재면 그것이
+    # **죽은 선언**이고, 이 사이클이 `reversal-sep:`에서 정확히 그 지적을 받았다(M61 리뷰 권장 5).
+    _rab=0
+    for _rn5 in $(rv_targets "$RVN"); do
+        _rrep2=$(rv_rep "$_rn5" "${1-}")
+        _nrow=$(rv_colcells "$_rrep2" row | grep -c .)
+        _nax=0
+        for _rv in $(rv_colcells "$_rrep2" axis); do
+            _nax=$((_nax + 1))
+            case " $RVAX " in
+                *" $_rv "*) ;;
+                *) _rab=$((_rab + 1)) ;;
+            esac
+        done
+        _rab=$((_rab + _nrow - _nax))
+    done
+    echo "$_rab"
+}
+rv_cellbad() { # [사본] [구분자] → 붉은 케이스 칸의 **빈 이름·중복 이름** 수
+    # **구분자 선언을 실제로 쓰는 자리**다(M61 리뷰 권장 5). 단독 판정만으로는 구분자가 무엇이든
+    # 결과가 같아 선언이 **죽어 있었다** — 여기서는 다른 구분자를 주면 `A<sep>A`를 **못 쪼개** 중복을
+    # 놓치므로 `V23`이 그 배선을 확인한다.
+    _rcb=0
+    _rsep=${2-}
+    [ -n "$_rsep" ] || _rsep=$RVSEP
+    for _rn6 in $(rv_targets "$RVN"); do
+        _rrep3=$(rv_rep "$_rn6" "${1-}")
+        _rcb=$((_rcb + $(rv_colcells "$_rrep3" reddened | LC_ALL=C awk -v sep="$_rsep" '
+            {
+                split("", seen); bad = 0; s = $0; hassep = (index(s, sep) > 0)
+                while (1) {
+                    p = index(s, sep)
+                    if (p == 0) { u = s } else { u = substr(s, 1, p - 1) }
+                    if (u == "") { if (hassep) bad++ }
+                    else { if (u in seen) bad++; seen[u] = 1 }
+                    if (p == 0) break
+                    s = substr(s, p + length(sep))
+                }
+                t += bad
+            }
+            END { print t + 0 }
+        ')))
+    done
+    echo "$_rcb"
+}
+rv_tpl_markers() { # → impl 템플릿이 마커 쌍과 **창 안의 규정된 목록 줄**을 가지면 ok
+    # **`-main` 줄도 센다**(M61 리뷰 라운드 1) — 마커 쌍만 세면 템플릿이 그 줄을 잃어도 초록이고,
+    # 그러면 다음 보고서가 목록을 갖지 못한 채 나온다(위 `rv_unread`가 무는 상태로 직행한다).
+    # **세는 자리를 창 안으로 좁히고 형태까지 묻는다**(M61 리뷰 라운드 4의 기록 — impl 후속 7·9가
+    # 같은 함수의 같은 사각이었다). 종전에는 ⑴ 그 줄이 **블록 밖으로 나가도** 초록이었고 ⑵ **접혀
+    # 있어도** 초록이었다 — 실물 보고서 쪽은 창 안만 읽고 형태를 무는데 **템플릿만 헐거워서**,
+    # 다음 사이클이 그 형태를 그대로 복사해 나오고 나서야 `V25`가 잡았다(한 겹 늦다).
+    # 형태 판정은 `rv_mainbad`를 그대로 쓴다 — 술어가 둘로 갈리면 그 자체가 다음 변종의 자리다.
+    _rvt="$ROOT/skills/impl/template.md"
+    [ -f "$_rvt" ] || { echo no; return; }
+    [ "$(rv_mainbad "$_rvt")" = 0 ] || { echo no; return; }
+    LC_ALL=C awk -v cr="$(printf '\r')" -v s="<!-- $RVBLK:start -->" -v e="<!-- $RVBLK:end -->" -v k="<!-- $RVBLK-main:" '
+        { t = $0; if (length(t) > 0 && substr(t, length(t), 1) == cr) t = substr(t, 1, length(t) - 1) }
+        t == s { a++ }
+        t == e { b++ }
+        w != 1 && t == s { w = 1; next }
+        w == 1 && t == e { w = 0; next }
+        w == 1 && index(t, k) > 0 { c++ }
+        END { print (a == 1 && b == 1 && c == 1) ? "ok" : "no" }
+    ' "$_rvt"
+}
+rv_fixture() { # <모드> → 대상 보고서 사본 (clean|nosolo|nomarker|nomain|dupmain|foldmain|aftermain|mention|dupname|badaxis)
+    # **원본이 없으면 빈 사본을 낸다**(M61 리뷰 라운드 1의 권장 2). `reversal-since:` 선언을 잃으면
+    # 시작 번호가 폴백 값이 되고 그 값이 **경로로 역참조**되는데, ps1 사본은 그때 파일을 열다
+    # **중단**했고 sh 사본은 완주했다 — 같은 트리에서 두 사본이 **다른 형태**로 실패했다.
+    # 부재를 양쪽이 같은 방식으로 흡수하고, 대상이 0이 되는 사실은 `V6`·`V7`이 붉혀 드러낸다.
+    _rvf="$SBX/rev-$1.md"
+    _rvsrc="$ROOT/docs/reports/M$RVN-impl.md"
+    if [ ! -f "$_rvsrc" ]; then : > "$_rvf"; printf '%s' "$_rvf"; return; fi
+    LC_ALL=C awk -v mode="$1" -v cr="$(printf '\r')" -v s="<!-- $RVBLK:start -->" -v e="<!-- $RVBLK:end -->" -v k="<!-- $RVBLK-main:" -v sep="$RVSEP" -v ci="$(rv_col reddened)" -v ai="$(rv_col axis)" '
+        { t = $0; if (length(t) > 0 && substr(t, length(t), 1) == cr) t = substr(t, 1, length(t) - 1) }
+        mode == "nomarker" && (t == s || t == e) { next }
+        # 산문이 마커를 **언급**하는 줄을 표 앞에 심는다 — 창이 부분 문자열로 열리면 여기서 열려
+        # 아래 다른 표가 되돌림 행으로 읽힌다. 줄 전체 일치면 아무 일도 일어나지 않는다.
+        mode == "mention" && done1 == 0 && substr(t, 1, 3) == "## " { done1 = 1; print "zzz-mention " s " in prose"; print t; next }
+        mode == "nomain" && index(t, k) > 0 { next }
+        # 목록 줄을 **하나 더** 만든다 — 사람 눈에는 선언한 것으로 보이는데 판정은 첫 줄에서 끝난다.
+        mode == "dupmain" && index(t, k) > 0 { print t; print t; next }
+        # 목록 줄을 **두 줄로 접는다** — 첫 줄에 키가 있고 `-->`가 **없다**. 키가 든 줄의 수는
+        # 그대로 **1**이라 「줄 수」로 묻던 판정은 이 상태를 보지 못했다(라운드 3의 차단).
+        mode == "foldmain" && index(t, k) > 0 {
+            p = index(t, "-->")
+            if (p > 1) { print substr(t, 1, p - 1); print "  zzz-folded -->"; next }
+        }
+        # 마지막 이름을 **닫는 태그 뒤로** 옮긴다 — 그 줄은 여전히 「닫힌 선언」이라 **닫힘만 묻던
+        # 판정은 통과**했고, 그 사이 그 이름은 `rv_main`의 시야에서 사라졌다(라운드 4의 차단).
+        mode == "aftermain" && index(t, k) > 0 {
+            p = index(t, "-->")
+            if (p > 1) { print substr(t, 1, p - 1) "--> zzz-after"; next }
+        }
+        mode == "nosolo" && index(t, k) > 0 {
+            p = index(t, "-->")
+            if (p > 1) { print substr(t, 1, p - 1) " zzz-nosolo -->"; next }
+        }
+        t == s { w = 1; sep0 = 0; print; next }
+        w == 1 && t == e { w = 0; print; next }
+        # **첫 데이터 행 하나만** 건드린다 — 판정이 그 한 행에서 갈리는지 보려는 것이다.
+        w == 1 && done2 == 0 && substr(t, 1, 1) == "|" && (mode == "dupname" || mode == "badaxis") {
+            if (sep0 == 0) { if (index(t, "---") > 0) sep0 = 1; print; next }
+            n = split(t, f, "|")
+            if (n >= 5) {
+                done2 = 1
+                if (mode == "dupname" && ci >= 1 && n >= ci + 2) f[ci + 1] = f[ci + 1] sep f[ci + 1]
+                if (mode == "badaxis" && ai >= 1 && n >= ai + 2) f[ai + 1] = " zzz-not-an-axis "
+                line = f[1]
+                for (i = 2; i <= n; i++) line = line "|" f[i]
+                print line; next
+            }
+        }
+        w == 1 && sep0 == 0 && substr(t, 1, 1) == "|" { if (index(t, "---") > 0) sep0 = 1; print; next }
+        { print t }
+    ' "$_rvsrc" > "$_rvf"
+    printf '%s' "$_rvf"
+}
+CF_KEY='control-form:'
+SITE_README="$ROOT/tests/site-includes/README.md"
+cf_name() { decl_tail "$CONV" "$CF_KEY" | LC_ALL=C awk '{ print $1; exit }'; }
+cf_defn() { # <병기어> → 규약에서 그 병기어를 **정의하는 줄**의 수
+    # **선언 값이 판정을 바꾸는 형태로 쓰인다**(M61 리뷰 라운드 3의 권장 2). 앞선 판본은 *"그
+    # 문자열이 README 어딘가에 있는가"* 만 물어, 값을 `control-reads-delta` → `control`로 **줄여도**
+    # `positive-control`에 **부분 일치**해 전 축이 초록이었다 — `reversal-sep:`가 `V21`~`V23`에서
+    # 파싱을 실제로 바꾸는 것과 동형이 아니었다. 그래서 대조를 **백틱 토큰**으로 좁히고, 값을 **키로
+    # 삼아 규약의 정의 줄을 찾는다**: 값이 달라지면 정의 줄이 없어 붉는다.
+    grep -cF "$(printf '**`%s`**' "$1")" "$CONV" 2>/dev/null | LC_ALL=C awk 'NR == 1 { print $1 + 0 }'
+}
+cf_restated() { # <병기어> → 그 병기어를 **백틱 토큰**으로 가진 재서술처의 수
+    # 재서술처는 **둘**이다(이 하니스 README + `tests/site-includes` README). 앞선 판본이 하나만
+    # 묶어, 다른 쪽에서 사라져도 아무것도 붉지 않았다(M61 리뷰의 미검증 잔여 리스크 2).
+    # `measure-order:`의 `U3`~`U5`가 재서술처 셋을 전부 묶은 것과 같은 형태로 맞춘다.
+    _cft=$(printf '`%s`' "$1")
+    _cfn=0
+    for _cff in "$DISC_README" "$SITE_README"; do
+        [ "$(has_token "$_cff" "$_cft")" = yes ] && _cfn=$((_cfn + 1))
+    done
+    echo "$_cfn"
+}
+chk "V1: control-form 선언 줄 정확히 1개" "$(decl_count "$CONV" "$CF_KEY")" "1"
+chk "V2: reversal-block 선언 줄 정확히 1개" "$(decl_count "$CONV" "$RVB_KEY")" "1"
+chk "V3: reversal-columns 선언 줄 정확히 1개" "$(decl_count "$CONV" "$RVC_KEY")" "1"
+chk "V4: reversal-sep 선언 줄 정확히 1개" "$(decl_count "$CONV" "$RVS_KEY")" "1"
+chk "V5: reversal-since 선언 줄 정확히 1개" "$(decl_count "$CONV" "$RVN_KEY")" "1"
+# (V6·V7) 추출 positive-control 둘 — 어느 하나가 비면 아래 본 검사가 **0 == 0**으로 공허 통과한다.
+chk "V6: 되돌림 행 추출 positive-control(>0)" "$([ "$(rv_rows_n)" -gt 0 ] && echo ok || echo no)" "ok"
+chk "V7: 본 검사 목록 추출 positive-control(>0)" "$([ "$(rv_main_n)" -gt 0 ] && echo ok || echo no)" "ok"
+# (V8) **본 검사.** 단독으로 붉는 행을 갖지 않는 「본 검사」 케이스가 있으면 그 수가 여기 드러난다.
+chk "V8: 본 검사 - 단독 행이 없는 본 검사 케이스 0개" "$(rv_lonely)" "0"
+# (V9) 픽스처 통제 — 노출이 공허하지 않다. **차이로 묻는다**(규약 `control-form:`).
+chk "V9: 픽스처 통제 - 단독 행 없는 케이스를 심으면 하나 는다" "$(( $(rv_lonely "$(rv_fixture nosolo)") - $(rv_lonely) ))" "1"
+# (V10) 픽스처 통제 — 마커를 지운 사본에서 창이 열리지 않는다. **사본 하나만 읽으므로 기준선이
+# 구조로 상수 0이다**(대상이 늘어도 이 사본에는 마커가 없다) — 규약 `control-form:`이 요구하는
+# 「왜 상수인가」의 같은 줄 서술이 이것이다.
+chk "V10: 픽스처 통제 - 마커를 지우면 그 사본의 행이 0이 된다" "$(rv_rows "$(rv_fixture nomarker)" | grep -c .)" "0"
+# (V11) 음성 통제 — 손대지 않은 사본은 기준선과 같다.
+chk "V11: 음성 통제 - 손대지 않은 사본은 기준선과 같다" "$(( $(rv_lonely "$(rv_fixture clean)") - $(rv_lonely) ))" "0"
+# (V12) 배선 — 마커 이름이 **규약에서 온다**. 러너에 박혀 있으면 다른 이름을 줘도 창이 열려 초록이다.
+# **다른 이름의 마커는 어느 보고서에도 없으므로 기준선이 구조로 상수 0이다**(같은 줄 서술).
+chk "V12: 배선 - 다른 마커 이름을 주면 창이 열리지 않는다" "$(rv_rows_n "" zzz-other-marker)" "0"
+# (V13) 소비자의 배선 — impl 템플릿이 마커 쌍을 갖는다. 없으면 다음 보고서가 형식을 잃는다.
+chk "V13: impl 템플릿이 마커 쌍과 목록 줄을 갖는다" "$(rv_tpl_markers)" "ok"
+# (V14) **소급 경계가 실제로 거르는가.** 시작 번호를 1로 낮추면 이 형식이 없던 시절의 보고서가
+# 대상에 들어와 블록 없는 보고서가 생긴다 — 경계가 장식이 아니라는 것을 이 케이스가 확인한다.
+chk "V14: 경계 통제 - 시작 번호를 1로 낮추면 블록 없는 보고서가 생긴다(>0)" "$([ "$(rv_noblock 1)" -gt 0 ] && echo ok || echo no)" "ok"
+# (V15) **오탐 방향** — 산문이 마커를 **언급**해도 창은 열리지 않는다(창은 줄 전체 일치다). 이 자리가
+# 열려 있던 동안 `V6`이 초록인 채 `V8`만 붉었다(이 사이클의 impl 실측). 여기서 붉으면 창이 다시
+# 부분 문자열로 넓어진 것이다.
+chk "V15: 오탐 방향 - 산문의 마커 언급은 창을 열지 않는다" "$(( $(rv_rows_n "$(rv_fixture mention)") - $(rv_rows_n) ))" "0"
+# (V16) **본 검사 — 조용한 제외 노출.** `rv_lonely`가 **행이 없거나 목록이 빈** 보고서를 건너뛰므로
+# 센다. 이 케이스가 없으면 **다음 사이클이 되돌림 절을 통째로 빠뜨려도 기계가 아무 말도 안 한다**
+# (M61 리뷰 차단 1의 실측: 그 상태에서 `V1`~`V15` 열다섯이 전부 초록이었다).
+chk "V16: 본 검사 - 단독 판정이 읽지 못하는 대상 보고서 0개" "$(rv_noblock "$RVN")" "0"
+# (V17·V18·V24) 픽스처·음성 통제 — 노출이 공허하지 않다. **차이로 묻는다**(규약 `control-form:`).
+# 두 픽스처가 **두 침묵을 각각** 만든다: 마커를 지우면 행이 0이고, `-main` 줄만 지우면 목록이 빈다.
+chk "V17: 픽스처 통제 - 마커 없는 보고서를 더하면 하나 는다" "$(( $(rv_noblock "$RVN" "$(rv_fixture nomarker)") - $(rv_noblock "$RVN") ))" "1"
+chk "V24: 픽스처 통제 - 목록 줄만 없는 보고서를 더해도 하나 는다" "$(( $(rv_noblock "$RVN" "$(rv_fixture nomain)") - $(rv_noblock "$RVN") ))" "1"
+chk "V18: 음성 통제 - 손대지 않은 사본을 더해도 늘지 않는다" "$(( $(rv_noblock "$RVN" "$(rv_fixture clean)") - $(rv_noblock "$RVN") ))" "0"
+# (V25) **본 검사 — 목록 선언의 범위.** `rv_main`이 첫 매치에서 끝나고 `-->`가 없으면 **그 줄에 있는
+# 이름만** 반환하므로, 복제된 둘째 줄도 **접힌 뒷줄**도 판정 대상에서 통째로 빠진다. 라운드 3은 그
+# 중 **복제**만 물었고, 정작 반환이 트리거로 적은 **줄 접기**가 그대로 남아 `V8`이 거짓 초록이 됐다
+# (M61 리뷰 라운드 3의 차단). **닫힘을 물어 두 상태를 한 판정에 건다.**
+chk "V25: 본 검사 - 목록 선언이 규정된 한 줄의 형태가 아닌 대상 보고서 0개" "$(rv_mainbadn "$RVN")" "0"
+# (V26·V30·V33·V27) 픽스처·음성 통제 — 노출이 공허하지 않다. **차이로 묻는다**(규약 `control-form:`).
+# 픽스처 **셋**이 세 상태를 각각 만든다: 줄을 복제하는 쪽 · 한 줄을 **두 줄로 접는** 쪽 · 이름을
+# **닫는 태그 뒤로** 미는 쪽. 셋 다 사람 눈에는 선언한 것으로 보이고, 셋 다 **한 판정**에 걸린다.
+chk "V26: 픽스처 통제 - 목록 줄을 하나 더 만든 보고서를 더하면 하나 는다" "$(( $(rv_mainbadn "$RVN" "$(rv_fixture dupmain)") - $(rv_mainbadn "$RVN") ))" "1"
+chk "V30: 픽스처 통제 - 목록 줄을 두 줄로 접은 보고서를 더해도 하나 는다" "$(( $(rv_mainbadn "$RVN" "$(rv_fixture foldmain)") - $(rv_mainbadn "$RVN") ))" "1"
+chk "V33: 픽스처 통제 - 이름을 닫는 태그 뒤로 민 보고서를 더해도 하나 는다" "$(( $(rv_mainbadn "$RVN" "$(rv_fixture aftermain)") - $(rv_mainbadn "$RVN") ))" "1"
+chk "V27: 음성 통제 - 손대지 않은 사본을 더해도 늘지 않는다" "$(( $(rv_mainbadn "$RVN" "$(rv_fixture clean)") - $(rv_mainbadn "$RVN") ))" "0"
+# (V19) **본 검사 — 축 값의 집합 소속.** 되돌림의 방향은 둘(`mutation-axes:`)이고 표가 행마다 그것을
+# 적는다. 열만 만들고 값을 안 재면 **죽은 선언**이 된다 — 빈 칸도 집합 밖으로 센다.
+chk "V19: 본 검사 - 선언 집합 밖이거나 빈 축 값 0개" "$(rv_axisbad)" "0"
+# (V20) 픽스처 통제 — 차이로 묻는다.
+chk "V20: 픽스처 통제 - 집합 밖 축 값을 심으면 하나 는다" "$(( $(rv_axisbad "$(rv_fixture badaxis)") - $(rv_axisbad) ))" "1"
+# (V21) **본 검사 — 붉은 케이스 칸의 형식 무결성.** 빈 이름(`A;;B`·`A;`)과 중복 이름(`A;A`)은 표를
+# 읽을 수 없게 만든다. 단독 판정과 **독립**이다 — 여러 이름이 든 칸이 망가져도 단독 행은 멀쩡하다.
+chk "V21: 본 검사 - 붉은 케이스 칸의 빈 이름·중복 0개" "$(rv_cellbad)" "0"
+# (V22) 픽스처 통제 — 차이로 묻는다.
+chk "V22: 픽스처 통제 - 중복 이름을 심으면 하나 는다" "$(( $(rv_cellbad "$(rv_fixture dupname)") - $(rv_cellbad) ))" "1"
+# (V23) **배선 — 구분자가 규약에서 온다.** 다른 구분자를 주면 그 픽스처를 **못 쪼개** 중복을 놓친다.
+# 이 케이스가 없는 동안 `reversal-sep:`는 값을 바꿔도 전 축이 초록인 **죽은 선언**이었다(M61 리뷰
+# 권장 5). **픽스처 하나만 읽으므로 기준선이 구조로 상수 0이다**(같은 줄 서술).
+chk "V23: 배선 - 다른 구분자를 주면 그 픽스처를 못 잡는다" "$(rv_cellbad "$(rv_fixture dupname)" zzz-other-sep)" "0"
+# (V28·V29) **`control-form:`의 값이 판정에 쓰인다.** `V1`은 선언 **줄 수**만 세어, 값을 아무거나
+# 바꿔도 전 축이 초록이었다 — 같은 사이클이 `reversal-sep:`에 대해 *"선언은 판정에 실제로 쓰여야
+# 한다"* 를 규약에 적고도 다섯째 키에서 같은 결함을 반복했다(M61 리뷰 라운드 2의 권장 2).
+# 형태는 `measure-order:`의 `U2`~`U5`와 같다 — 꼬리에서 병기어를 뽑고 **재서술처가 그것을 갖는지**를 묻는다.
+# **다만 부분 문자열로는 부족하다**(M61 리뷰 라운드 3의 권장 2) — 값을 `control`로 **줄여도**
+# `positive-control`에 걸려 전 축이 초록이었다. 대조를 **백틱 토큰**으로 좁히고, 값을 **키로 삼아
+# 규약의 정의 줄**(`V31`)까지 묻는다. 그래야 값이 달라질 때 판정이 실제로 달라진다.
+chk "V28: control-form 병기어 추출 positive-control" "$([ -n "$(cf_name)" ] && echo ok || echo no)" "ok"
+chk "V29: 본 검사 - 재서술처 둘이 그 병기어를 백틱 토큰으로 갖는다" "$(cf_restated "$(cf_name)")" "2"
+chk "V31: 본 검사 - 규약이 그 병기어의 정의 줄을 정확히 하나 갖는다" "$(cf_defn "$(cf_name)")" "1"
+# (V32) **배선** — 재서술처 판정이 **주어진 병기어**를 실제로 쓴다. **인자로 준 토큰 하나만 읽고 그
+# 토큰은 어느 파일에도 없으므로 기준선이 구조로 상수 0이다**(규약 `control-form:`이 요구하는 같은
+# 줄 서술). 이 케이스가 없으면 `cf_restated`가 인자를 무시해도 `V29`가 초록이다.
+chk "V32: 배선 - 다른 병기어를 주면 재서술처가 0이다" "$(cf_restated zzz-other-form)" "0"
 
 chk "F1: README cases 선언 == 실제 케이스 수" "$(declared_cases)" "$((pass + fail + 1))"
 
