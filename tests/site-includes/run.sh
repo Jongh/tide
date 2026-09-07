@@ -220,6 +220,160 @@ for term in $TERMS; do
 done
 chk "ci-scan: no excluded-term literal in the workflow" "$wf_literal" "0"
 
+# --- 스캔 스텝의 실효성 (M61) -------------------------------------------------
+# 위 배선 여섯이 무는 것은 **스텝의 존재와 순서**뿐이다. 그래서 참조 줄만 남기고 **검출 루프를
+# 통째로 주석 처리해도 45/0 초록**이었다(M57 리뷰 사소 3 — 4사이클 미반영). 「분담해서 집행한다고
+# 적힌 것이 실제로는 아무도 하지 않는다」가 **그 사이클이 세운 집행 자신에게** 다시 생긴 형태다.
+# 여기서 무는 것은 **그 스텝이 산출물을 실제로 훑는가**이고, 최소 요구는 둘이 **한 스텝 안에 함께**
+# 있는 것이다 — ⑴ **빌드 출력 경로** ⑵ **도출한 용어로 훑는 반복**.
+# **경로 리터럴을 하드코딩하지 않는다** — 워크플로가 **업로드 스텝에 선언한 값**에서 읽는다.
+# 하드코딩하면 선언을 바꿔도 대상이 따라 움직이지 않아 검사가 조용히 낡는다(M60의
+# `source-eol-contract`가 `.gitattributes`에서 패턴을 읽는 것과 같은 형태).
+# **경계 — 이것은 형태를 묻지 「그 스텝이 CI에서 실제로 도는가」를 묻지 않는다.** 실행 확인은
+# `Deploy docs site` 런이 유일한 자리이며, 규약이 같은 경계를 적는다.
+sweep_fn() { # → 도출 단일 원본이 노출하는 첫 공개 함수 이름 (러너는 그 이름을 알지 않는다)
+    # **두 사본이 같은 방식으로 끊는다**(M61 리뷰의 미검증 잔여 리스크 1). 앞선 판본은 sh가
+    # **공백으로 분할한 첫 필드**에서 `()`를 뗐고 ps1은 **캡처 그룹**을 썼다 — 단일 원본을
+    # `excluded_terms(){` 처럼 **공백 없이** 적으면 sh만 `excluded_terms(){`를 내어 같은 트리에서
+    # 두 사본이 다른 이름을 갖는다. 여는 괄호 **앞까지**를 잘라 ps1의 캡처와 뜻을 맞춘다.
+    LC_ALL=C awk 'match($0, /^[a-z][A-Za-z0-9_]*\(\)[ \t]*\{/) { print substr($0, 1, index($0, "(") - 1); exit }' "$ROOT/$SCAN_REF"
+}
+wf_out_path() { # <파일> → 업로드 스텝이 **선언한** 빌드 산출물 경로 (없으면 빈 출력)
+    [ -f "$1" ] || return 0
+    LC_ALL=C awk -v up="$UPLOAD_REF" -v cr="$(printf '\r')" '
+        {
+            s = $0
+            if (length(s) > 0 && substr(s, length(s), 1) == cr) s = substr(s, 1, length(s) - 1)
+            t = s; sub(/^[ \t]+/, "", t)
+        }
+        substr(t, 1, 1) == "#" { next }
+        seen == 0 && index(s, up) > 0 { seen = 1; next }
+        seen == 1 && t ~ /^path:[ \t]*[^ \t]/ { sub(/^path:[ \t]*/, "", t); print t; exit }
+    ' "$1"
+}
+wf_step_body() { # <파일> → SCAN_REF를 **쓰는** 스텝 블록의 줄 (주석 줄은 남긴 채 그대로)
+    # 블록은 그 줄이 속한 `- ` 스텝에서 시작해 **같은 들여쓰기의 다음 `- `**(또는 더 얕은 줄) 앞까지다.
+    [ -f "$1" ] || return 0
+    LC_ALL=C awk -v scan="$SCAN_REF" -v cr="$(printf '\r')" '
+        {
+            s = $0
+            if (length(s) > 0 && substr(s, length(s), 1) == cr) s = substr(s, 1, length(s) - 1)
+            line[NR] = s
+        }
+        END {
+            hit = 0
+            for (i = 1; i <= NR; i++) {
+                t = line[i]; sub(/^[ \t]+/, "", t)
+                if (substr(t, 1, 1) == "#") continue
+                if (index(line[i], scan) > 0) { hit = i; break }
+            }
+            if (hit == 0) exit
+            st = 0
+            for (i = hit; i >= 1; i--) {
+                t = line[i]; sub(/^[ \t]+/, "", t)
+                if (substr(t, 1, 2) == "- ") { st = i; break }
+            }
+            if (st == 0) exit
+            ind = match(line[st], /[^ ]/) - 1
+            print line[st]
+            for (i = st + 1; i <= NR; i++) {
+                t = line[i]
+                if (t ~ /^[ \t]*$/) { print t; continue }
+                c = match(t, /[^ ]/) - 1
+                u = t; sub(/^[ \t]+/, "", u)
+                if (c < ind) break
+                if (c == ind && substr(u, 1, 2) == "- ") break
+                print t
+            }
+        }
+    ' "$1"
+}
+wf_sweeps() { # <파일> → 그 스텝이 **선언된 산출물 경로**를 **도출 용어로** 훑으면 ok
+    _wsb=$(wf_step_body "$1")
+    [ -n "$_wsb" ] || { echo no; return; }
+    _wso=$(wf_out_path "$1")
+    [ -n "$_wso" ] || { echo no; return; }
+    _wsn=$(sweep_fn)
+    [ -n "$_wsn" ] || { echo no; return; }
+    printf '%s\n' "$_wsb" | LC_ALL=C awk -v fn="$_wsn" -v out="$_wso" '
+        # `$v` 를 **변수 참조로** 본다 — 뒤에 식별자 문자가 붙으면 다른 변수다($t 가 $terms 에 맞는 것).
+        function hasvar(s, v,   p, c) {
+            p = index(s, "$" v)
+            while (p > 0) {
+                c = substr(s, p + length(v) + 1, 1)
+                if (c !~ /[A-Za-z0-9_]/) return 1
+                s = substr(s, p + 1)
+                p = index(s, "$" v)
+            }
+            return 0
+        }
+        { t = $0; sub(/^[ \t]+/, "", t) }
+        substr(t, 1, 1) == "#" { next }
+        { body[++nb] = t }
+        END {
+            var = ""
+            for (i = 1; i <= nb; i++) {
+                p = index(body[i], "$(" fn)
+                if (p > 0) {
+                    q = index(body[i], "=")
+                    if (q > 1 && q < p) { var = substr(body[i], 1, q - 1); break }
+                }
+            }
+            if (var == "") { print "no"; exit }
+            lv = ""
+            for (i = 1; i <= nb; i++) {
+                if (substr(body[i], 1, 4) != "for ") continue
+                if (!hasvar(body[i], var)) continue
+                n = split(body[i], f, " ")
+                if (n >= 2) { lv = f[2]; break }
+            }
+            if (lv == "") { print "no"; exit }
+            for (i = 1; i <= nb; i++) {
+                if (hasvar(body[i], lv) && index(body[i], out) > 0) { print "ok"; exit }
+            }
+            print "no"
+        }
+    '
+}
+wf_sweep_fixture() { # <모드> → 사본 (comment: 검출 루프 주석 처리 · path: 선언 경로만 바꾼다)
+    _wsx="$SBX/pages-sweep-$1.yml"
+    LC_ALL=C awk -v mode="$1" -v up="$UPLOAD_REF" '
+        { t = $0; sub(/^[ \t]+/, "", t) }
+        mode == "comment" {
+            if (loop == 0 && substr(t, 1, 4) == "for ") loop = 1
+            if (loop == 1) {
+                print "#" $0
+                if (substr(t, 1, 4) == "done") loop = 2
+                next
+            }
+        }
+        mode == "path" {
+            if (seen == 0 && index($0, up) > 0) seen = 1
+            else if (seen == 1 && t ~ /^path:[ \t]*[^ \t]/) { print $0 "-zzz"; seen = 2; next }
+        }
+        { print }
+    ' "$PAGES_WF" > "$_wsx"
+    printf '%s' "$_wsx"
+}
+# 추출 positive-control 둘 — 어느 하나가 비면 아래 본 검사가 `no`로 **크게 붉는다**.
+chk "ci-sweep1: build-output path extraction positive-control" "$([ -n "$(wf_out_path "$PAGES_WF")" ] && echo ok || echo no)" "ok"
+chk "ci-sweep2: derivation function name extraction positive-control" "$([ -n "$(sweep_fn)" ] && echo ok || echo no)" "ok"
+# **본 검사** — 스캔 스텝이 선언된 산출물 경로를 도출 용어로 실제로 훑는가.
+chk "ci-sweep3: the scan step sweeps the declared build output" "$(wf_sweeps "$PAGES_WF")" "ok"
+# 픽스처 통제 — **실제 판정을 사본에 건다**(M46 판례). 이 사본이 앞선 판본에서 초록이던 그것이다.
+# **기준선이 구조로 상수 `no`다** — 이 사본에는 반복이 아예 없어 판정이 다른 값을 낼 수 없다(규약
+# `control-form:`의 예외 형태 ⑵). 실물이 어떤 상태든 이 값은 변하지 않으므로 차이가 아니라 절대값이다.
+chk "ci-sweep4: control -- commenting out the detection loop is caught" "$(wf_sweeps "$(wf_sweep_fixture comment)")" "no"
+# 배선 통제 — **선언을 바꾸면 대상이 따라 움직인다.** 경로가 러너에 박혀 있으면 여기가 초록이 된다.
+# **기준선이 구조로 상수 `no`다** — 이 사본의 선언 경로는 스텝 본문에 없는 문자열이라 판정이 다른
+# 값을 낼 수 없다(같은 예외 형태). 실물의 상태와 무관하다.
+chk "ci-sweep5: control -- the target follows the declared output path" "$(wf_sweeps "$(wf_sweep_fixture path)")" "no"
+# 오탐 방향 — 무관한 스텝이 늘어도 **판정이 바뀌지 않는다**. **차이로 묻는다**(규약 `control-form:`
+# 의 `control-reads-delta`를 **비수치 판정에 적용**한 자리다). 절대값(`= ok`)으로 두면 본 검사가
+# 붉을 때 이 통제가 **함께 붉어** 본 검사가 되돌림 표에서 **단독 행을 가질 수 없다** — 그러면
+# `Part V`가 그 사실을 지목한다. 여기서 무는 것은 「무관한 것이 판정을 흔드는가」 하나다.
+chk "ci-sweep6: an unrelated step does not change the verdict" "$([ "$(wf_sweeps "$(wf_fixture noise)")" = "$(wf_sweeps "$PAGES_WF")" ] && echo same || echo differs)" "same"
+
 # --- 워크플로 블록 스칼라 무결성 (M57 impl 실측이 연 자리) --------------------
 # `run: |` 블록 안에서 명령 인자에 **개행을 리터럴로** 쓰면 그 줄이 **열 0**에서 시작해야 하고,
 # 그러면 블록 스칼라가 거기서 끊겨 **워크플로 전체가 YAML로 파싱되지 않는다.** 그 상태가 실제로

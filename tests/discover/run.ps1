@@ -3464,16 +3464,23 @@ try {
     Chk "P4: main check -- milestones whose number sets differ: 0" ([string](CritMismatch ([int]$critN) '')) '0'
     Chk "P5: main check -- verdicts outside the declared set: 0" ([string](CritBad '')) '0'
     # Fixture controls -- the REAL verdict runs against the fixture (M46 precedent), four directions.
-    Chk "P6: control -- a dropped row is caught" ([string](CritMismatch ([int]$critN) (CritFixture 'drop'))) '1'
-    Chk "P7: control -- a ghost number is caught" ([string](CritMismatch ([int]$critN) (CritFixture 'ghost'))) '1'
-    Chk "P8: control -- a verdict outside the set is caught" ([string](CritBad (CritFixture 'outset'))) '1'
-    Chk "P9: control -- a blanked verdict cell is caught too" ([string](CritBad (CritFixture 'blank'))) '1'
-    Chk "P10: negative control -- an untouched copy stays green" ([string](CritMismatch ([int]$critN) (CritFixture 'clean'))) '0'
+    # ASKED AS A DELTA (M61 -- the convention's `control-reads-delta:`). The earlier shape asked for
+    # absolute values (1 / 0) and thereby ASSUMED A ZERO BASELINE. The baseline need not be zero (it
+    # is not while a cross-checked report actually diverges), and then the control MEASURES THE
+    # BASELINE instead of the reaction it claims to measure -- observed as P6/P7 `got 2, want 1` and
+    # P10 `got 1, want 0` (M60 refutation (1), reproduced by this cycle). P8/P9/P12 were measured to
+    # be the same class. Neutering the verdict function drives the delta to 0, so these still redden.
+    Chk "P6: control -- a dropped row is caught" ([string]((CritMismatch ([int]$critN) (CritFixture 'drop')) - (CritMismatch ([int]$critN) ''))) '1'
+    Chk "P7: control -- a ghost number is caught" ([string]((CritMismatch ([int]$critN) (CritFixture 'ghost')) - (CritMismatch ([int]$critN) ''))) '1'
+    Chk "P8: control -- a verdict outside the set is caught" ([string]((CritBad (CritFixture 'outset')) - (CritBad ''))) '1'
+    Chk "P9: control -- a blanked verdict cell is caught too" ([string]((CritBad (CritFixture 'blank')) - (CritBad ''))) '1'
+    Chk "P10: negative control -- an untouched copy stays green" ([string]((CritMismatch ([int]$critN) (CritFixture 'clean')) - (CritMismatch ([int]$critN) ''))) '0'
     # (P11) DOES THE NON-RETROACTIVE BOUNDARY ACTUALLY FILTER? Lower the start number to 1 and the
     # reports written before this section existed come into scope and diverge.
     Chk "P11: boundary control -- lowering the start number to 1 diverges (>0)" $(if ((CritMismatch 1 '') -gt 0) { 'ok' } else { 'no' }) 'ok'
     # (P12) FALSE-POSITIVE DIRECTION. Swapping to another in-set value is normal prose.
-    Chk "P12: false-positive direction -- another in-set verdict passes" ([string](CritBad (CritFixture 'swap'))) '0'
+    # A delta here too -- with a non-zero baseline an absolute value cannot judge this direction.
+    Chk "P12: false-positive direction -- another in-set verdict passes" ([string]((CritBad (CritFixture 'swap')) - (CritBad ''))) '0'
     # (P13-P15) The consumer's wiring: point at the rule, do NOT re-enumerate it.
     Chk "P13: the impl skill points at the convention section" $(if ((CritFileHits 'skills/impl/SKILL.md' ($CRIT_HD.Substring(3) + ' (impl)')) -ge 1) { 'ok' } else { 'no' }) 'ok'
     Chk "P14: the impl template carries that section (whole-line, exactly 1)" ([string](CritHeadLines 'skills/impl/template.md')) '1'
@@ -3761,6 +3768,487 @@ try {
     # (U7) fixture control -- the exposure is not vacuous: adding a report-less number raises it.
     Chk "U7: control -- a new skip raises the count by one" ([string]((SkippedN '9999') - (SkippedN ''))) '1'
 
+    # --- Part V: the machine READS the reversal table (M61) ------------------
+    # The checklist's REVERSAL MEASUREMENT demands "neuter each case one by one and confirm THAT
+    # case reddens" -- and nobody ever asked whether that held. M60's `T7` is the instance: the
+    # doc said it checked wiring, the implementation only looked for a token, so it was strictly
+    # weaker than `T2` and NEVER reddened alone across eight rows (always with `T2`/`T3`). Had the
+    # table been readable, the machine would have named it. Here the table becomes a DECLARED
+    # format and this part reads it; the format's single source is the convention.
+    $RVB_KEY = 'reversal-block:'
+    $RVC_KEY = 'reversal-columns:'
+    $RVS_KEY = 'reversal-sep:'
+    $RVN_KEY = 'reversal-since:'
+    $RVA_KEY = 'mutation-axes:'
+    # Pin the fallback in BOTH copies (same mechanism as `criteria-since:`): an empty marker would
+    # match EVERY line and open the window wholesale, an empty separator would loop forever. A
+    # token that appears nowhere makes the row count 0, and `V6` reddens to say so.
+    # BOTH COPIES MUST FALL BACK THE SAME WAY (M61 review, recommendation 2): `DeclTail` returns
+    # $null when the declaration is gone, and calling .Trim() on it ABORTS the run -- so the same
+    # tree read "cases named by name" in sh and "incomplete run" here. Coerce to string first.
+    $RVBLK = @(("" + (DeclTail $CONV $RVB_KEY)).Trim() -split '\s+' | Where-Object { $_ -ne '' })
+    $RVBLK = if ($RVBLK.Count -gt 0) { $RVBLK[0] } else { 'zzz-reversal-block-unset' }
+    $RVSEP = @(("" + (DeclTail $CONV $RVS_KEY)).Trim() -split '\s+' | Where-Object { $_ -ne '' })
+    $RVSEP = if ($RVSEP.Count -gt 0) { $RVSEP[0] } else { 'zzz-reversal-sep-unset' }
+    $RVCOL = @(("" + (DeclTail $CONV $RVC_KEY)).Trim() -split '\s+' | Where-Object { $_ -ne '' })
+    # The axis value set comes from the `mutation-axes:` declaration -- the runner does NOT know
+    # the axis names. Strip the backticks and that IS the set; empty means every cell counts as
+    # outside the set and the axis check reddens.
+    $RVAX = @((("" + (DeclTail $CONV $RVA_KEY)) -replace '`', '').Trim() -split '\s+' | Where-Object { $_ -ne '' })
+    $RVN = 999999
+    $rvs0 = @(("" + (DeclTail $CONV $RVN_KEY)).Trim() -split '\s+' | Where-Object { $_ -ne '' })
+    if ($rvs0.Count -gt 0 -and $rvs0[0] -match '^M([0-9]+)$') { $RVN = [int]$Matches[1] }
+    function RvCol([string]$tok) {
+        for ($i = 0; $i -lt $RVCOL.Count; $i++) { if ($RVCOL[$i] -ceq $tok) { return ($i + 1) } }
+        return 0
+    }
+    function RvTargets([int]$since) {
+        $out = New-Object System.Collections.ArrayList
+        foreach ($m in Get-ChildItem -Path (Join-Path $ROOT 'docs/milestones') -Filter 'M*.md' -File) {
+            if ($m.BaseName -notmatch '^M([0-9]+)$') { continue }
+            $n = [int]$Matches[1]
+            if ($n -lt $since) { continue }
+            if (-not (Test-Path (Join-Path $ROOT ("docs/reports/M$n-impl.md")))) { continue }
+            [void]$out.Add($n)
+        }
+        return $out.ToArray()
+    }
+    function RvRep([int]$n, [string]$copy) {
+        if ($copy -ne '' -and $n -eq $RVN) { return $copy }
+        return (Join-Path $ROOT ("docs/reports/M$n-impl.md"))
+    }
+    function RvColCells([string]$path, [string]$col, [string]$marker) {
+        # -> the normalized cell of that COLUMN for each data row inside the marker window.
+        # The header is skipped STRUCTURALLY: only rows after the `---` separator are data.
+        # THE WINDOW OPENS ON WHOLE-LINE EQUALITY -- a mention is not a marker (opened by
+        # measurement during this cycle's impl). Widen it to a substring and the window opens
+        # the moment the report's PROSE names the marker, and some other table (the criteria
+        # cross-check) gets read as reversal rows. That state actually happened here, and `V6`
+        # stayed GREEN while only `V8` reddened -- i.e. the extraction positive-control was
+        # VACUOUS. `tests/site-includes` carries the same precedent (a real section marker needs
+        # the `--8<-- ` prefix). Columns are chosen BY NAME and their position comes from the
+        # declaration, so the header may be written in Korean with no literal in this runner.
+        if (-not (Test-Path $path)) { return @() }
+        $mk = $marker; if ($mk -eq '') { $mk = $RVBLK }
+        $s = '<!-- ' + $mk + ':start -->'
+        $e = '<!-- ' + $mk + ':end -->'
+        $ci = RvCol $col
+        $out = New-Object System.Collections.ArrayList
+        $w = $false; $sep = $false
+        foreach ($t in [System.IO.File]::ReadAllLines($path)) {
+            if (-not $w) {
+                if ($t -ceq $s) { $w = $true; $sep = $false }
+                continue
+            }
+            if ($t -ceq $e) { $w = $false; continue }
+            if (-not $t.StartsWith('|', [System.StringComparison]::Ordinal)) { continue }
+            if (-not $sep) { if ($t.IndexOf('---', [System.StringComparison]::Ordinal) -ge 0) { $sep = $true }; continue }
+            $f = $t -split '\|'
+            if ($ci -lt 1 -or $f.Count -lt ($ci + 2)) { continue }
+            $a = ($f[$ci] -replace '[ \r\*]', '')
+            if ($a -eq '') { continue }
+            [void]$out.Add($a)
+        }
+        return $out.ToArray()
+    }
+    function RvRows([string]$path, [string]$marker) {
+        return @(RvColCells $path 'reddened' $marker)
+    }
+    function RvMain([string]$path, [string]$marker) {
+        # -> the case names on the in-block declaration line.
+        if (-not (Test-Path $path)) { return @() }
+        $mk = $marker; if ($mk -eq '') { $mk = $RVBLK }
+        $s = '<!-- ' + $mk + ':start -->'
+        $e = '<!-- ' + $mk + ':end -->'
+        $k = '<!-- ' + $mk + '-main:'
+        $w = $false
+        foreach ($t in [System.IO.File]::ReadAllLines($path)) {
+            if (-not $w) {
+                if ($t -ceq $s) { $w = $true }
+                continue
+            }
+            if ($t -ceq $e) { $w = $false; continue }
+            $p = $t.IndexOf($k, [System.StringComparison]::Ordinal)
+            if ($p -lt 0) { continue }
+            $r = $t.Substring($p + $k.Length)
+            $q = $r.IndexOf('-->', [System.StringComparison]::Ordinal)
+            if ($q -ge 0) { $r = $r.Substring(0, $q) }
+            return @($r -split '\s+' | Where-Object { $_ -ne '' })
+        }
+        return @()
+    }
+    function RvSplit([string]$cell, [string]$sep) {
+        # -> the cell split on the DECLARED separator, empty parts kept (the caller decides).
+        $parts = New-Object System.Collections.ArrayList
+        $s = $cell
+        while ($true) {
+            $p = $s.IndexOf($sep, [System.StringComparison]::Ordinal)
+            if ($p -lt 0) { [void]$parts.Add($s); break }
+            [void]$parts.Add($s.Substring(0, $p))
+            $s = $s.Substring($p + $sep.Length)
+        }
+        return $parts.ToArray()
+    }
+    function RvSolo($cells, [string]$c) {
+        # -> 'yes' when some cell holds THAT case and nothing else. Rows that reddened several
+        # cases do not count here -- that is exactly where `T7` sat for eight rows.
+        foreach ($cell in $cells) {
+            $n = 0; $hit = $false
+            foreach ($u in (RvSplit $cell $RVSEP)) {
+                if ($u -ne '') { $n++; if ($u -ceq $c) { $hit = $true } }
+            }
+            if ($n -eq 1 -and $hit) { return 'yes' }
+        }
+        return 'no'
+    }
+    function RvLonely([string]$copy, [string]$marker) {
+        $n = 0
+        foreach ($t in RvTargets $RVN) {
+            $rep = RvRep $t $copy
+            $main = @(RvMain $rep $marker)
+            if ($main.Count -eq 0) { continue }
+            $rows = @(RvRows $rep $marker)
+            foreach ($c in $main) { if ((RvSolo $rows $c) -ne 'yes') { $n++ } }
+        }
+        return $n
+    }
+    function RvRowsN([string]$copy, [string]$marker) {
+        $n = 0
+        foreach ($t in RvTargets $RVN) { $n += @(RvRows (RvRep $t $copy) $marker).Count }
+        return $n
+    }
+    function RvMainN() {
+        $n = 0
+        foreach ($t in RvTargets $RVN) { $n += @(RvMain (Join-Path $ROOT ("docs/reports/M$t-impl.md")) '').Count }
+        return $n
+    }
+    function RvUnread([string]$path) {
+        # -> 1 when the solo verdict CANNOT read that report (no rows, or an empty main list).
+        # THE COUNTED SILENCE AND THE SKIPPED SILENCE MUST BE THE SAME SET (M61 review, round 1
+        # blocker). The earlier shape had `RvLonely` skip on an EMPTY MAIN LIST while this counted
+        # only reports with ZERO ROWS -- so "a report that has the table but lost the `-main` line"
+        # sat in the difference and nobody looked at it.
+        if (@(RvRows $path '').Count -le 0) { return 1 }
+        if (@(RvMain $path '').Count -le 0) { return 1 }
+        return 0
+    }
+    function RvNoBlock([int]$since, [string]$extra) {
+        # `RvLonely` SKIPS such a report (else a cycle in progress reddens all the way through and
+        # the harness stops being a progress signal), so the silence is counted here -- the same
+        # shape as `U6` on the `criteria-since:` side.
+        $n = 0
+        foreach ($t in RvTargets $since) {
+            $n += RvUnread (Join-Path $ROOT ("docs/reports/M$t-impl.md"))
+        }
+        if ($extra -ne '') { $n += RvUnread $extra }
+        return $n
+    }
+    function RvMainBad([string]$path, [string]$marker) {
+        # -> 1 when the list DECLARATION is not THE PRESCRIBED SINGLE-LINE SHAPE.
+        # ASSERT THE WHOLE LINE'S SHAPE INSTEAD OF PILING UP NEGATIVE CHECKS (M61 review, round 4
+        # blocker). This one seat opened FIVE times across five rounds, each time as a VARIANT of
+        # the same line: (1) no block at all (2) the difference of two silences (3) a duplicated
+        # line (4) a folded line (5) A NAME LEFT PAST THE CLOSER. Every prescription so far added
+        # ONE MORE forbidden state, so the next variant survived. The last one pins it down: move
+        # the final name past the `-->` and the line still "closes on itself", so the closure test
+        # passed -- while `RvMain` stops at `-->` and that name silently left the solo verdict,
+        # leaving `V8` FALSELY GREEN (measured on the live tree: 345/0, every axis green).
+        # ASKING FOR THE SHAPE PUTS FOUR VARIANTS UNDER ONE VERDICT, and whatever leaves the shape
+        # next is caught the moment it does.
+        #
+        # PRESCRIPTION (the convention is the single source): exactly ONE list line inside the
+        # window, and, with surrounding blanks removed, it STARTS WITH THE KEY, ENDS WITH `-->`,
+        # and holds nothing between them but ASCII alphanumeric/hyphen names separated by blanks
+        # (an empty list is shape-valid; that it is empty is counted separately by `RvUnread`).
+        # THE NAME RULE IS A CONSTANT REGEX -- the marker name is only ever compared as a fixed
+        # string, so the two copies cannot split on regex dialect (POSIX ERE vs .NET).
+        # ZERO lines is already counted by `RvUnread`, so it is not counted here.
+        # This verdict IS the enforcement of what the `nosolo` fixture assumes (round 3,
+        # recommendation 3): that fixture only acts when the `-main` line carries `-->` on the same
+        # line; without it the fixture no-ops and the CONTROL reddens although what broke is not
+        # what the control watches. The convention declares the premise, this bites it.
+        if (-not (Test-Path $path)) { return 0 }
+        $mk = $marker; if ($mk -eq '') { $mk = $RVBLK }
+        $s = '<!-- ' + $mk + ':start -->'
+        $e = '<!-- ' + $mk + ':end -->'
+        $k = '<!-- ' + $mk + '-main:'
+        $w = $false; $n = 0; $bad = 0
+        foreach ($t in [System.IO.File]::ReadAllLines($path)) {
+            if (-not $w) { if ($t -ceq $s) { $w = $true }; continue }
+            if ($t -ceq $e) { $w = $false; continue }
+            if ($t.IndexOf($k, [System.StringComparison]::Ordinal) -lt 0) { continue }
+            $n++
+            $u = $t.Trim([char]0x20, [char]0x09)
+            if (-not $u.StartsWith($k, [System.StringComparison]::Ordinal)) { $bad++; continue }
+            if ($u.Length -lt ($k.Length + 3) -or -not $u.EndsWith('-->', [System.StringComparison]::Ordinal)) { $bad++; continue }
+            $mid = $u.Substring($k.Length, $u.Length - $k.Length - 3)
+            if ($mid -notmatch '^([ \t]+[A-Za-z0-9-]+)*[ \t]*$') { $bad++ }
+        }
+        if ($n -ge 2 -or $bad -gt 0) { return 1 }
+        return 0
+    }
+    function RvMainBadN([int]$since, [string]$extra) {
+        $n = 0
+        foreach ($t in RvTargets $since) {
+            $n += RvMainBad (Join-Path $ROOT ("docs/reports/M$t-impl.md")) ''
+        }
+        if ($extra -ne '') { $n += RvMainBad $extra '' }
+        return $n
+    }
+    function RvAxisBad([string]$copy) {
+        # -> axis cells outside the declared set, EMPTY ones included. Declare a column and never
+        # check its values and you have a DEAD DECLARATION -- this cycle took exactly that finding
+        # on `reversal-sep:` (M61 review, recommendation 5).
+        $n = 0
+        foreach ($t in RvTargets $RVN) {
+            $rep = RvRep $t $copy
+            $rows = @(RvColCells $rep 'row' '').Count
+            $ax = @(RvColCells $rep 'axis' '')
+            foreach ($v in $ax) { if ($RVAX -cnotcontains $v) { $n++ } }
+            $n += ($rows - $ax.Count)
+        }
+        return $n
+    }
+    function RvCellBad([string]$copy, [string]$sep) {
+        # -> empty / duplicate names inside the reddened cells. THIS is where the separator
+        # declaration is actually USED (M61 review, recommendation 5): the solo verdict alone came
+        # out the same whatever the separator was, so the declaration was DEAD. Hand it another
+        # separator and `A<sep>A` no longer splits, so the duplicate is missed -- `V23` checks that.
+        $sp = $sep; if ($sp -eq '') { $sp = $RVSEP }
+        $n = 0
+        foreach ($t in RvTargets $RVN) {
+            $rep = RvRep $t $copy
+            foreach ($cell in @(RvColCells $rep 'reddened' '')) {
+                $hassep = $cell.IndexOf($sp, [System.StringComparison]::Ordinal) -ge 0
+                $seen = New-Object System.Collections.Generic.HashSet[string]
+                foreach ($u in (RvSplit $cell $sp)) {
+                    if ($u -eq '') { if ($hassep) { $n++ } }
+                    elseif (-not $seen.Add($u)) { $n++ }
+                }
+            }
+        }
+        return $n
+    }
+    function RvTplMarkers() {
+        # The `-main` LINE IS COUNTED TOO (M61 review, round 1): counting only the marker pair
+        # leaves the template green after losing that line, and then the next report comes out
+        # with no list at all -- straight into the state `RvUnread` bites.
+        # THE COUNT IS NOW WINDOW-SCOPED AND THE SHAPE IS ASKED (M61 review, round 4 record --
+        # impl follow-ups 7 and 9 were the same blind spot in this one function): the line used to
+        # stay green (1) after moving OUTSIDE the block and (2) while FOLDED, even though the report
+        # side reads only inside the window and now asserts the shape. The template being the looser
+        # of the two means the next cycle copies the bad form and `V25` catches it ONE LAYER LATE.
+        # The shape verdict is `RvMainBad` itself -- two predicates for one rule is where the next
+        # variant would live.
+        $p = Join-Path $ROOT 'skills/impl/template.md'
+        if (-not (Test-Path $p)) { return 'no' }
+        if ((RvMainBad $p '') -ne 0) { return 'no' }
+        $s = '<!-- ' + $RVBLK + ':start -->'
+        $e = '<!-- ' + $RVBLK + ':end -->'
+        $k = '<!-- ' + $RVBLK + '-main:'
+        $a = 0; $b = 0; $c = 0; $w = $false
+        foreach ($t in [System.IO.File]::ReadAllLines($p)) {
+            if ($t -ceq $s) { $a++ }
+            if ($t -ceq $e) { $b++ }
+            if (-not $w) { if ($t -ceq $s) { $w = $true }; continue }
+            if ($t -ceq $e) { $w = $false; continue }
+            if ($t.IndexOf($k, [System.StringComparison]::Ordinal) -ge 0) { $c++ }
+        }
+        if ($a -eq 1 -and $b -eq 1 -and $c -eq 1) { return 'ok' }
+        return 'no'
+    }
+    function RvFixture([string]$mode) {
+        # AN ABSENT SOURCE YIELDS AN EMPTY COPY (M61 review, round 1 recommendation 2). Lose the
+        # `reversal-since:` declaration and the start number falls back to a sentinel that is then
+        # DEREFERENCED AS A PATH -- this copy used to ABORT opening it while the .sh twin ran to
+        # completion, i.e. the same tree failed in two different SHAPES. Absorb the absence the
+        # same way on both sides; that the target set went empty is reddened by `V6`/`V7`.
+        $f = Join-Path $sbx ('rev-' + $mode + '.md')
+        $src = Join-Path $ROOT ("docs/reports/M$RVN-impl.md")
+        if (-not (Test-Path $src)) {
+            [System.IO.File]::WriteAllText($f, '', (New-Object System.Text.UTF8Encoding($false)))
+            return $f
+        }
+        $s = '<!-- ' + $RVBLK + ':start -->'
+        $e = '<!-- ' + $RVBLK + ':end -->'
+        $k = '<!-- ' + $RVBLK + '-main:'
+        $ci = RvCol 'reddened'
+        $ai = RvCol 'axis'
+        $out = New-Object System.Collections.ArrayList
+        $done1 = $false; $done2 = $false; $w = $false; $sep0 = $false
+        foreach ($t in [System.IO.File]::ReadAllLines($src)) {
+            if ($mode -eq 'nomarker' -and ($t -ceq $s -or $t -ceq $e)) { continue }
+            if ($mode -eq 'nomain' -and $t.IndexOf($k, [System.StringComparison]::Ordinal) -ge 0) { continue }
+            # ONE MORE list line -- a human reads it as declared, the verdict stops at the first.
+            if ($mode -eq 'dupmain' -and $t.IndexOf($k, [System.StringComparison]::Ordinal) -ge 0) { [void]$out.Add($t); [void]$out.Add($t); continue }
+            # FOLD the list line onto two lines -- the first holds the key and NO `-->`. The number
+            # of key-bearing lines stays 1, which is why the line-count verdict never saw this
+            # state (round 3 blocker).
+            if ($mode -eq 'foldmain' -and $t.IndexOf($k, [System.StringComparison]::Ordinal) -ge 0) {
+                $p = $t.IndexOf('-->', [System.StringComparison]::Ordinal)
+                if ($p -gt 0) { [void]$out.Add($t.Substring(0, $p)); [void]$out.Add('  zzz-folded -->'); continue }
+            }
+            # Push the last name PAST THE CLOSER -- the line still "closes on itself", which is why
+            # the closure-only verdict passed it while the name left `RvMain`'s sight (round 4 blocker).
+            if ($mode -eq 'aftermain' -and $t.IndexOf($k, [System.StringComparison]::Ordinal) -ge 0) {
+                $p = $t.IndexOf('-->', [System.StringComparison]::Ordinal)
+                if ($p -gt 0) { [void]$out.Add($t.Substring(0, $p) + '--> zzz-after'); continue }
+            }
+            # plant a line where PROSE names the marker, ahead of the table -- a substring window
+            # would open there and read the next table as reversal rows; whole-line does nothing.
+            if ($mode -eq 'mention' -and -not $done1 -and $t.StartsWith('## ', [System.StringComparison]::Ordinal)) {
+                $done1 = $true
+                [void]$out.Add('zzz-mention ' + $s + ' in prose')
+                [void]$out.Add($t)
+                continue
+            }
+            if ($mode -eq 'nosolo' -and $t.IndexOf($k, [System.StringComparison]::Ordinal) -ge 0) {
+                $p = $t.IndexOf('-->', [System.StringComparison]::Ordinal)
+                if ($p -gt 0) { [void]$out.Add($t.Substring(0, $p) + ' zzz-nosolo -->'); continue }
+            }
+            if ($t -ceq $s) { $w = $true; $sep0 = $false; [void]$out.Add($t); continue }
+            if ($w -and $t -ceq $e) { $w = $false; [void]$out.Add($t); continue }
+            # touch ONLY the first data row -- the point is whether the verdict turns on that row.
+            if ($w -and $t.StartsWith('|', [System.StringComparison]::Ordinal)) {
+                if (-not $sep0) {
+                    if ($t.IndexOf('---', [System.StringComparison]::Ordinal) -ge 0) { $sep0 = $true }
+                    [void]$out.Add($t); continue
+                }
+                if (-not $done2 -and ($mode -eq 'dupname' -or $mode -eq 'badaxis')) {
+                    $f2 = $t -split '\|'
+                    if ($f2.Count -ge 5) {
+                        $done2 = $true
+                        if ($mode -eq 'dupname' -and $ci -ge 1 -and $f2.Count -ge ($ci + 2)) { $f2[$ci] = $f2[$ci] + $RVSEP + $f2[$ci] }
+                        if ($mode -eq 'badaxis' -and $ai -ge 1 -and $f2.Count -ge ($ai + 2)) { $f2[$ai] = ' zzz-not-an-axis ' }
+                        [void]$out.Add(($f2 -join '|')); continue
+                    }
+                }
+            }
+            [void]$out.Add($t)
+        }
+        [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    $CF_KEY = 'control-form:'
+    $DISCR = Join-Path $ROOT 'tests/discover/README.md'
+    $SITER = Join-Path $ROOT 'tests/site-includes/README.md'
+    function CfName { $a = @((DeclTail $CONV $CF_KEY) -split '\s+' | Where-Object { $_ -ne '' }); if ($a.Count -gt 0) { return $a[0] } else { return '' } }
+    function CfDefn([string]$alias) {
+        # -> how many lines in the convention DEFINE that alias. THE DECLARED VALUE MUST CHANGE A
+        # VERDICT (M61 review, round 3 recommendation 2): the earlier shape asked only "is that
+        # string somewhere in the README", so shrinking `control-reads-delta` to `control` still
+        # passed on a SUBSTRING hit inside `positive-control` -- not isomorphic to what
+        # `reversal-sep:` does in `V21`-`V23`, where the value really drives the parse. So match
+        # BACKTICKED TOKENS and use the value AS A KEY to find its definition line.
+        # Counted per LINE, exactly as the .sh twin's `grep -cF` does -- counting OCCURRENCES here
+        # would split the two copies on a line that carried it twice.
+        $needle = '**`' + $alias + '`**'
+        if (-not (Test-Path $CONV)) { return 0 }
+        $n = 0
+        foreach ($t in [System.IO.File]::ReadAllLines($CONV)) {
+            if ($t.IndexOf($needle, [System.StringComparison]::Ordinal) -ge 0) { $n++ }
+        }
+        return $n
+    }
+    function CfRestated([string]$alias) {
+        # -> how many RESTATEMENT SITES carry the alias as a BACKTICKED TOKEN. There are TWO (this
+        # harness README and the `tests/site-includes` one); the earlier shape bound only one, so
+        # losing it on the other side reddened nothing (M61 review, unverified residual risk 2).
+        # Same shape as `U3`-`U5`, which bind all three restatement sites of `measure-order:`.
+        $needle = '`' + $alias + '`'
+        $n = 0
+        foreach ($f in @($DISCR, $SITER)) { if ((HasToken $f $needle) -eq 'yes') { $n++ } }
+        return $n
+    }
+    Chk "V1: control-form declaration line is exactly 1" (DeclCount $CONV $CF_KEY) '1' 
+    Chk "V2: reversal-block declaration line is exactly 1" (DeclCount $CONV $RVB_KEY) '1'
+    Chk "V3: reversal-columns declaration line is exactly 1" (DeclCount $CONV $RVC_KEY) '1'
+    Chk "V4: reversal-sep declaration line is exactly 1" (DeclCount $CONV $RVS_KEY) '1'
+    Chk "V5: reversal-since declaration line is exactly 1" (DeclCount $CONV $RVN_KEY) '1'
+    # (V6/V7) two extraction positive-controls -- either empty and the main check below would
+    # pass VACUOUSLY as 0 == 0.
+    Chk "V6: reversal-row extraction positive-control (>0)" $(if ((RvRowsN '' '') -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "V7: main-case list extraction positive-control (>0)" $(if ((RvMainN) -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # (V8) MAIN CHECK. Any main-check case with no row where it reddens ALONE shows up here.
+    Chk "V8: main check -- main-check cases with no solo row: 0" ([string](RvLonely '' '')) '0'
+    # (V9) fixture control -- the exposure is not vacuous. Asked as a DELTA (`control-form:`).
+    Chk "V9: control -- planting a case with no solo row raises it by one" ([string]((RvLonely (RvFixture 'nosolo') '') - (RvLonely '' ''))) '1'
+    # (V10) fixture control -- with the markers gone the window never opens. IT READS ONE COPY ONLY,
+    # so the baseline is CONSTANT 0 by construction (more targets do not add markers to this copy)
+    # -- that is the same-line justification `control-form:` asks for.
+    Chk "V10: control -- removing the markers drops that copy's rows to 0" ([string](@(RvRows (RvFixture 'nomarker') '').Count)) '0'
+    # (V11) negative control -- an untouched copy equals the baseline.
+    Chk "V11: negative control -- an untouched copy equals the baseline" ([string]((RvLonely (RvFixture 'clean') '') - (RvLonely '' ''))) '0'
+    # (V12) WIRING -- the marker name comes from the CONVENTION. Hardcode it here and another name
+    # would still open the window, leaving this green. NO report carries the other marker, so the
+    # baseline is CONSTANT 0 by construction (same-line justification).
+    Chk "V12: wiring -- another marker name opens no window" ([string](RvRowsN '' 'zzz-other-marker')) '0'
+    # (V13) consumer wiring -- the impl template carries the pair, else the next report loses the format.
+    Chk "V13: the impl template carries the marker pair and the list line" (RvTplMarkers) 'ok'
+    # (V14) DOES THE NON-RETROACTIVE BOUNDARY ACTUALLY FILTER? Lower the start number to 1 and
+    # reports written before this format existed come into scope with no block at all.
+    Chk "V14: boundary control -- lowering the start number to 1 yields block-less reports (>0)" $(if ((RvNoBlock 1 '') -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # (V15) FALSE-POSITIVE DIRECTION -- prose that NAMES the marker must not open the window (the
+    # window is whole-line equality). While that seat was open, `V6` stayed green and only `V8`
+    # reddened (measured during this cycle's impl). Reddening here means the window widened back
+    # to a substring match.
+    Chk "V15: false-positive direction -- a prose mention opens no window" ([string]((RvRowsN (RvFixture 'mention') '') - (RvRowsN '' ''))) '0'
+    # (V16) MAIN CHECK -- EXPOSING THE SILENT SKIP. Without it, the next cycle can drop the whole
+    # reversal section and the machine says nothing (M61 review, blocker 1: in that state all
+    # fifteen of `V1`-`V15` stayed green).
+    Chk "V16: main check -- target reports the solo verdict cannot read: 0" ([string](RvNoBlock $RVN '')) '0'
+    # (V17/V24/V18) fixture and negative controls -- the exposure is not vacuous. Asked as DELTAS.
+    # Two fixtures make the TWO silences separately: no markers means no rows, dropping only the
+    # `-main` line means an empty list.
+    Chk "V17: control -- adding a marker-less report raises it by one" ([string]((RvNoBlock $RVN (RvFixture 'nomarker')) - (RvNoBlock $RVN ''))) '1'
+    Chk "V24: control -- adding a list-less report raises it by one too" ([string]((RvNoBlock $RVN (RvFixture 'nomain')) - (RvNoBlock $RVN ''))) '1'
+    Chk "V18: negative control -- adding an untouched copy does not raise it" ([string]((RvNoBlock $RVN (RvFixture 'clean')) - (RvNoBlock $RVN ''))) '0'
+    # (V25) MAIN CHECK -- THE EXTENT OF THE LIST DECLARATION. `RvMain` returns at the first match and,
+    # with no `-->` on it, returns ONLY the names on that line -- so a duplicated second line AND a
+    # folded tail both fall out of the verdict. Round 3 bit only DUPLICATION, leaving the trigger the
+    # return had named -- FOLDING -- open, and `V8` went falsely green (M61 review, round 3 blocker).
+    # ASKING FOR CLOSURE PUTS BOTH STATES UNDER ONE VERDICT.
+    Chk "V25: main check -- target reports whose list declaration is off the prescribed shape: 0" ([string](RvMainBadN $RVN '')) '0'
+    # (V26/V30/V33/V27) fixture and negative controls -- the exposure is not vacuous. Asked as DELTAS.
+    # THREE fixtures make the three states separately: duplicating the line, folding one onto two,
+    # and pushing a name past the closer. A human reads all three as declared; ONE verdict bites all.
+    Chk "V26: control -- adding a report with a duplicated list line raises it by one" ([string]((RvMainBadN $RVN (RvFixture 'dupmain')) - (RvMainBadN $RVN ''))) '1'
+    Chk "V30: control -- adding a report with a folded list line raises it by one too" ([string]((RvMainBadN $RVN (RvFixture 'foldmain')) - (RvMainBadN $RVN ''))) '1'
+    Chk "V33: control -- adding a report with a name past the closer raises it by one too" ([string]((RvMainBadN $RVN (RvFixture 'aftermain')) - (RvMainBadN $RVN ''))) '1'
+    Chk "V27: negative control -- adding an untouched copy does not raise it" ([string]((RvMainBadN $RVN (RvFixture 'clean')) - (RvMainBadN $RVN ''))) '0'
+    # (V19) MAIN CHECK -- axis values belong to the declared set. Reversal has TWO directions
+    # (`mutation-axes:`) and the table records one per row. A column whose values are never checked
+    # is a dead declaration, so EMPTY cells count as outside the set too.
+    Chk "V19: main check -- axis cells outside the declared set or empty: 0" ([string](RvAxisBad '')) '0'
+    # (V20) fixture control -- asked as a DELTA.
+    Chk "V20: control -- planting an out-of-set axis raises it by one" ([string]((RvAxisBad (RvFixture 'badaxis')) - (RvAxisBad ''))) '1'
+    # (V21) MAIN CHECK -- format integrity of the reddened cells. Empty names (`A;;B`, `A;`) and
+    # duplicates (`A;A`) make the table unreadable. INDEPENDENT of the solo verdict: a broken
+    # multi-name cell leaves the solo rows intact, so this one can redden alone.
+    Chk "V21: main check -- empty or duplicate names in reddened cells: 0" ([string](RvCellBad '' '')) '0'
+    # (V22) fixture control -- asked as a DELTA.
+    Chk "V22: control -- planting a duplicate name raises it by one" ([string]((RvCellBad (RvFixture 'dupname') '') - (RvCellBad '' ''))) '1'
+    # (V23) WIRING -- the separator comes from the CONVENTION. Hand it another separator and the
+    # fixture no longer splits, so the duplicate is missed. Without this case `reversal-sep:` was a
+    # DEAD declaration: changing its value left every axis green (M61 review, recommendation 5).
+    # It reads ONE fixture only, so the baseline is CONSTANT 0 by construction (same-line justification).
+    Chk "V23: wiring -- another separator misses that fixture" ([string](RvCellBad (RvFixture 'dupname') 'zzz-other-sep')) '0'
+    # (V28/V29) THE `control-form:` VALUE IS ACTUALLY READ. `V1` counts declaration LINES only, so the
+    # value could be anything and every axis stayed green -- the same cycle wrote "a declaration must
+    # really be used by the verdict" for `reversal-sep:` and then repeated the defect on its fifth key
+    # (M61 review, round 2 recommendation 2). Same shape as `U2`-`U5` for `measure-order:`.
+    # A SUBSTRING HIT IS NOT ENOUGH (M61 review, round 3 recommendation 2): shrinking the value to
+    # `control` still matched inside `positive-control` and every axis stayed green. Match BACKTICKED
+    # TOKENS and use the value as a KEY into the convention's definition line (`V31`), so that
+    # changing the value really changes a verdict.
+    Chk "V28: control-form alias extraction positive-control" $(if ((CfName) -ne '') { 'ok' } else { 'no' }) 'ok'
+    Chk "V29: main check -- both restatement sites carry that alias as a backticked token" ([string](CfRestated (CfName))) '2'
+    Chk "V31: main check -- the convention has exactly one definition line for that alias" ([string](CfDefn (CfName))) '1'
+    # (V32) WIRING -- the restatement verdict really uses the alias it is HANDED. It reads ONE given
+    # token and that token appears in no file, so the baseline is CONSTANT 0 by construction (the
+    # same-line justification `control-form:` asks for). Without it `CfRestated` could ignore its
+    # argument and `V29` would stay green.
+    Chk "V32: wiring -- another alias leaves no restatement site" ([string](CfRestated 'zzz-other-form')) '0'
 
     Chk "F1: README cases declaration == actual case count" (DeclaredCases) ([string]($script:pass + $script:fail + 1))
 
