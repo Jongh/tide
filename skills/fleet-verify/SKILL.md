@@ -89,6 +89,11 @@ pass/fail 보고)만 한다 — release는 fleet-cycle의 순서 있는 핸드�
 ② **통합 훅 명령(들)** — `.tide-fleet/integration`에서 읽은 실행 명령 요약.
 ③ **통합 결과** — **pass**(exit 0) / **fail**(비0 — 실패 출력 요약 + 관련 레포). 훅 미선언이면
    "통합 훅 미선언 — 통합 검증 생략" 표기.
+   - **pass가 덮는 범위를 함께 적는다** — `verify-ran` · `verify-skipped` · `verify-uncovered`
+     셋이며, **각각이 무엇을 요구하는지는 규약이 정의한다** —
+     `docs/conventions.md`의 "멀티 레포 오케스트레이션" 절이 그 자리다.
+     적지 않으면 「빌드가 안 깨졌다」가 「통합이 검증됐다」로 읽힌다 —
+     외부 실측에서 훅의 스모크 스텝 자리가 빈 채 pass가 났다.
 ④ **다음 안내**:
    - pass → "이제 release 핸드오프 순서대로 수동 `/tide:release`"(fleet-cycle이 제시한 의존성
      순서대로 사용자가 레포별 release).

@@ -3854,6 +3854,236 @@ chk "V31: 본 검사 - 규약이 그 병기어의 정의 줄을 정확히 하나
 # 줄 서술). 이 케이스가 없으면 `cf_restated`가 인자를 무시해도 `V29`가 초록이다.
 chk "V32: 배선 - 다른 병기어를 주면 재서술처가 0이다" "$(cf_restated zzz-other-form)" "0"
 
+# --- Part W: 검사 범위 선언 (M62) --------------------------------------------
+# 「X를 검사했다」의 **범위를 검사자가 정하고 아무도 보지 않는** 자리다. 외부 저장소의 첫 전면
+# 사이클에서 이 부류가 **축을 바꿔 가며 네 번 재발**했고(검색 패턴 → 대상 파일 집합 → 대조 항목 →
+# 검색 루트) 넷째는 **이미 릴리즈에 실린 뒤** 발견됐다. 규약이 그 자리에 병기어 하나를 세웠으므로
+# 이 파트가 **선언 정합**으로 결합한다 — 병기어가 없으면 Part E의 `E8`·`E9`와 같은 이유로
+# 재서술처가 낡아도 초록이다. 단일 원본은 `docs/conventions.md`의 "검사 범위 선언" 절.
+#   무는 것은 **선언의 유일성 · 병기어의 세 자리 공존 · 경계 표지의 실재**까지다. 「선언한 범위가
+#   실제로 돌린 검색과 같은가」는 정적으로 판정되지 않으며 규약이 그 경계를 같은 절에 적는다.
+SCOPE_KEY='scope-decl:'
+SCOPE_LIM_KEY='scope-limits:'
+# 병기어는 **선언에서 온다**(러너에 박으면 값을 바꿔도 초록이다 — `control-form:`의 `V28`~`V32`와
+# 같은 형태). 선언을 잃었을 때의 폴백을 **두 사본에 같은 형태로 못박는다**: 빈 값을 그대로 쓰면
+# 백틱 토큰이 `` `` `` 두 글자가 되어 아무 파일에나 걸리고, 그러면 선언을 지운 트리가 초록이 된다.
+SCOPE_ALIAS=$(decl_tail "$CONV" "$SCOPE_KEY" | LC_ALL=C awk '{ print $1 }')
+[ -n "$SCOPE_ALIAS" ] || SCOPE_ALIAS=zzz-scope-decl-unset
+SCOPE_MARKS=$(markers_of "$SCOPE_LIM_KEY")
+NSCM=$(printf '%s\n' "$SCOPE_MARKS" | grep -c .)
+scope_all() { # <병기어> → 규약·review 스킬·impl 템플릿 셋 전부에 있으면 yes
+    in_all_three "$1" "$CONV" "$REV_SKILL" "$IMPL_TPL"
+}
+scope_tok() { # <파일> <병기어> → 그 파일이 병기어를 **백틱 토큰**으로 가지면 yes
+    has_token "$1" "$(printf '`%s`' "$2")"
+}
+scope_defn() { # <병기어> → 규약에서 그 병기어를 **정의하는 줄**의 수(`V31`과 같은 형태)
+    grep -cF "$(printf '**`%s`**' "$1")" "$CONV" 2>/dev/null | LC_ALL=C awk 'NR == 1 { print $1 + 0 }'
+}
+marks_used_in() { # <파일> <선언 키> <표지들> → 그 **선언 줄이 속한 절 안**에서 실제로 쓰인 표지의 수
+    # 표지만 선언하고 경계 문장을 지우면 선언이 **죽은 채** 남는다 — `mutation-axes:`가 열만 만들고
+    # 값을 안 재던 자리와 같은 부류다. 선언 줄 자신은 세지 않는다(Part I·L과 같은 제외).
+    #
+    # **창은 「파일 전체」가 아니라 「선언 줄이 속한 절」이다**(M62 리뷰 라운드 0 차단 1의 처분).
+    # 전역으로 세면 **다른 절이 같은 표지를 인용하는 것만으로** 정작 그 절의 경계 문장을 지워도
+    # 초록이 된다 — 실측된 자리다.
+    #
+    # **창을 여는 것은 「선언 줄」이지 「키의 첫 언급」이 아니다**(라운드 1 차단 1의 처분). 앵커를
+    # 첫 백틱 언급으로 잡으면 **앞선 절이 키를 인용하기만 해도** 창이 그리로 옮겨가고, 그 절이
+    # 표지를 담고 있으면 진짜 절의 경계 문장을 **전부 지워도 초록**이다(실측: 인용을 두 줄로 나눠
+    # 적은 트리에서 `W9`가 3으로 통과했다). 그래서 앵커 술어를 `decl_lines`와 **같은 것**으로
+    # 맞춘다 — 들여쓰기 + `-` + 공백 + 백틱 키. 두 술어가 갈린 것이 그 공허의 원인이었다.
+    # 절 = 선언 줄이 속한 헤딩의 **다음 줄부터** 다음 헤딩 직전까지이며(헤딩 줄 자신은 창 밖이다 —
+    # 제목에 든 표지는 경계 문장이 아니다), 헤딩은 층위를 가리지 않는다(`#`로 시작하는 줄).
+    #
+    # **세는 것은 「토큰의 출현」이 아니라 「경계 문장으로 쓰였는가」다**(라운드 2 차단 1의 처분).
+    # 창을 두 번 좁히고도 판정의 술어가 토큰 출현이면 **같은 절 안에 표지를 나열한 한 줄**이 대신
+    # 세어져 경계 문장을 전부 지워도 초록이다(실측: 나열 한 줄만 남긴 트리가 기준선과 같았다).
+    # 그래서 줄을 둘로 거른다 — ⑴ **나열 줄**(선언된 표지를 **전부** 담은 줄. 선언 줄 자신과 그
+    # 복제가 이 형태다. 표지가 하나뿐이면 이 거름을 끈다 — 그때는 모든 사용 줄이 「전부」가 된다)
+    # ⑵ 표지가 **굵은 코드 스팬**(`**` + 백틱 표지 + `**`)으로 쓰인 줄만 센다. 규약이 경계 문장을
+    # 그 형태로 적기 때문이며(`scope_defn`이 병기어 정의 줄에 같은 형태를 요구한다) 나열은 그 형태를
+    # 쓰지 않는다. **남는 구멍은 정직하게 적는다** — 굵게 적은 나열 줄을 **둘로 쪼개** 각 줄이
+    # 표지를 전부 담지 않게 하면 여전히 지나간다. 그 잔여는 README Part W 절의 고지가 받는다.
+    _mf="$1"; _mk="$2"
+    [ -f "$_mf" ] || { echo 0; return; }
+    LC_ALL=C awk -v k="\`$_mk\`" -v cr="$(printf '\r')" '
+        function is_decl(s,   i, n) {
+            if (length(s) > 0 && substr(s, length(s), 1) == cr) s = substr(s, 1, length(s) - 1)
+            i = 1
+            while (i <= length(s) && (substr(s, i, 1) == " " || substr(s, i, 1) == "\t")) i++
+            if (substr(s, i, 1) != "-") return 0
+            i++
+            n = 0
+            while (i <= length(s) && (substr(s, i, 1) == " " || substr(s, i, 1) == "\t")) { i++; n++ }
+            if (n < 1) return 0
+            return (substr(s, i, length(k)) == k)
+        }
+        /^#/ { if (found) exit; n = 0; delete buf; next }
+        { buf[++n] = $0; if (is_decl($0)) found = 1 }
+        END { if (found) for (i = 1; i <= n; i++) print buf[i] }
+    ' "$_mf" > "$SBX/marksection.txt"
+    _mn=0
+    # 표지 목록은 공백으로 갈린 토큰이라 분리를 위해 인용하지 않는다 — 대신 **글롭을 끈다**.
+    # 끄지 않으면 표지에 `*`·`?`가 들어갔을 때 경로 확장이 일어나 ps1 사본(배열)과 답이 갈린다.
+    set -f
+    _mtot=0
+    for _mm in $3; do _mtot=$((_mtot + 1)); done
+    : > "$SBX/marksbound.txt"
+    while IFS= read -r _ml; do
+        case "$_ml" in *"$_mk"*) continue ;; esac
+        if [ "$_mtot" -gt 1 ]; then
+            _mall=1
+            for _m2 in $3; do
+                case "$_ml" in *"$_m2"*) ;; *) _mall=0; break ;; esac
+            done
+            [ "$_mall" -eq 1 ] && continue
+        fi
+        printf '%s\n' "$_ml" >> "$SBX/marksbound.txt"
+    done < "$SBX/marksection.txt"
+    for _mm in $3; do
+        _mc=$(grep -F "$(printf '**`%s`**' "$_mm")" "$SBX/marksbound.txt" 2>/dev/null | grep -c .)
+        [ "$_mc" -gt 0 ] && _mn=$((_mn + 1))
+    done
+    set +f
+    echo "$_mn"
+}
+# 픽스처 — 표지 하나는 선언과 **같은 절**에, 다른 하나는 **다른 절**에 둔다. 절 창이 살아 있으면 1,
+# 창이 파일 전역으로 되돌아가면 2가 되어 아래 `W22`가 붉는다(판정을 망가뜨렸을 때 붉는 통제다).
+MK_FIX="$SBX/marks-crosssection.md"
+{
+    printf '## Sec A\n'
+    printf -- '- `zzz-mk:` `zzz-m1` `zzz-m2`\n'
+    printf 'uses **`zzz-m1`** in its own section\n'
+    printf '## Sec B\n'
+    printf 'uses **`zzz-m2`** in a different section\n'
+} > "$MK_FIX"
+# 픽스처 둘째 — **앞선 절이 키를 산문으로 인용**하고 표지 둘을 함께 담는다. 선언 줄(불릿)은 그 뒤
+# 절에 있고 그 절은 표지 하나만 쓴다. 앵커가 `decl_lines`와 같은 술어면 답은 1이고, 앵커가 「키의
+# 첫 언급」으로 되돌아가면 창이 앞 절로 옮겨가 2가 된다 — `W23`이 그 회귀를 문다.
+MK_FIX2="$SBX/marks-citeahead.md"
+{
+    printf '## Sec A\n'
+    printf 'the `zzz-mk:` list is cited here in prose\n'
+    printf 'and it names **`zzz-m1`** and **`zzz-m2`** on this line\n'
+    printf '## Sec B\n'
+    printf -- '- `zzz-mk:` `zzz-m1` `zzz-m2`\n'
+    printf 'uses **`zzz-m1`** in the declaration section\n'
+} > "$MK_FIX2"
+# 픽스처 셋째 — 선언과 **같은 절**에 **맨 백틱으로 적힌 줄**이 있고 경계 문장은 다른 표지에만 있다.
+# **그 줄은 표지를 하나만 담는다** — 전부 담으면 앞의 나열 줄 거름에 먼저 걸려 굵기 요구가 판정을
+# 가르지 못하고, 그러면 이 픽스처는 굵기 요구를 지워도 답이 변하지 않는 **죽은 통제**가 된다
+# (M62 리뷰 라운드 3의 실측: 앞 판본이 그 상태였고 굵기 요구를 지운 트리가 양 축 전건 초록이었다).
+# 판정이 「굵은 코드 스팬으로 쓰였는가」면 답은 1이고, 「토큰이 있는가」로 되돌아가면 2가 된다 —
+# `W24`가 그 회귀를 문다(라운드 2 차단 1의 실물이 이 형태였다).
+MK_FIX3="$SBX/marks-plainlist.md"
+{
+    printf '## Sec A\n'
+    printf -- '- `zzz-mk:` `zzz-m1` `zzz-m2`\n'
+    printf 'the markers are `zzz-m2` in a plain list\n'
+    printf 'uses **`zzz-m1`** as a boundary sentence\n'
+} > "$MK_FIX3"
+# 픽스처 넷째 — 같은 절의 나열 줄이 **굵게** 적혔고 선언된 표지를 **전부** 담는다. 나열 줄 거름이
+# 살아 있으면 답은 1이고, 거름이 빠지면 2가 된다 — `W25`가 그 회귀를 문다.
+MK_FIX4="$SBX/marks-boldlist.md"
+{
+    printf '## Sec A\n'
+    printf -- '- `zzz-mk:` `zzz-m1` `zzz-m2`\n'
+    printf 'the markers are **`zzz-m1`** and **`zzz-m2`** on one line\n'
+    printf 'uses **`zzz-m1`** as a boundary sentence\n'
+} > "$MK_FIX4"
+chk "W1: scope-decl 선언 줄 정확히 1개" "$(decl_count "$CONV" "$SCOPE_KEY")" "1"
+# (W2) 추출 positive-control — 병기어를 못 뽑으면 아래 결합이 **폴백 토큰**으로 돌아 전부 붉는데,
+# 그 원인이 「어디서 지워졌는가」인지 「선언이 없는가」인지 여기서 갈린다.
+chk "W2: 병기어 추출 positive-control" "$([ "$SCOPE_ALIAS" != zzz-scope-decl-unset ] && echo ok || echo no)" "ok"
+# (W3) **본 검사** — 병기어가 규약·review 스킬·impl 템플릿 셋 전부에 있다(E2·E5와 같은 3곳 결합).
+chk "W3: 검사 범위 병기어($SCOPE_ALIAS) 세 파일 전부에 등장" "$(scope_all "$SCOPE_ALIAS")" "yes"
+# (W4~W6) **셋을 각각 따로도 문다** — 결합만 두면 하나가 죽어도 「어느 자리인가」가 가려진다
+# (Part E가 `E10`·`E11`에서 3파일 결합과 자리별 단언을 함께 두는 형태). 규약 쪽은 **정의 줄**을,
+# 재서술처 둘은 **백틱 토큰**을 문다 — 재서술이 병기어를 산문에 흘려 적는 것과 구별한다.
+chk "W4: 규약이 그 병기어의 정의 줄을 정확히 하나 갖는다" "$(scope_defn "$SCOPE_ALIAS")" "1"
+chk "W5: review SKILL이 병기어를 백틱 토큰으로 갖는다" "$(scope_tok "$REV_SKILL" "$SCOPE_ALIAS")" "yes"
+chk "W6: impl 템플릿이 병기어를 백틱 토큰으로 갖는다" "$(scope_tok "$IMPL_TPL" "$SCOPE_ALIAS")" "yes"
+chk "W7: scope-limits 선언 줄 정확히 1개" "$(decl_count "$CONV" "$SCOPE_LIM_KEY")" "1"
+# (W8) 표지 추출 positive-control — 0이면 아래 `W9`가 **0 == 0**으로 공허 통과한다.
+chk "W8: 경계 표지 추출 positive-control(>0)" "$([ "$NSCM" -gt 0 ] && echo ok || echo no)" "ok"
+# (W9) **본 검사** — 선언한 경계 표지가 전부 규약 본문에서 **실제로 쓰인다**(경계 문장이 살아 있다).
+chk "W9: 경계 표지 전부가 선언 절 안에서 쓰인다" "$(marks_used_in "$CONV" "$SCOPE_LIM_KEY" "$SCOPE_MARKS")" "$NSCM"
+# (W22) **픽스처 통제** — 판정이 절 창을 실제로 쓰는가. 표지 둘 중 하나만 선언과 같은 절에 있으므로
+# 절 창이면 1, 파일 전역으로 되돌아가면 2다. **판정을 망가뜨렸을 때 붉어지지 않으면 통제가 아니다.**
+# **기준선이 상수인 이유**: 읽는 대상이 이 파트가 방금 쓴 **픽스처 한 파일뿐**이라 산출물이 늘거나
+# 줄어도 값이 움직이지 않는다(규약 `control-form:`의 절대값 예외 — `W12`·`W18`과 같은 사유).
+chk "W22: 픽스처 통제 - 다른 절의 표지 사용은 세지 않는다" "$(marks_used_in "$MK_FIX" zzz-mk: "zzz-m1 zzz-m2")" "1"
+# (W23) **적대 통제** — 창의 앵커가 「선언 줄」인가 「키의 첫 언급」인가. 앞선 절이 키를 **산문으로**
+# 인용하고 표지 둘을 담으므로, 앵커가 첫 언급이면 2이고 선언 줄이면 1이다. 라운드 1의 공허가 정확히
+# 이 자리였다 — 경계 문장을 다 지워도 앞 절의 인용이 대신 세어져 초록이었다.
+# **기준선이 상수인 이유**는 `W22`와 같다(픽스처 한 파일만 읽는다).
+chk "W23: 적대 통제 - 앞선 절의 키 인용은 창을 옮기지 않는다" "$(marks_used_in "$MK_FIX2" zzz-mk: "zzz-m1 zzz-m2")" "1"
+# (W24) **적대 통제** — 판정의 술어가 「토큰 출현」인가 「경계 문장으로 쓰였는가」인가. 같은 절에 표지
+# 둘을 **맨 백틱으로 나열한 줄**이 있고 굵은 사용은 하나뿐이므로, 술어가 출현이면 2이고 굵은 사용이면
+# 1이다. 라운드 2의 공허가 정확히 이 자리였다.
+# **기준선이 상수인 이유**는 `W22`와 같다(픽스처 한 파일만 읽는다).
+chk "W24: 적대 통제 - 같은 절의 맨 나열 줄은 세지 않는다" "$(marks_used_in "$MK_FIX3" zzz-mk: "zzz-m1 zzz-m2")" "1"
+# (W25) **적대 통제** — 나열 줄이 **굵게** 적히고 표지를 **전부** 담아도 세지 않는가. 나열 줄 거름이
+# 빠지면 2다. `W24`가 「굵기」 축을, `W25`가 「전부 담은 줄」 축을 각각 문다.
+# **기준선이 상수인 이유**는 `W22`와 같다(픽스처 한 파일만 읽는다).
+chk "W25: 적대 통제 - 표지를 전부 담은 굵은 나열 줄은 세지 않는다" "$(marks_used_in "$MK_FIX4" zzz-mk: "zzz-m1 zzz-m2")" "1"
+# 음성 통제 — 가짜 병기어는 규약에 없어야 한다(Part E의 `-bogus` 통제와 동형, 구별력 입증).
+chk "W: 통제 — conventions에 가짜 범위 병기어 없음" "$(has_token "$CONV" "${SCOPE_ALIAS}-bogus")" "no"
+# 교차 통제 — 범위 선언은 리뷰·impl 보고서의 자산이라 milestone 템플릿에 없어야 한다(Part D·E와 동형).
+chk "W: 통제 — milestone 템플릿에 범위 병기어 없음" "$(has_token "$MS_TPL" "$SCOPE_ALIAS")" "no"
+# (W12) **배선** — 결합 판정이 **인자로 준 병기어**를 실제로 쓴다. 이 케이스가 없으면 `scope_all`이
+# 인자를 무시해도 `W3`가 초록이다(`V32`와 같은 형태 — 읽는 것은 인자로 준 그 토큰 하나이고 어느
+# 파일에도 없으므로 기준선이 **구조로 상수**다).
+chk "W12: 배선 - 다른 병기어를 주면 결합이 성립하지 않는다" "$(scope_all zzz-other-scope)" "no"
+# (W13~W18 · M62-T03) 측정이 **캐시·스킵으로 위조되는** 자리. Part U가 무는 것은 **순서**이고, 순서를
+# 지켜도 빌드 시스템이 태스크를 UP-TO-DATE로 건너뛰면 명령을 돌린 것만 참이고 값은 **옛 트리의 것**이다
+# (외부 실측 2회 — Gradle `test`가 3개월 전 XML을 「마지막 측정」으로 만들었다). 규약이 그 자리에
+# 병기어를 하나 더 세웠으므로 위와 같은 형태로 결합한다. 층위는 **2곳**이다(규약 = 정의, impl 스킬 =
+# 절차) — 보고서 템플릿에 슬롯을 두면 복제 선언을 늘린다(`E6`·`E9`가 같은 판단을 적는다).
+MC_KEY='measure-cache:'
+MC_ALIAS=$(decl_tail "$CONV" "$MC_KEY" | LC_ALL=C awk '{ print $1 }')
+[ -n "$MC_ALIAS" ] || MC_ALIAS=zzz-measure-cache-unset
+chk "W13: measure-cache 선언 줄 정확히 1개" "$(decl_count "$CONV" "$MC_KEY")" "1"
+# (W14) 추출 positive-control — `W2`와 같은 사유(폴백으로 돌면 원인이 가려진다).
+chk "W14: 캐시 병기어 추출 positive-control" "$([ "$MC_ALIAS" != zzz-measure-cache-unset ] && echo ok || echo no)" "ok"
+# (W15~W17) **본 검사** — 병기어가 규약과 impl 스킬 둘 다에 있고(`in_both`), 규약 쪽은 **정의 줄**을,
+# 스킬 쪽은 **백틱 토큰**을 따로 문다(`W4`~`W6`과 같은 층위 분담).
+chk "W15: 캐시 병기어($MC_ALIAS) 규약↔impl SKILL 정합" "$(in_both "$MC_ALIAS" "$CONV" "$IMPL_SKILL")" "yes"
+chk "W16: 규약이 캐시 병기어의 정의 줄을 정확히 하나 갖는다" "$(scope_defn "$MC_ALIAS")" "1"
+chk "W17: impl SKILL이 캐시 병기어를 백틱 토큰으로 갖는다" "$(scope_tok "$IMPL_SKILL" "$MC_ALIAS")" "yes"
+# 음성 통제 · 교차 통제 — 위 두 통제와 동형(구별력 입증 · 자산 경계).
+chk "W: 통제 — conventions에 가짜 캐시 병기어 없음" "$(has_token "$CONV" "${MC_ALIAS}-bogus")" "no"
+chk "W: 통제 — milestone 템플릿에 캐시 병기어 없음" "$(has_token "$MS_TPL" "$MC_ALIAS")" "no"
+# (W18) **배선** — `W12`와 같은 형태(인자로 준 토큰 하나만 읽고 그 토큰은 어느 파일에도 없다).
+chk "W18: 배선 - 다른 캐시 병기어를 주면 결합이 성립하지 않는다" "$(in_both zzz-other-cache "$CONV" "$IMPL_SKILL")" "no"
+# (W19~W21 · M62-T04) `fleet-verify`의 **pass가 덮는 범위**를 산출물이 적는가. 외부 실측에서 훅의
+# 스모크 스텝 자리가 **빈 채 pass**가 났고 그 pass가 「통합이 검증됐다」로 읽혔다. 규약이 표지 셋을
+# 선언하므로 `W7`~`W9`와 **같은 기전**으로 문다(표지의 선언처는 규약, 러너는 읽기만 — 한글 리터럴 0).
+# 스킬 문면의 산문 판정은 하지 않는다 — 그 층은 리뷰의 자리다.
+VS_KEY='verify-scope:'
+VS_MARKS=$(markers_of "$VS_KEY")
+NVSM=$(printf '%s\n' "$VS_MARKS" | grep -c .)
+chk "W19: verify-scope 선언 줄 정확히 1개" "$(decl_count "$CONV" "$VS_KEY")" "1"
+# (W20) 추출 positive-control — 0이면 아래 `W21`이 **0 == 0**으로 공허 통과한다(`W8`과 같은 사유).
+chk "W20: 검증 범위 표지 추출 positive-control(>0)" "$([ "$NVSM" -gt 0 ] && echo ok || echo no)" "ok"
+# (W21) **본 검사** — 선언한 표지가 전부 규약 본문에서 **실제로 쓰인다**(정의 문장이 살아 있다).
+chk "W21: 검증 범위 표지 전부가 선언 절 안에서 쓰인다" "$(marks_used_in "$CONV" "$VS_KEY" "$VS_MARKS")" "$NVSM"
+# (W26~W27) **꼬리의 구분자**를 이 파트가 세운 병기어 키 둘에도 못박는다(M42 리뷰 차단 1의 처방을
+# Part W가 물려받는 자리 — `I10`~`I13`과 **같은 헬퍼**를 부른다). 두 사본의 꼬리 분리 폭이 다르면
+# 보이지 않는 한 글자(NBSP·탭)에 **한쪽만 붉어 총계가 갈린다** — 실측된 자리다. 금지 자체를 여기
+# 두면 그 갈림이 **양 축에서 함께** 붉는다. 통제(`I12`·`I13`)가 이미 이 금지의 비공허를 실증하므로
+# 여기서 픽스처를 다시 만들지 않는다.
+chk "W26: scope-decl 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$SCOPE_KEY")" "0"
+chk "W27: measure-cache 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$MC_KEY")" "0"
+# (W28~W29) **표지 키 둘**에는 같은 금지를 다른 사유로 건다 — `markers_of`의 분리 폭은 두 사본 모두
+# ASCII 공백 하나로 못박혀 있어 금지 문자가 축을 **가르지 않는다**. 대신 **표지 둘을 한 토큰으로
+# 붙여** 선언된 수를 줄이고, `W9`·`W21`은 **줄어든 수와 자기를 비교**해 통과한다. positive-control
+# (`W8`·`W20`)은 수가 여전히 0보다 커서 초록이다. **보이지 않는 한 글자가 경계 표지를 은퇴시킬 수
+# 없어야 한다.**
+chk "W28: scope-limits 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$SCOPE_LIM_KEY")" "0"
+chk "W29: verify-scope 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$VS_KEY")" "0"
+
 chk "F1: README cases 선언 == 실제 케이스 수" "$(declared_cases)" "$((pass + fail + 1))"
 
 echo
