@@ -4250,6 +4250,267 @@ try {
     # argument and `V29` would stay green.
     Chk "V32: wiring -- another alias leaves no restatement site" ([string](CfRestated 'zzz-other-form')) '0'
 
+    # --- Part W: inspection-scope declaration (M62) ---------------------------
+    # "I checked X" leaves the SCOPE to the inspector and nobody looks at it. In the first full cycle
+    # an external repo ran, this class RECURRED FOUR TIMES ALONG DIFFERENT AXES (grep pattern -> file
+    # set -> compared items -> SEARCH ROOT), and the fourth was found only AFTER it had shipped in a
+    # release. The convention now plants one ASCII co-term there, so this part binds it as a
+    # DECLARATION-CONSISTENCY check -- without a co-term the restatement sites go stale while staying
+    # green, exactly as Part E's `E8`/`E9` measured. Single source: the conventions "scope declaration"
+    # section. What is bitten: declaration uniqueness, the co-term living in all three seats, and the
+    # boundary markers being really used. Whether the DECLARED scope equals the search actually run is
+    # not statically decidable, and the convention writes that boundary in the same section.
+    $SCOPE_KEY     = 'scope-decl:'
+    $SCOPE_LIM_KEY = 'scope-limits:'
+    # The co-term COMES FROM THE DECLARATION (hard-coding it here would keep every axis green when the
+    # value changes -- same shape as `control-form:` in `V28`-`V32`). The fallback for a LOST
+    # declaration is pinned IDENTICALLY IN BOTH COPIES: an empty value would make the backticked needle
+    # two characters that match anywhere, so deleting the declaration would turn the tree GREEN.
+    $SCOPE_ALIAS = ''
+    $scTail = DeclTail $CONV $SCOPE_KEY
+    if ($null -ne $scTail) {
+        # SPLIT WIDTH is pinned to the .sh twin's awk default FS under LC_ALL=C (space and tab), for the
+        # reason `MarkersOf` records: `\s+` also eats NBSP, so one pasted NBSP kept THIS copy green while
+        # the .sh copy lost the co-term -- the totals then differ over a tree neither copy calls broken.
+        # Matching the width is not enough on its own, so `W26`/`W27` below forbid the character outright
+        # (same pairing as `I10`-`I13`).
+        $scA = @($scTail -split '[ \t]+' | Where-Object { $_ -ne '' })
+        if ($scA.Count -gt 0) { $SCOPE_ALIAS = $scA[0] }
+    }
+    if ($SCOPE_ALIAS -eq '') { $SCOPE_ALIAS = 'zzz-scope-decl-unset' }
+    $SCOPE_MARKS = @(MarkersOf $SCOPE_LIM_KEY)
+    $NSCM = $SCOPE_MARKS.Count
+    function ScopeAll([string]$alias) { return (InAllThree $alias $CONV $REV_SKILL $IMPL_TPL) }
+    function ScopeTok($file, [string]$alias) { return (HasToken $file ('`' + $alias + '`')) }
+    function ScopeDefn([string]$alias) {
+        # -> how many lines in the convention DEFINE that co-term (same shape as `V31`). Counted per
+        # LINE, exactly as the .sh twin's `grep -cF` does.
+        $needle = '**`' + $alias + '`**'
+        if (-not (Test-Path $CONV)) { return 0 }
+        $n = 0
+        foreach ($t in [System.IO.File]::ReadAllLines($CONV)) {
+            if ($t.IndexOf($needle, [System.StringComparison]::Ordinal) -ge 0) { $n++ }
+        }
+        return $n
+    }
+    function MarksUsedIn([string]$file, [string]$key, $marks) {
+        # -> how many declared markers are really used INSIDE THE SECTION the DECLARATION LINE lives in.
+        # Declaring markers and then deleting the boundary sentences leaves a DEAD declaration -- the
+        # same class `mutation-axes:` was in while the column existed and nothing measured it. The
+        # declaration line itself is not a subject (same exclusion as Part I / Part L).
+        #
+        # THE WINDOW IS THE SECTION, NOT THE WHOLE FILE (M62 review round 0, blocking 1). Counted
+        # file-wide, ANOTHER SECTION merely citing the same marker keeps the count whole even after
+        # the real boundary sentence is deleted -- measured.
+        #
+        # THE ANCHOR IS THE DECLARATION LINE, NOT THE FIRST MENTION OF THE KEY (round 1, blocking 1).
+        # Anchored on the first backticked mention, a section ahead of the declaration merely citing
+        # the key drags the window there, and if that section carries the markers the real boundary
+        # sentences can ALL be deleted and this stays green (measured: a two-line citation kept `W9`
+        # at 3). So the anchor predicate is the SAME one `DeclLines` uses -- indent, dash, space,
+        # backticked key. The two predicates drifting apart is what made the pass vacuous.
+        # A section runs from the line AFTER the heading the declaration sits under to just before the
+        # next heading (the heading line itself is outside the window -- a marker in a title is not a
+        # boundary sentence); heading level does not matter (any line starting with the number sign).
+        if (-not (Test-Path $file)) { return 0 }
+        $lines = [System.IO.File]::ReadAllLines($file)
+        $declRe = '^[ \t]*-[ \t]+`' + [regex]::Escape($key) + '`'
+        $decl = -1
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -cmatch $declRe) { $decl = $i; break }
+        }
+        if ($decl -lt 0) { return 0 }
+        $start = 0
+        for ($i = $decl; $i -ge 0; $i--) {
+            if ($lines[$i].StartsWith('#', [System.StringComparison]::Ordinal)) { $start = $i + 1; break }
+        }
+        $end = $lines.Count
+        for ($i = $decl + 1; $i -lt $lines.Count; $i++) {
+            if ($lines[$i].StartsWith('#', [System.StringComparison]::Ordinal)) { $end = $i; break }
+        }
+        # WHAT IS COUNTED IS "USED AS A BOUNDARY SENTENCE", NOT "THE TOKEN APPEARS" (round 2, blocking 1).
+        # With the token-appears predicate, ONE LINE LISTING THE MARKERS inside the same section is
+        # counted instead, so every boundary sentence can be deleted and this stays green (measured: a
+        # tree with only the listing line left matched the baseline). Two filters, both copies alike:
+        # (1) drop LISTING lines -- a line carrying EVERY declared marker (the declaration line and its
+        # duplicates have that shape); switched off when only one marker is declared, since then every
+        # use is a "carries them all" line. (2) count only markers written as a BOLD CODE SPAN, the form
+        # the convention uses for a boundary sentence and `ScopeDefn` already requires of the co-term;
+        # a listing does not use it. THE REMAINING HOLE IS WRITTEN DOWN: a bold listing SPLIT ACROSS TWO
+        # LINES, neither carrying them all, still passes. The README Part W notice carries that residue.
+        $bound = New-Object System.Collections.Generic.List[string]
+        for ($i = $start; $i -lt $end; $i++) {
+            $t = $lines[$i]
+            if ($t.IndexOf($key, [System.StringComparison]::Ordinal) -ge 0) { continue }
+            if (@($marks).Count -gt 1) {
+                $all = $true
+                foreach ($m2 in $marks) {
+                    if ($t.IndexOf($m2, [System.StringComparison]::Ordinal) -lt 0) { $all = $false; break }
+                }
+                if ($all) { continue }
+            }
+            [void]$bound.Add($t)
+        }
+        $n = 0
+        foreach ($m in $marks) {
+            $needle = '**`' + $m + '`**'
+            $hit = 0
+            foreach ($t in $bound) {
+                if ($t.IndexOf($needle, [System.StringComparison]::Ordinal) -ge 0) { $hit = 1; break }
+            }
+            $n += $hit
+        }
+        return $n
+    }
+    # fixture -- one marker sits in the declaration's own section, the other in a DIFFERENT section.
+    # With the section window the answer is 1; if the window regresses to file-wide it becomes 2 and
+    # `W22` reddens (a control that does not redden when the judgement is broken is not a control).
+    $MK_FIX = Join-Path $SBX 'marks-crosssection.md'
+    [System.IO.File]::WriteAllLines($MK_FIX, [string[]]@(
+        '## Sec A',
+        '- `zzz-mk:` `zzz-m1` `zzz-m2`',
+        'uses **`zzz-m1`** in its own section',
+        '## Sec B',
+        'uses **`zzz-m2`** in a different section'))
+    # second fixture -- a section AHEAD of the declaration cites the key IN PROSE and carries both
+    # markers; the bullet declaration sits in a later section that uses only one. With the declaration
+    # anchor the answer is 1; if the anchor regresses to "first mention" the window moves ahead and it
+    # becomes 2 -- `W23` bites that regression.
+    $MK_FIX2 = Join-Path $SBX 'marks-citeahead.md'
+    [System.IO.File]::WriteAllLines($MK_FIX2, [string[]]@(
+        '## Sec A',
+        'the `zzz-mk:` list is cited here in prose',
+        'and it names **`zzz-m1`** and **`zzz-m2`** on this line',
+        '## Sec B',
+        '- `zzz-mk:` `zzz-m1` `zzz-m2`',
+        'uses **`zzz-m1`** in the declaration section'))
+    # third fixture -- the declaration's OWN section carries a PLAIN-BACKTICK line, and the boundary
+    # sentence belongs to the OTHER marker. THE PLAIN LINE CARRIES ONLY ONE MARKER: carrying them all
+    # would trip the listing filter first, the bold requirement would stop deciding, and this fixture
+    # would be a DEAD control (M62 review round 3 measured exactly that -- with the bold requirement
+    # deleted both copies stayed fully green). With the bold-span predicate the answer is 1; regress to
+    # "the token appears" and it becomes 2 -- `W24` bites that. This is the exact shape round 2s
+    # blocking finding took in the real tree.
+    $MK_FIX3 = Join-Path $SBX 'marks-plainlist.md'
+    [System.IO.File]::WriteAllLines($MK_FIX3, [string[]]@(
+        '## Sec A',
+        '- `zzz-mk:` `zzz-m1` `zzz-m2`',
+        'the markers are `zzz-m2` in a plain list',
+        'uses **`zzz-m1`** as a boundary sentence'))
+    # fourth fixture -- the listing is BOLD and carries EVERY declared marker. With the listing filter
+    # the answer is 1; drop the filter and it becomes 2 -- `W25` bites that.
+    $MK_FIX4 = Join-Path $SBX 'marks-boldlist.md'
+    [System.IO.File]::WriteAllLines($MK_FIX4, [string[]]@(
+        '## Sec A',
+        '- `zzz-mk:` `zzz-m1` `zzz-m2`',
+        'the markers are **`zzz-m1`** and **`zzz-m2`** on one line',
+        'uses **`zzz-m1`** as a boundary sentence'))
+    Chk "W1: scope-decl declaration line is exactly 1" (DeclCount $CONV $SCOPE_KEY) '1'
+    # (W2) extraction positive-control -- with no co-term the binds below run on the FALLBACK token and
+    # all redden; this case separates "the declaration is gone" from "a seat lost the co-term".
+    Chk "W2: co-term extraction positive-control" $(if ($SCOPE_ALIAS -ne 'zzz-scope-decl-unset') { 'ok' } else { 'no' }) 'ok'
+    # (W3) MAIN CHECK -- the co-term lives in conventions + review SKILL + impl template (three-way
+    # bind, same layer as E2/E5).
+    Chk "W3: scope co-term ($SCOPE_ALIAS) in all three files" (ScopeAll $SCOPE_ALIAS) 'yes'
+    # (W4-W6) EACH SEAT IS ALSO ASKED SEPARATELY -- with only the conjunction, losing one seat hides
+    # WHICH seat died (Part E keeps the three-file bind and the per-seat assertions together in
+    # `E10`/`E11`). The convention side is asked for its DEFINITION line; the two restatement sites are
+    # asked for a BACKTICKED token, which separates a restatement from prose that merely says the word.
+    Chk "W4: the convention has exactly one definition line for that co-term" ([string](ScopeDefn $SCOPE_ALIAS)) '1'
+    Chk "W5: review SKILL carries the co-term as a backticked token" (ScopeTok $REV_SKILL $SCOPE_ALIAS) 'yes'
+    Chk "W6: impl template carries the co-term as a backticked token" (ScopeTok $IMPL_TPL $SCOPE_ALIAS) 'yes'
+    Chk "W7: scope-limits declaration line is exactly 1" (DeclCount $CONV $SCOPE_LIM_KEY) '1'
+    # (W8) marker extraction positive-control -- at 0 the check below would pass VACUOUSLY as 0 == 0.
+    Chk "W8: boundary-marker extraction positive-control (>0)" $(if ($NSCM -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # (W9) MAIN CHECK -- every declared boundary marker is really used inside the declaration section.
+    Chk "W9: every boundary marker is used inside the declaration section" ([string](MarksUsedIn $CONV $SCOPE_LIM_KEY $SCOPE_MARKS)) ([string]$NSCM)
+    # (W22) FIXTURE CONTROL -- does the judgement really use the section window? One of the two markers
+    # sits outside the declaration's section, so the section window answers 1 and a file-wide regression
+    # answers 2. A control that does not redden when the judgement is broken is not a control.
+    # WHY THE BASELINE IS CONSTANT: the only thing read is the ONE fixture file this part just
+    # wrote, so the value cannot move when artifacts are added or removed (the absolute-value
+    # exception `control-form:` allows -- same reason as `W12` / `W18`).
+    Chk "W22: fixture control -- a marker used in another section does not count" ([string](MarksUsedIn $MK_FIX 'zzz-mk:' @('zzz-m1', 'zzz-m2'))) '1' 
+    # (W23) ADVERSARIAL CONTROL -- is the window anchored on the DECLARATION LINE or on the first
+    # mention of the key? A section ahead cites the key in prose and carries both markers, so the
+    # answer is 2 under a first-mention anchor and 1 under the declaration anchor. That is exactly
+    # where round 1 was vacuous. The baseline is constant for the same reason as `W22`.
+    Chk "W23: adversarial control -- a key cited in an earlier section does not move the window" ([string](MarksUsedIn $MK_FIX2 'zzz-mk:' @('zzz-m1', 'zzz-m2'))) '1'
+    # (W24) ADVERSARIAL CONTROL -- is the predicate "the token appears" or "used as a boundary sentence"?
+    # The declaration's own section carries a plain-backtick listing of both markers while only one has a
+    # bold use, so the answer is 2 under the token predicate and 1 under the bold-span predicate. That is
+    # exactly where round 2 was vacuous. The baseline is constant for the same reason as `W22`.
+    Chk "W24: adversarial control -- a plain listing in the same section does not count" ([string](MarksUsedIn $MK_FIX3 'zzz-mk:' @('zzz-m1', 'zzz-m2'))) '1'
+    # (W25) ADVERSARIAL CONTROL -- a BOLD listing that carries EVERY declared marker must not count
+    # either; drop the listing filter and this becomes 2. `W24` asks the boldness axis, `W25` the
+    # carries-them-all axis. The baseline is constant for the same reason as `W22`.
+    Chk "W25: adversarial control -- a bold listing carrying every marker does not count" ([string](MarksUsedIn $MK_FIX4 'zzz-mk:' @('zzz-m1', 'zzz-m2'))) '1'
+    # negative control -- a bogus co-term must not be in the convention (same shape as Part E's -bogus).
+    Chk "W: control -- conventions has no bogus scope co-term" (HasToken $CONV ($SCOPE_ALIAS + '-bogus')) 'no'
+    # cross control -- scope declaration is a review/impl-report asset, so the milestone template has none.
+    Chk "W: control -- milestone template has no scope co-term" (HasToken $MS_TPL $SCOPE_ALIAS) 'no'
+    # (W12) WIRING -- the bind really uses the co-term it is HANDED. Without it `ScopeAll` could ignore
+    # its argument and `W3` would stay green (same shape as `V32`; the token is in no file, so the
+    # baseline is constant by construction).
+    Chk "W12: wiring -- another co-term does not satisfy the bind" (ScopeAll 'zzz-other-scope') 'no'
+    # (W13-W18 / M62-T03) where a measurement is FORGED BY A CACHE OR A SKIP. Part U bites the ORDER,
+    # and even with the order kept, a build system that marks a task UP-TO-DATE makes only "the command
+    # ran" true while the VALUE comes from an OLD TREE (measured twice externally -- Gradle `test`
+    # turned a three-month-old XML into "the last measurement"). The convention plants one more co-term
+    # there, so this binds it in the same shape. The layer is TWO SEATS (convention = definition, impl
+    # skill = procedure); a report-template slot would only add a duplicated declaration (`E6`/`E9`
+    # write that same judgement).
+    $MC_KEY = 'measure-cache:'
+    $MC_ALIAS = ''
+    $mcTail = DeclTail $CONV $MC_KEY
+    if ($null -ne $mcTail) {
+        # split width pinned for the same reason as the scope co-term above (`W27` forbids the rest).
+        $mcA = @($mcTail -split '[ \t]+' | Where-Object { $_ -ne '' })
+        if ($mcA.Count -gt 0) { $MC_ALIAS = $mcA[0] }
+    }
+    if ($MC_ALIAS -eq '') { $MC_ALIAS = 'zzz-measure-cache-unset' }
+    Chk "W13: measure-cache declaration line is exactly 1" (DeclCount $CONV $MC_KEY) '1'
+    # (W14) extraction positive-control -- same reason as `W2` (running on the fallback hides the cause).
+    Chk "W14: cache co-term extraction positive-control" $(if ($MC_ALIAS -ne 'zzz-measure-cache-unset') { 'ok' } else { 'no' }) 'ok'
+    # (W15-W17) MAIN CHECK -- the co-term lives in the convention and the impl skill, and each seat is
+    # also asked on its own: the convention for its DEFINITION line, the skill for a BACKTICKED token
+    # (same division of layers as `W4`-`W6`).
+    Chk "W15: cache co-term ($MC_ALIAS) convention <-> impl SKILL" (InBoth $MC_ALIAS $CONV $IMPL_SKILL) 'yes'
+    Chk "W16: the convention has exactly one definition line for the cache co-term" ([string](ScopeDefn $MC_ALIAS)) '1'
+    Chk "W17: impl SKILL carries the cache co-term as a backticked token" (ScopeTok $IMPL_SKILL $MC_ALIAS) 'yes'
+    # negative control / cross control -- same shape as the two above (discrimination / asset boundary).
+    Chk "W: control -- conventions has no bogus cache co-term" (HasToken $CONV ($MC_ALIAS + '-bogus')) 'no'
+    Chk "W: control -- milestone template has no cache co-term" (HasToken $MS_TPL $MC_ALIAS) 'no'
+    # (W18) WIRING -- same shape as `W12` (it reads only the token it is handed, which is in no file).
+    Chk "W18: wiring -- another cache co-term does not satisfy the bind" (InBoth 'zzz-other-cache' $CONV $IMPL_SKILL) 'no'
+    # (W19-W21 / M62-T04) does the artifact write WHAT THE PASS COVERS for `fleet-verify`? Externally,
+    # the hook's smoke step sat EMPTY and the run still passed, and that pass read as "the integration
+    # is verified". The convention declares three markers, so this bites them with the SAME MECHANISM as
+    # `W7`-`W9` (markers are declared in the convention, the runner only reads -- no Hangul literals).
+    # The prose of the skill is not judged here; that layer belongs to review.
+    $VS_KEY = 'verify-scope:'
+    $VS_MARKS = @(MarkersOf $VS_KEY)
+    $NVSM = $VS_MARKS.Count
+    Chk "W19: verify-scope declaration line is exactly 1" (DeclCount $CONV $VS_KEY) '1'
+    # (W20) extraction positive-control -- at 0 the check below would pass VACUOUSLY (same as `W8`).
+    Chk "W20: verify-scope marker extraction positive-control (>0)" $(if ($NVSM -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # (W21) MAIN CHECK -- every declared marker is really used outside the declaration line.
+    Chk "W21: every verify-scope marker is used inside the declaration section" ([string](MarksUsedIn $CONV $VS_KEY $VS_MARKS)) ([string]$NVSM)
+    # (W26-W27) the SEPARATOR IN THE TAIL is pinned for the two co-term keys this part introduced, which
+    # is M42's prescription (`I10`-`I13`, same helper) inherited here. When the two copies split the tail
+    # at different widths, one invisible character (NBSP, TAB) reddens ONE copy only and the totals
+    # disagree over a tree neither copy calls broken -- measured. Forbidding the character makes that
+    # split reach BOTH axes at once. `I12`/`I13` already prove the ban is not vacuous, so no new fixture.
+    Chk "W26: no forbidden separator in the scope-decl declaration tail" (BadSeps $CONV $SCOPE_KEY) '0'
+    Chk "W27: no forbidden separator in the measure-cache declaration tail" (BadSeps $CONV $MC_KEY) '0'
+    # (W28-W29) the two MARKER keys get the same ban, for a different failure: `MarkersOf` is width-pinned
+    # to one ASCII space in both copies, so a forbidden character there does NOT split the axes -- it
+    # MERGES two markers into one token in BOTH, the declared count drops, and `W9`/`W21` compare the
+    # smaller number to itself and pass. The positive controls (`W8`/`W20`) stay green because the count
+    # is still above zero. An invisible character must not be able to retire a boundary marker.
+    Chk "W28: no forbidden separator in the scope-limits declaration tail" (BadSeps $CONV $SCOPE_LIM_KEY) '0'
+    Chk "W29: no forbidden separator in the verify-scope declaration tail" (BadSeps $CONV $VS_KEY) '0'
+
     Chk "F1: README cases declaration == actual case count" (DeclaredCases) ([string]($script:pass + $script:fail + 1))
 
     Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) (actual command skills N=$N) [runtime: PowerShell $($PSVersionTable.PSVersion) $($PSVersionTable.PSEdition)]"
