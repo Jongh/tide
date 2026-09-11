@@ -11,12 +11,29 @@
 #     have a unique prefix, and 6 of the 9 cases M46 added share prefixes. The label prefix up to
 #     the first interpolation IS unique (161/161 in both copies), so that is the key. The two
 #     copies use different label languages, so EACH COPY READS ITS OWN LABELS.
-#   - Scope is limited to declaration-token cases: breaking a literal token in a data file
-#     generalizes, but disabling verdict CODE takes a different edit every time and does not fit a
-#     declaration. Code-side coverage stays with the per-case revert measurement the conventions require.
-#   - Cost decides scope: one mutation = copy + one full target run. On this machine the sh copy of
-#     discover takes ~72s and this copy ~6s (12x asymmetry -- Windows process spawn). A full sweep is
-#     infeasible locally; CI ubuntu is ~13x faster, so the full sweep belongs there.
+#   - SCOPE NOW REACHES VERDICT CODE (M63). The previous version limited the subject to data-file
+#     declaration tokens and handed code-side coverage to "the per-case revert measurement (a human)".
+#     M62 MEASURED THAT HANDOFF FAILING: a human revert table only perturbs ARTIFACTS, so no row ever
+#     aimed at the runner itself, and one adversarial control sat there DEAD (delete its predicate and
+#     both axes stayed fully green). What blocked code tokens was not the principle but the GRAMMAR --
+#     tokens were restricted to alphanumerics and hyphens, so a code literal could not be written down.
+#   - THEREFORE THE REPLACE MUST BE LITERAL. A widened token carries `.`, `*`, `[`, `|`, which `sed`
+#     reads as regex metacharacters. This copy already used `String.Replace` (literal), so THE TWO
+#     COPIES WERE ALREADY SPLIT (measured in M63); `LitReplace` + `X6` pin them together -- BUT ONLY
+#     FOR SINGLE-LINE, LF CONTENT. The .sh twin's `awk` strips CR and appends a missing final newline,
+#     so ON A CRLF FILE OR A FILE WITH NO FINAL NEWLINE THE TWO COPIES STILL DIVERGE (measured by the
+#     M63 review -- `docs/conventions.md`, which two of the three declarations target, is CRLF here).
+#     Not a regression: the previous `sed` path stripped CR too. The single source for that boundary
+#     is the "two copies" section of `tests/mutation/README.md`.
+#   - Cost decides scope: one mutation = copy + one full target run. MEASURED ON THIS MACHINE (M63):
+#     the sh copy of discover takes 407-679s and this copy ~19s (20x+ asymmetry -- Windows process
+#     spawn). THE CONDITION THE NUMBER WAS TAKEN UNDER MATTERS: those are values with no other heavy
+#     job running; under contention the same axis reached 1652-1932s (M62). EVEN WITHOUT CONTENTION
+#     THE SAME AXIS SWINGS 1.7x (M63 review, same tree and session: Git Bash `sh` 679s, `dash` 448s),
+#     so THIS HAS TO BE A RANGE, NOT A POINT -- a point goes stale on the very next measurement,
+#     which is why M63 had to edit this line twice. The previous note said
+#     "~72s", a value from when discover had 172 cases -- 6x stale. A full sweep is infeasible
+#     locally; CI ubuntu is much faster, so the full sweep belongs there.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -53,12 +70,37 @@ function Chk([string]$desc, [string]$got, [string]$want) {
     else { $script:fail++; "FAIL  {0,-56} (got {1}, want {2})" -f $desc, $got, $want | Write-Host }
 }
 
+# --- literal replace -----------------------------------------------------
+# NOT a regex. A widened token (a literal out of the verdict CODE) can carry `.`, `*`, `[`, `|`, and
+# a regex path would rewrite places the declaration never named. This copy already used the literal
+# `String.Replace`, while the .sh twin used `sed` -- so the two copies could answer the same
+# declaration differently. `X6` pins that isomorphism; the helper exists so the case and the loop
+# share one implementation (one question, one answer, per copy).
+# THE ISOMORPHISM REACHES SINGLE-LINE, LF CONTENT. This copy is byte-faithful; the .sh twin is
+# line-based `awk`, so it strips CR and appends a missing final newline. The replaced token itself
+# comes out the same in both -- what diverges is the target file's LINE ENDINGS (M63 review).
+# Boundary single source: the "two copies" section of `tests/mutation/README.md`.
+function LitReplace([string]$text, [string]$tok, [string]$rep) {
+    if ([string]::IsNullOrEmpty($tok)) { return $text }
+    return $text.Replace($tok, $rep)
+}
+
 try {
     New-Item -ItemType Directory -Path $SBX -Force | Out-Null
 
     # --- declarations ----------------------------------------------------
-    # form: `# mutates: <file> :: <token> :: <stable case-label prefix> :: <caught|missed>`
-    $ann = @([IO.File]::ReadAllLines($TARGET) | Where-Object { $_ -match '^# mutates:' })
+    # two forms:
+    #   `# mutates:    <file> :: <token> :: <stable case-label prefix> :: <caught|missed>`
+    #   `# mutates-to: <file> :: <from> :: <to> :: <stable case-label prefix> :: <caught|missed>`
+    # THE SECOND FORM ARRIVED IN M63. The first replaces the token with a FIXED nonsense string, so it
+    # only asks "is this literal load-bearing". Pointed at verdict code it either (1) breaks the syntax
+    # and kills the runner outright -- the named case is then absent from the FAIL list, so the result
+    # is `missed` -- or (2) survives but still cannot express a regression that merely LOOSENS the
+    # verdict (bold code span -> plain backtick). M62 was hit by exactly the latter. The second form
+    # lets the declaration say WHAT TO PUT THERE, reproducing that regression directly.
+    # THE TWO FORMS ARE SEPARATE KEYWORDS: allowing two field counts under one keyword would leave
+    # `X5` unable to tell a shifted line (a separator inside a token) from a legitimate 5-field line.
+    $ann = @([IO.File]::ReadAllLines($TARGET) | Where-Object { $_ -match '^# mutates(-to)?:' })
 
     # (X1) extraction positive-control -- with zero declarations the loop below never runs and the
     # harness passes vacuously (checklist item 1). This is the first self-hollowness to block.
@@ -79,15 +121,45 @@ try {
     $decl = if ($declLine.Count -ge 1) { [regex]::Match($declLine[0], 'mutations:\s*([0-9]+)').Groups[1].Value } else { 'none' }
     Chk "X2: README mutations declaration == measured count" $decl ([string]$ann.Count)
 
+    # (X5) DECLARATION FIELD COUNT (M63) -- widening the token grammar leaves exactly ONE ban: the
+    # field separator ` :: `. A token carrying that string splits one field too many and `$4` then
+    # holds something that is not the verdict value. The previous version never asked, so the drift
+    # was SILENT -- the widening edit opens that door, so the same edit closes it.
+    $badFields = 0
+    foreach ($line in $ann) {
+        if ($line.StartsWith('# mutates-to:', [System.StringComparison]::Ordinal)) {
+            $want = 5; $body = $line -replace '^# mutates-to:', ''
+        } else {
+            $want = 4; $body = $line -replace '^# mutates:', ''
+        }
+        $nf = @($body -split ' :: ').Count
+        if ($nf -ne $want) { $badFields++ }
+    }
+    Chk "X5: field count matches the keyword's rule" ([string]$badFields) '0'
+
+    # (X6) LITERAL-REPLACE SELF-TEST (M63) -- with a regex `a.c` also matches `abc`; literally it
+    # matches only `a.c`. BOTH COPIES MUST ANSWER THE SAME on the same fixture, or the widened grammar
+    # splits the axes (the .sh twin carries the same case name and the same fixture). The previous .sh
+    # used `sed` (regex) and answered `Z Z` here, while this copy already used a literal replace.
+    Chk "X6: literal replace -- regex metacharacter token" (LitReplace 'abc a.c' 'a.c' 'Z') 'abc Z'
+
     # --- mutation loop ---------------------------------------------------
     $i = 0
     foreach ($line in $ann) {
         $i++
-        $parts = ($line -replace '^# mutates:', '') -split ' :: '
+        if ($line.StartsWith('# mutates-to:', [System.StringComparison]::Ordinal)) {
+            $parts = ($line -replace '^# mutates-to:', '') -split ' :: '
+            $rep  = $parts[2].Trim()
+            $lab  = $parts[3].Trim()
+            $want = $parts[4].Trim()
+        } else {
+            $parts = ($line -replace '^# mutates:', '') -split ' :: '
+            $rep  = 'MUTATED-BY-tide-mutation'
+            $lab  = $parts[2].Trim()
+            $want = $parts[3].Trim()
+        }
         $f    = $parts[0].Trim()
         $tok  = $parts[1].Trim()
-        $lab  = $parts[2].Trim()
-        $want = $parts[3].Trim()
 
         $W = Join-Path $SBX "m$i"
         New-Item -ItemType Directory -Path $W -Force | Out-Null
@@ -108,7 +180,7 @@ try {
         $mf = Join-Path $W $f
         if (Test-Path -LiteralPath $mf) {
             $txt = [IO.File]::ReadAllText($mf)
-            [IO.File]::WriteAllText($mf, $txt.Replace($tok, 'MUTATED-BY-tide-mutation'))
+            [IO.File]::WriteAllText($mf, (LitReplace $txt $tok $rep))
         }
 
         $out = & pwsh -NoProfile -File (Join-Path $W $TARGET_REL) 2>&1 | Out-String

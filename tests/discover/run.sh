@@ -3871,8 +3871,15 @@ SCOPE_ALIAS=$(decl_tail "$CONV" "$SCOPE_KEY" | LC_ALL=C awk '{ print $1 }')
 [ -n "$SCOPE_ALIAS" ] || SCOPE_ALIAS=zzz-scope-decl-unset
 SCOPE_MARKS=$(markers_of "$SCOPE_LIM_KEY")
 NSCM=$(printf '%s\n' "$SCOPE_MARKS" | grep -c .)
-scope_all() { # <병기어> → 규약·review 스킬·impl 템플릿 셋 전부에 있으면 yes
-    in_all_three "$1" "$CONV" "$REV_SKILL" "$IMPL_TPL"
+scope_all() { # <병기어> → 규약·review 스킬·review 템플릿·impl 템플릿 **넷** 전부에 있으면 yes
+    # **M63에서 넷이 됐다** — M62 리뷰가 *"impl 템플릿과 리뷰 스킬에는 넣고 리뷰 템플릿만 비었는데
+    # 사유가 없다"* 를 지적했고, 그 자리를 채우면 재서술처가 하나 는다. 결합을 함께 넓히지 않으면
+    # 규약이 「재서술처 셋」이라 적는 동안 기계는 **둘만** 보게 되어, 이 절이 존재하는 이유
+    # (*"병기어가 없으면 재서술처가 낡아도 초록"*)가 그 자리에서 그대로 무너진다.
+    for _sa4 in "$CONV" "$REV_SKILL" "$REV_TPL" "$IMPL_TPL"; do
+        [ "$(has_token "$_sa4" "$1")" = yes ] || { echo no; return; }
+    done
+    echo yes
 }
 scope_tok() { # <파일> <병기어> → 그 파일이 병기어를 **백틱 토큰**으로 가지면 yes
     has_token "$1" "$(printf '`%s`' "$2")"
@@ -3997,13 +4004,16 @@ chk "W1: scope-decl 선언 줄 정확히 1개" "$(decl_count "$CONV" "$SCOPE_KEY
 # 그 원인이 「어디서 지워졌는가」인지 「선언이 없는가」인지 여기서 갈린다.
 chk "W2: 병기어 추출 positive-control" "$([ "$SCOPE_ALIAS" != zzz-scope-decl-unset ] && echo ok || echo no)" "ok"
 # (W3) **본 검사** — 병기어가 규약·review 스킬·impl 템플릿 셋 전부에 있다(E2·E5와 같은 3곳 결합).
-chk "W3: 검사 범위 병기어($SCOPE_ALIAS) 세 파일 전부에 등장" "$(scope_all "$SCOPE_ALIAS")" "yes"
+chk "W3: 검사 범위 병기어($SCOPE_ALIAS) 네 파일 전부에 등장" "$(scope_all "$SCOPE_ALIAS")" "yes"
 # (W4~W6) **셋을 각각 따로도 문다** — 결합만 두면 하나가 죽어도 「어느 자리인가」가 가려진다
 # (Part E가 `E10`·`E11`에서 3파일 결합과 자리별 단언을 함께 두는 형태). 규약 쪽은 **정의 줄**을,
 # 재서술처 둘은 **백틱 토큰**을 문다 — 재서술이 병기어를 산문에 흘려 적는 것과 구별한다.
 chk "W4: 규약이 그 병기어의 정의 줄을 정확히 하나 갖는다" "$(scope_defn "$SCOPE_ALIAS")" "1"
 chk "W5: review SKILL이 병기어를 백틱 토큰으로 갖는다" "$(scope_tok "$REV_SKILL" "$SCOPE_ALIAS")" "yes"
 chk "W6: impl 템플릿이 병기어를 백틱 토큰으로 갖는다" "$(scope_tok "$IMPL_TPL" "$SCOPE_ALIAS")" "yes"
+# (W30) **자리별 단언 — 셋째 재서술처**(M63). 결합(`W3`)만 넓히면 **어느 자리가 죽었는지**가 가려진다
+# (`W4`~`W6`이 앞 셋에 대해 같은 판단을 적는 것과 같은 형태다).
+chk "W30: review 템플릿이 병기어를 백틱 토큰으로 갖는다" "$(scope_tok "$REV_TPL" "$SCOPE_ALIAS")" "yes"
 chk "W7: scope-limits 선언 줄 정확히 1개" "$(decl_count "$CONV" "$SCOPE_LIM_KEY")" "1"
 # (W8) 표지 추출 positive-control — 0이면 아래 `W9`가 **0 == 0**으로 공허 통과한다.
 chk "W8: 경계 표지 추출 positive-control(>0)" "$([ "$NSCM" -gt 0 ] && echo ok || echo no)" "ok"
@@ -4093,7 +4103,16 @@ echo "# discover 감지 임계값(≥2→hint·<2→none·단일 레포→none·
 
 # --- 뮤테이션 선언 (M47) — `tests/mutation`이 읽는다 -------------------------
 # 형식: `# mutates: <파일> :: <토큰> :: <케이스 라벨 안정 접두> :: <caught|missed>`
-# 토큰은 **영숫자·하이픈만** 쓴다(치환 구분자 충돌 방지). 라벨은 보간(`$`) 앞까지의 안정 접두이며
-# 이 사본의 라벨 161개 안에서 유일하다(M47-T01 실측). ps1 사본은 자기 언어의 라벨로 같은 선언을 둔다.
+# 토큰은 **필드 구분자 ` :: `와 앞뒤 공백만** 금지한다(M63 — 앞 판본은 영숫자·하이픈만 허용해
+# **판정 코드의 리터럴을 적을 수 없었고**, 그것이 죽은 통제를 아무도 못 잡던 이유였다). 라벨은
+# 보간(`$`) 앞까지의 안정 접두이며 이 사본 안에서 유일하다. ps1 사본은 자기 언어의 라벨로 같은
+# 선언을 둔다.
+#   **`# mutates:`(고정 대체)로 무력화되려면 리터럴의 「짝」이 이 파일 밖에 있어야 한다**(M63 실측)
+#   — 치환은 파일 전역이라 비교의 **양변이 같은 파일 안**에 있으면 둘 다 함께 바뀌어 동작이 그대로다.
+#   아래 셋째 선언이 무는 굵은 코드 스팬은 짝이 규약·픽스처에 있어 죽는다.
+#   **`# mutates-to:`에는 그 제약이 없다**(M63 리뷰) — 대체값을 선언이 정하므로 **비대칭 치환**이
+#   되고, 자기 변수끼리 비교하는 자리(나열 줄 거름 등)도 **선언할 수 있다**. 이번에 선언하지 않은
+#   것은 구조가 아니라 **비용**이다. 경계의 단일 원본은 `tests/mutation/README.md`다.
 # mutates: docs/conventions.md :: declared-change-set :: D7: conventions :: caught
 # mutates: docs/conventions.md :: mutation-negative-control-sentinel :: D7: conventions :: missed
+# mutates-to: tests/discover/run.sh :: printf '**`%s`**' "$_mm" :: printf '`%s`' "$_mm" :: W24: 적대 통제 :: caught
