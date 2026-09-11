@@ -4280,7 +4280,17 @@ try {
     if ($SCOPE_ALIAS -eq '') { $SCOPE_ALIAS = 'zzz-scope-decl-unset' }
     $SCOPE_MARKS = @(MarkersOf $SCOPE_LIM_KEY)
     $NSCM = $SCOPE_MARKS.Count
-    function ScopeAll([string]$alias) { return (InAllThree $alias $CONV $REV_SKILL $IMPL_TPL) }
+    function ScopeAll([string]$alias) {
+        # FOUR SITES SINCE M63 -- the M62 review noted that the alias sat in the impl template and the
+        # review SKILL while the review TEMPLATE was empty with no stated reason; filling that slot adds
+        # a restatement site. Widening the binding along with it is not optional: leave it at three and
+        # the conventions say "three restatement sites" while the machine watches two, which is exactly
+        # the failure this section exists to prevent ("no co-term, and a stale restatement stays green").
+        foreach ($f in @($CONV, $REV_SKILL, $REV_TPL, $IMPL_TPL)) {
+            if ((HasToken $f $alias) -ne 'yes') { return 'no' }
+        }
+        return 'yes'
+    }
     function ScopeTok($file, [string]$alias) { return (HasToken $file ('`' + $alias + '`')) }
     function ScopeDefn([string]$alias) {
         # -> how many lines in the convention DEFINE that co-term (same shape as `V31`). Counted per
@@ -4411,7 +4421,7 @@ try {
     Chk "W2: co-term extraction positive-control" $(if ($SCOPE_ALIAS -ne 'zzz-scope-decl-unset') { 'ok' } else { 'no' }) 'ok'
     # (W3) MAIN CHECK -- the co-term lives in conventions + review SKILL + impl template (three-way
     # bind, same layer as E2/E5).
-    Chk "W3: scope co-term ($SCOPE_ALIAS) in all three files" (ScopeAll $SCOPE_ALIAS) 'yes'
+    Chk "W3: scope co-term ($SCOPE_ALIAS) in all four files" (ScopeAll $SCOPE_ALIAS) 'yes'
     # (W4-W6) EACH SEAT IS ALSO ASKED SEPARATELY -- with only the conjunction, losing one seat hides
     # WHICH seat died (Part E keeps the three-file bind and the per-seat assertions together in
     # `E10`/`E11`). The convention side is asked for its DEFINITION line; the two restatement sites are
@@ -4419,6 +4429,9 @@ try {
     Chk "W4: the convention has exactly one definition line for that co-term" ([string](ScopeDefn $SCOPE_ALIAS)) '1'
     Chk "W5: review SKILL carries the co-term as a backticked token" (ScopeTok $REV_SKILL $SCOPE_ALIAS) 'yes'
     Chk "W6: impl template carries the co-term as a backticked token" (ScopeTok $IMPL_TPL $SCOPE_ALIAS) 'yes'
+    # (W30) PER-SITE ASSERTION FOR THE THIRD RESTATEMENT SITE (M63). Widening only the combination
+    # (`W3`) hides WHICH site died -- the same judgement `W4`-`W6` record for the first three.
+    Chk "W30: review template carries the co-term as a backticked token" (ScopeTok $REV_TPL $SCOPE_ALIAS) 'yes'
     Chk "W7: scope-limits declaration line is exactly 1" (DeclCount $CONV $SCOPE_LIM_KEY) '1'
     # (W8) marker extraction positive-control -- at 0 the check below would pass VACUOUSLY as 0 == 0.
     Chk "W8: boundary-marker extraction positive-control (>0)" $(if ($NSCM -gt 0) { 'ok' } else { 'no' }) 'ok'
@@ -4530,8 +4543,19 @@ exit 0
 
     # --- mutation declarations (M47) -- read by `tests/mutation` ------------
     # form: `# mutates: <file> :: <token> :: <stable case-label prefix> :: <caught|missed>`
-    # Tokens are alphanumeric+hyphen only (no delimiter clash). The label is the prefix up to the
-    # first interpolation and is unique among this copy's 161 labels (measured in M47-T01).
-    # The sh copy carries the same declarations against its own (Korean) labels.
+    # Tokens ban ONLY the field separator ` :: ` and leading/trailing spaces (M63 -- the previous
+    # grammar allowed alphanumerics and hyphens only, so A VERDICT-CODE LITERAL COULD NOT BE WRITTEN
+    # DOWN, and that is why a dead control went unnoticed). The label is the prefix up to the first
+    # interpolation and is unique within this copy. The sh copy carries the same declarations against
+    # its own (Korean) labels.
+    #   UNDER `# mutates:` (FIXED REPLACEMENT) a literal's counterpart must live OUTSIDE this file
+    #   (measured in M63): the replace is file-wide, so when BOTH SIDES of a comparison sit in the
+    #   same file they change together and behaviour is unchanged. The bold code span below has its
+    #   counterpart in the conventions and the fixtures, so it dies.
+    #   `# mutates-to:` CARRIES NO SUCH LIMIT (M63 review): the declaration names the replacement, so
+    #   the substitution is ASYMMETRIC and a self-comparing filter (the enumeration-line filter, say)
+    #   CAN be declared. Not declaring it this cycle was a COST decision, not a structural one.
+    #   The single source for that boundary is `tests/mutation/README.md`.
 # mutates: docs/conventions.md :: declared-change-set :: D7: conventions declares :: caught
 # mutates: docs/conventions.md :: mutation-negative-control-sentinel :: D7: conventions declares :: missed
+# mutates-to: tests/discover/run.ps1 :: '**`' + $m + '`**' :: '`' + $m + '`' :: W24: adversarial control :: caught
