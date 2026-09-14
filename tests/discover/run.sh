@@ -4314,6 +4314,28 @@ chk "W21: 검증 범위 표지 전부가 선언 절 안에서 쓰인다" "$(mark
 # 두면 그 갈림이 **양 축에서 함께** 붉는다. 통제(`I12`·`I13`)가 이미 이 금지의 비공허를 실증하므로
 # 여기서 픽스처를 다시 만들지 않는다.
 chk "W26: scope-decl 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$SCOPE_KEY")" "0"
+# (W49~W57 · M65) **구조적 불가 주장의 근거** — `scope-decl:`의 반대 방향 병기어다. 층·재서술처·기전이
+# 위 `W1`~`W6`·`W12`·`W26`과 같아 **같은 헬퍼**(`scope_all`·`scope_defn`·`scope_tok`·`bad_seps`)를 부른다.
+# 공유의 근거는 **규약이 두 병기어에 적은 재서술처 목록이 같다**는 사실이다 — 한쪽만 늘면 공유가
+# 틀리므로, 그때는 헬퍼를 가르고 같은 편집에서 이 주석과 규약 문장을 함께 고친다.
+# 폴백은 `W2`와 같은 형태로 못박는다(빈 값이면 백틱 토큰이 두 글자가 되어 아무 파일에나 걸린다).
+INF_KEY='infeasible-decl:'
+INF_ALIAS=$(decl_tail "$CONV" "$INF_KEY" | LC_ALL=C awk '{ print $1 }')
+[ -n "$INF_ALIAS" ] || INF_ALIAS=zzz-infeasible-decl-unset
+chk "W49: infeasible-decl 선언 줄 정확히 1개" "$(decl_count "$CONV" "$INF_KEY")" "1"
+chk "W50: 불가 주장 병기어 추출 positive-control" "$([ "$INF_ALIAS" != zzz-infeasible-decl-unset ] && echo ok || echo no)" "ok"
+# (W51) **본 검사** — 규약 + 재서술처 셋, 네 파일 결합(`W3`과 같은 헬퍼).
+chk "W51: 불가 주장 병기어($INF_ALIAS) 네 파일 전부에 등장" "$(scope_all "$INF_ALIAS")" "yes"
+# (W52~W55) **자리별로도 문다** — 결합만 두면 어느 자리가 죽었는지 가려진다(`W4`~`W6`·`W30`과 같은 판단).
+chk "W52: 규약이 불가 주장 병기어의 정의 줄을 정확히 하나 갖는다" "$(scope_defn "$INF_ALIAS")" "1"
+chk "W53: review SKILL이 불가 주장 병기어를 백틱 토큰으로 갖는다" "$(scope_tok "$REV_SKILL" "$INF_ALIAS")" "yes"
+chk "W54: impl 템플릿이 불가 주장 병기어를 백틱 토큰으로 갖는다" "$(scope_tok "$IMPL_TPL" "$INF_ALIAS")" "yes"
+chk "W55: review 템플릿이 불가 주장 병기어를 백틱 토큰으로 갖는다" "$(scope_tok "$REV_TPL" "$INF_ALIAS")" "yes"
+# (W56) **배선** — `W12`와 같은 형태(인자로 준 토큰 하나만 읽고 그 토큰은 어느 파일에도 없어 기준선이
+# **구조로 상수**다).
+chk "W56: 배선 - 다른 불가 주장 병기어를 주면 결합이 성립하지 않는다" "$(scope_all zzz-other-infeasible)" "no"
+# (W57) 꼬리 구분자 — `W26`과 같은 헬퍼·같은 사유(두 사본의 분리 폭이 갈리는 자리를 양 축에서 함께 붉힌다).
+chk "W57: infeasible-decl 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$INF_KEY")" "0"
 chk "W27: measure-cache 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$MC_KEY")" "0"
 # (W28~W29) **표지 키 둘**에는 같은 금지를 다른 사유로 건다 — `markers_of`의 분리 폭은 두 사본 모두
 # ASCII 공백 하나로 못박혀 있어 금지 문자가 축을 **가르지 않는다**. 대신 **표지 둘을 한 토큰으로
@@ -4480,9 +4502,10 @@ echo "# discover 감지 임계값(≥2→hint·<2→none·단일 레포→none·
 #   — 치환은 파일 전역이라 비교의 **양변이 같은 파일 안**에 있으면 둘 다 함께 바뀌어 동작이 그대로다.
 #   아래 셋째 선언이 무는 굵은 코드 스팬은 짝이 규약·픽스처에 있어 죽는다.
 #   **`# mutates-to:`에는 그 제약이 없다**(M63 리뷰) — 대체값을 선언이 정하므로 **비대칭 치환**이
-#   되고, 자기 변수끼리 비교하는 자리(나열 줄 거름 등)도 **선언할 수 있다**. 이번에 선언하지 않은
-#   것은 구조가 아니라 **비용**이다. 경계의 단일 원본은 `tests/mutation/README.md`다.
+#   되고, 자기 변수끼리 비교하는 자리(나열 줄 거름 등)도 **선언할 수 있다**. M63은 비용을 사유로
+#   선언을 미뤘고, **M65가 아래 다섯째 선언으로 실제로 선언했다**(M64가 그 `sh` 축 판정을 CI에 넘긴 뒤). 경계의 단일 원본은 `tests/mutation/README.md`다.
 # mutates: docs/conventions.md :: declared-change-set :: D7: conventions :: caught
 # mutates: docs/conventions.md :: mutation-negative-control-sentinel :: D7: conventions :: missed
 # mutates-to: tests/discover/run.sh :: printf '**`%s`**' "$_mm" :: printf '`%s`' "$_mm" :: W24: 적대 통제 :: caught
 # mutates-to: tests/discover/run.sh :: '`axis-[a-z0-9-]*`' :: '`zzz-[a-z0-9-]*`' :: W35: 재서술처의 배당 토큰 추출 :: caught
+# mutates-to: tests/discover/run.sh :: [ "$_mall" -eq 1 ] && continue :: [ "$_mall" -eq 9 ] && continue :: W25: 적대 통제 - 표지를 전부 :: caught
