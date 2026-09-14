@@ -4336,6 +4336,41 @@ chk "W55: review 템플릿이 불가 주장 병기어를 백틱 토큰으로 갖
 chk "W56: 배선 - 다른 불가 주장 병기어를 주면 결합이 성립하지 않는다" "$(scope_all zzz-other-infeasible)" "no"
 # (W57) 꼬리 구분자 — `W26`과 같은 헬퍼·같은 사유(두 사본의 분리 폭이 갈리는 자리를 양 축에서 함께 붉힌다).
 chk "W57: infeasible-decl 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$INF_KEY")" "0"
+# (W58~W66 · M66) **다른 절차에 기대는 주장의 분기** — `scope-decl:`·`infeasible-decl:`과 같은 층의 셋째
+# 병기어이고 재서술처도 같은 셋이라 **같은 헬퍼**를 부른다(공유의 근거와 깨지는 조건은 `W49` 주석과 같다).
+# 발화(어떤 문장이 기대는 주장인가)는 여기서 묻지 않는다 — 규약이 그 판정을 리뷰의 목록 대조에 둔다.
+LEAN_KEY='lean-decl:'
+LEAN_ALIAS=$(decl_tail "$CONV" "$LEAN_KEY" | LC_ALL=C awk '{ print $1 }')
+[ -n "$LEAN_ALIAS" ] || LEAN_ALIAS=zzz-lean-decl-unset
+chk "W58: lean-decl 선언 줄 정확히 1개" "$(decl_count "$CONV" "$LEAN_KEY")" "1"
+chk "W59: 기대는 분기 병기어 추출 positive-control" "$([ "$LEAN_ALIAS" != zzz-lean-decl-unset ] && echo ok || echo no)" "ok"
+# (W60) **본 검사** — 규약 + 재서술처 셋, 네 파일 결합(`W3`·`W51`과 같은 헬퍼).
+chk "W60: 기대는 분기 병기어($LEAN_ALIAS) 네 파일 전부에 등장" "$(scope_all "$LEAN_ALIAS")" "yes"
+# (W61~W64) **자리별로도 문다**(`W52`~`W55`와 같은 판단).
+chk "W61: 규약이 기대는 분기 병기어의 정의 줄을 정확히 하나 갖는다" "$(scope_defn "$LEAN_ALIAS")" "1"
+chk "W62: review SKILL이 기대는 분기 병기어를 백틱 토큰으로 갖는다" "$(scope_tok "$REV_SKILL" "$LEAN_ALIAS")" "yes"
+chk "W63: impl 템플릿이 기대는 분기 병기어를 백틱 토큰으로 갖는다" "$(scope_tok "$IMPL_TPL" "$LEAN_ALIAS")" "yes"
+chk "W64: review 템플릿이 기대는 분기 병기어를 백틱 토큰으로 갖는다" "$(scope_tok "$REV_TPL" "$LEAN_ALIAS")" "yes"
+# (W65) **배선** — `W12`·`W56`과 같은 형태(인자로 준 토큰 하나만 읽고 그 토큰은 어느 파일에도 없어 기준선이
+# **구조로 상수**다).
+chk "W65: 배선 - 다른 기대는 분기 병기어를 주면 결합이 성립하지 않는다" "$(scope_all zzz-other-lean)" "no"
+chk "W66: lean-decl 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$LEAN_KEY")" "0"
+# (W67~W72 · M66) **스캔 양성 통제** — 규약 "릴리즈 빌드 출력 검증" 절의 병기어와 재서술처 하나
+# (`skills/release/SKILL.md`). 재서술처가 하나라 결합이 자리별 단언과 겹치므로 결합 케이스를 두지 않고
+# 규약 정의 줄(`W69`)과 재서술처 백틱 토큰(`W70`)만 문다. release 스킬의 토큰은 **파일 전역**으로 찾는다 —
+# 스캔 단계 밖으로 옮겨도 초록이다. 창을 그 단계로 좁히는 일은 하지 않았다(사유: 범위 — 단계 경계를
+# 번호 목록 줄로 읽는 헬퍼가 새로 필요하다. 경계는 README에 적는다).
+SCAN_KEY='scan-control:'
+SCAN_ALIAS=$(decl_tail "$CONV" "$SCAN_KEY" | LC_ALL=C awk '{ print $1 }')
+[ -n "$SCAN_ALIAS" ] || SCAN_ALIAS=zzz-scan-control-unset
+chk "W67: scan-control 선언 줄 정확히 1개" "$(decl_count "$CONV" "$SCAN_KEY")" "1"
+chk "W68: 스캔 양성 통제 병기어 추출 positive-control" "$([ "$SCAN_ALIAS" != zzz-scan-control-unset ] && echo ok || echo no)" "ok"
+chk "W69: 규약이 스캔 양성 통제 병기어의 정의 줄을 정확히 하나 갖는다" "$(scope_defn "$SCAN_ALIAS")" "1"
+chk "W70: release SKILL이 스캔 양성 통제 병기어를 백틱 토큰으로 갖는다" "$(scope_tok "$REL_SKILL" "$SCAN_ALIAS")" "yes"
+# (W71) **배선** — 인자로 준 토큰(어느 파일에도 없음)을 주면 `no`다. 이 케이스가 없으면 `scope_tok`이 인자를
+# 무시해도 `W70`이 초록이다(기준선이 구조로 상수 — `W12`와 같은 형태).
+chk "W71: 배선 - 다른 스캔 양성 통제 병기어는 release SKILL에 없다" "$(scope_tok "$REL_SKILL" zzz-other-scan)" "no"
+chk "W72: scan-control 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$SCAN_KEY")" "0"
 chk "W27: measure-cache 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$MC_KEY")" "0"
 # (W28~W29) **표지 키 둘**에는 같은 금지를 다른 사유로 건다 — `markers_of`의 분리 폭은 두 사본 모두
 # ASCII 공백 하나로 못박혀 있어 금지 문자가 축을 **가르지 않는다**. 대신 **표지 둘을 한 토큰으로
