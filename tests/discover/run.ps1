@@ -4767,6 +4767,53 @@ try {
     Chk "W56: wiring -- another infeasibility co-term does not satisfy the bind" (ScopeAll 'zzz-other-infeasible') 'no'
     # (W57) tail separator -- same helper and reason as `W26`.
     Chk "W57: no forbidden separator in the infeasible-decl declaration tail" (BadSeps $CONV $INF_KEY) '0'
+    # (W58-W66 / M66) BRANCHES OF A CLAIM THAT LEANS ON ANOTHER PROCEDURE -- the third co-term in the same
+    # layer as `scope-decl:` / `infeasible-decl:`; its restatement sites are the same three, so it calls THE
+    # SAME HELPERS (the reason and the breaking condition are those in the `W49` comment). Whether a sentence
+    # IS such a claim is not asked here -- the convention puts that judgement in the review's list check.
+    $LEAN_KEY = 'lean-decl:'
+    $LEAN_ALIAS = ''
+    $leanTail = DeclTail $CONV $LEAN_KEY
+    if ($null -ne $leanTail) {
+        $leanA = @($leanTail -split '[ \t]+' | Where-Object { $_ -ne '' })
+        if ($leanA.Count -gt 0) { $LEAN_ALIAS = $leanA[0] }
+    }
+    if ($LEAN_ALIAS -eq '') { $LEAN_ALIAS = 'zzz-lean-decl-unset' }
+    Chk "W58: lean-decl declaration line is exactly 1" (DeclCount $CONV $LEAN_KEY) '1'
+    Chk "W59: leaning-claim co-term extraction positive-control" $(if ($LEAN_ALIAS -ne 'zzz-lean-decl-unset') { 'ok' } else { 'no' }) 'ok'
+    # (W60) MAIN CHECK -- the convention plus the three restatement sites (same helper as `W3` / `W51`).
+    Chk "W60: leaning-claim co-term ($LEAN_ALIAS) in all four files" (ScopeAll $LEAN_ALIAS) 'yes'
+    # (W61-W64) EACH SEAT IS ALSO ASKED (same judgement as `W52`-`W55`).
+    Chk "W61: the convention has exactly one definition line for the leaning-claim co-term" ([string](ScopeDefn $LEAN_ALIAS)) '1'
+    Chk "W62: review SKILL carries the leaning-claim co-term as a backticked token" (ScopeTok $REV_SKILL $LEAN_ALIAS) 'yes'
+    Chk "W63: impl template carries the leaning-claim co-term as a backticked token" (ScopeTok $IMPL_TPL $LEAN_ALIAS) 'yes'
+    Chk "W64: review template carries the leaning-claim co-term as a backticked token" (ScopeTok $REV_TPL $LEAN_ALIAS) 'yes'
+    # (W65) WIRING -- same shape as `W12` / `W56` (the token handed in is in no file, so the baseline is
+    # CONSTANT BY CONSTRUCTION).
+    Chk "W65: wiring -- another leaning-claim co-term does not satisfy the bind" (ScopeAll 'zzz-other-lean') 'no'
+    Chk "W66: no forbidden separator in the lean-decl declaration tail" (BadSeps $CONV $LEAN_KEY) '0'
+    # (W67-W72 / M66) SCAN POSITIVE CONTROL -- the co-term in the convention's release build-output section and
+    # ONE restatement site (`skills/release/SKILL.md`). With one site a bind would duplicate the per-site check,
+    # so only the definition line (`W69`) and the site token (`W70`) are asked. The release-skill token is found
+    # FILE-WIDE, so moving it out of the scan step stays green; narrowing the window to that step was not done
+    # (reason: scope -- it needs a new helper that reads step boundaries from numbered list lines; the README
+    # records the boundary).
+    $SCAN_KEY = 'scan-control:'
+    $SCAN_ALIAS = ''
+    $scanTail = DeclTail $CONV $SCAN_KEY
+    if ($null -ne $scanTail) {
+        $scanA = @($scanTail -split '[ \t]+' | Where-Object { $_ -ne '' })
+        if ($scanA.Count -gt 0) { $SCAN_ALIAS = $scanA[0] }
+    }
+    if ($SCAN_ALIAS -eq '') { $SCAN_ALIAS = 'zzz-scan-control-unset' }
+    Chk "W67: scan-control declaration line is exactly 1" (DeclCount $CONV $SCAN_KEY) '1'
+    Chk "W68: scan positive-control co-term extraction positive-control" $(if ($SCAN_ALIAS -ne 'zzz-scan-control-unset') { 'ok' } else { 'no' }) 'ok'
+    Chk "W69: the convention has exactly one definition line for the scan positive-control co-term" ([string](ScopeDefn $SCAN_ALIAS)) '1'
+    Chk "W70: release SKILL carries the scan positive-control co-term as a backticked token" (ScopeTok $REL_SKILL $SCAN_ALIAS) 'yes'
+    # (W71) WIRING -- a token found in no file must give `no`; without this case `ScopeTok` could ignore its
+    # argument and `W70` would stay green (baseline constant by construction -- same shape as `W12`).
+    Chk "W71: wiring -- another scan positive-control co-term is not in release SKILL" (ScopeTok $REL_SKILL 'zzz-other-scan') 'no'
+    Chk "W72: no forbidden separator in the scan-control declaration tail" (BadSeps $CONV $SCAN_KEY) '0'
     Chk "W27: no forbidden separator in the measure-cache declaration tail" (BadSeps $CONV $MC_KEY) '0'
     # (W28-W29) the two MARKER keys get the same ban, for a different failure: `MarkersOf` is width-pinned
     # to one ASCII space in both copies, so a forbidden character there does NOT split the axes -- it
