@@ -25,7 +25,13 @@
 # 주의: git 차단 동사는 이 스크립트 내부 setup에만 둔다(여기선 init만 — commit 불필요).
 # 러너 호출 명령줄엔 차단 패턴이 없어야 활성 tide-guard가 막지 않는다.
 #
-# 사용: sh tests/discover/run.sh   (성공 시 exit 0, 하나라도 실패 시 exit 1)
+# 사용: sh tests/discover/run.sh        (전수 — 성공 시 exit 0, 하나라도 실패 시 exit 1)
+#       sh tests/discover/run.sh W      (부분 — 파트 표지 하나만 돈다, M64-T03)
+#
+# Part 선택(M64-T03): 인자가 없으면 **현행 그대로 전수**가 돈다(하위 호환이 계약이다). 인자를 주면
+# 그 파트의 케이스 계산 구간만 돌고 나머지는 **실제로 건너뛴다** — `chk` 호출만 거르면 계산이 그대로
+# 돌아 절감이 0이 되므로, 가드는 `chk`가 아니라 **계산 구간**을 감싼다. 함수 정의와 파트를 건너
+# 쓰이는 경로 상수는 가드 **밖**에 둔다(뒤 파트가 앞 파트의 헬퍼를 쓴다).
 
 set -u
 
@@ -42,6 +48,36 @@ chk() { # <desc> <got> <want>
     if [ "$2" = "$3" ]; then pass=$((pass + 1)); printf 'PASS  %-56s (%s)\n' "$1" "$2"
     else fail=$((fail + 1)); printf 'FAIL  %-56s (got %s, want %s)\n' "$1" "$2" "$3"; fi
 }
+
+# --- 파트 선택 (M64-T03) ------------------------------------------------
+# 표지 명단은 **러너가 탐침으로 갖는다**(C-3의 캐노니컬 이름과 같은 형태) — 선언처는 그 하니스
+# README의 `cases:` 한 줄이고, `F18`이 그 줄의 파트 표지와 이 명단을 대조한다. 명단에 없는 표지를
+# 주면 **조용한 0케이스 초록이 아니라 FAIL**이다(F3·F4와 같은 positive-control 형태).
+PART_SEL=${1-}
+PART_LABELS='A B C D E F G H I J K L M N O P Q R S T U V W'
+part_known() { # <표지> → yes|no
+    case " $PART_LABELS " in
+        *" $1 "*) echo yes ;;
+        *)        echo no ;;
+    esac
+}
+part_on() {   # <표지> → 선택이 없으면(전수) 참, 선택과 같으면 참
+    [ -z "$PART_SEL" ] || [ "$PART_SEL" = "$1" ]
+}
+part_full() { [ -z "$PART_SEL" ]; }   # 전수 실행인가
+# **결과 줄의 형태를 갈라 둔다**(M64-T03) — 같은 형태면 부분 총계를 그대로 보고서에 옮겨도 사람이
+# 못 알아챈다. 접두가 다른 것이 그 경로를 닫고, `F20`이 그 다름을 **같은 함수로** 확인한다.
+RESULT_FULL_PREFIX='# 결과:'
+result_prefix() { # [표지] → 결과 줄 접두(표지가 없으면 전수 접두)
+    if [ -z "${1-}" ]; then printf '%s' "$RESULT_FULL_PREFIX"
+    else printf '# 부분 결과(Part %s):' "$1"; fi
+}
+if [ -n "$PART_SEL" ] && [ "$(part_known "$PART_SEL")" = no ]; then
+    printf 'FAIL  %-56s (got %s, want one of %s)\n' "part-select: 없는 파트 표지" "$PART_SEL" "$PART_LABELS"
+    echo
+    echo "$(result_prefix "$PART_SEL") PASS=0 FAIL=1"
+    exit 1
+fi
 
 # === Part A — 감지 임계값 (detection threshold) =========================
 
@@ -61,6 +97,7 @@ mk_tide_repo() { # <dir> — git 레포 + tide 산출물(milestone)
 
 # --- 픽스처 ---
 # (A1) 부모에 자식 tide 레포 2개 → hint N=2
+if part_on A; then
 P2="$SBX/parent2"; mkdir -p "$P2"
 mk_tide_repo "$P2/svc-auth"
 mk_tide_repo "$P2/svc-orders"
@@ -84,8 +121,10 @@ PH="$SBX/parenthidden"; mkdir -p "$PH"
 mk_tide_repo "$PH/svc-a"
 mk_tide_repo "$PH/svc-b"
 mk_tide_repo "$PH/.hidden-svc"     # 숨김(dot) → 발견 제외(tide 산출물 있어도)
+fi
 
 # --- Part A 시나리오 ---
+if part_on A; then
 chk "A: 자식 tide 레포 2개 → hint N=2"            "$(detect_hint "$P2")" "hint N=2"
 chk "A: 자식 tide 레포 1개 → none"                "$(detect_hint "$P1")" "none"
 chk "A: 자식 tide 레포 0개 → none"                "$(detect_hint "$P0")" "none"
@@ -93,6 +132,7 @@ chk "A: 단일 레포 루트(자식 src 등 비-tide) → none" "$(detect_hint "
 chk "A: 자식 2개 + 숨김 tide 자식 → hint N=2(숨김 미카운트)" "$(detect_hint "$PH")" "hint N=2"
 chk "A: 숨김 자식(.hidden-svc) 미발견"             "$(discover "$PH" | grep -c hidden)" "0"
 chk "A: 발견 = svc-a,svc-b (숨김 제외)"            "$(discover "$PH" | tr '\n' ',')" "svc-a,svc-b,"
+fi
 
 # === Part B — 단일 원본 동결: 카탈로그 단일 원본 + 드리프트 가드 ==========
 # (M22) 커맨드 카탈로그를 docs/commands.md 단일 원본으로 끌어오고, 사이트는 스니펫 셸이다.
@@ -106,25 +146,33 @@ chk "A: 발견 = svc-a,svc-b (숨김 제외)"            "$(discover "$PH" | tr 
 # 하나로 sh 85/0 exit 0 vs ps1 79/6 exit 1로 갈렸다(같은 러너의 Part G는 점 필터를 갖고 있어
 # **한 러너 안에서 파트끼리 규율이 달랐다**). 범위 표의 Part B 가지가 이 의미의 선언처다.
 N=$(ls "$ROOT"/skills/*/SKILL.md 2>/dev/null | grep -c .)
+if part_on B; then
 chk "B: 실제 커맨드 스킬 개수 측정(>0)" "$([ "$N" -gt 0 ] && echo ok || echo no)" "ok"
+fi
 
 README="$ROOT/README.md"
 CONV="$ROOT/docs/conventions.md"
 CANON_CMD="$ROOT/docs/commands.md"        # 새 캐노니컬 커맨드 카탈로그(단일 원본)
+if part_on B; then
 SITE_CMD="$ROOT/site/docs/commands.md"    # 사이트 셸(스니펫 인클루드)
+fi
 SITE_GS="$ROOT/site/docs/getting-started.md"
+if part_on B; then
 ORCH="$ROOT/docs/orchestration.md"       # 사이트 본문으로 인클루드되는 오케스트레이션 안내(카운트 선언 보유)
+fi
 
 # (B1) 카운트 선언 정합 — "N종"(예: 11종) 선언 파일이 실제 스킬 수와 일치(불일치면 FAIL).
 #      site/docs/commands.md는 이제 셸이라 카운트 비보유 → 캐노니컬 docs/commands.md로 대체.
 declared_has_count() { # <file> <N> → yes|no
     [ -f "$1" ] && grep -qF "${2}종" "$1" && echo yes || echo no
 }
+if part_on B; then
 chk "B1: docs/commands.md 가 ${N}종 선언(캐노니컬)"     "$(declared_has_count "$CANON_CMD" "$N")" "yes"
 chk "B1: README.md 가 ${N}종 선언"                     "$(declared_has_count "$README" "$N")" "yes"
 chk "B1: docs/conventions.md 가 ${N}종 선언"           "$(declared_has_count "$CONV" "$N")" "yes"
 chk "B1: site/docs/getting-started.md 가 ${N}종 선언"  "$(declared_has_count "$SITE_GS" "$N")" "yes"
 chk "B1: docs/orchestration.md 가 ${N}종 선언"          "$(declared_has_count "$ORCH" "$N")" "yes"
+fi
 
 # (B2) 사이트 카탈로그 페이지가 스니펫 셸인지 — 인클루드 보유 AND 카운트·카탈로그 표 미재선언.
 #      재수기화(카탈로그 복귀) 시 FAIL → 단일 원본화를 강제한다.
@@ -135,7 +183,9 @@ is_snippet_shell() { # <file> <N> → yes|no
     grep -qF '|---|---|---|---|' "$1" && { echo no; return; }               # 카탈로그 표 재선언 = 셸 아님
     echo yes
 }
+if part_on B; then
 chk "B2: site/docs/commands.md 는 스니펫 셸(재복제 아님)" "$(is_snippet_shell "$SITE_CMD" "$N")" "yes"
+fi
 
 # (B3) 카탈로그 완전성 — 각 커맨드 이름이 캐노니컬 카탈로그에 /tide:<name> 으로 등장.
 #      개수만 맞고 이름이 빠지거나 바뀐 표류(개수 가드가 못 잡던 것)를 적발한다.
@@ -144,6 +194,7 @@ chk "B2: site/docs/commands.md 는 스니펫 셸(재복제 아님)" "$(is_snippe
 has_command() { # <file> <name> → yes|no
     [ -f "$1" ] && grep -qE "/tide:$2([^a-z-]|$)" "$1" && echo yes || echo no
 }
+if part_on B; then
 allnames_ok=yes
 for skill in "$ROOT"/skills/*/SKILL.md; do
     name=$(basename "$(dirname "$skill")")
@@ -161,6 +212,7 @@ chk "B1: 드리프트 통제 — README에 ${WRONG}종 없음"          "$(decla
 chk "B1: 드리프트 통제 — conventions에 ${WRONG}종 없음"     "$(declared_has_count "$CONV" "$WRONG")" "no"
 chk "B1: 드리프트 통제 — site/getting-started에 ${WRONG}종 없음" "$(declared_has_count "$SITE_GS" "$WRONG")" "no"
 chk "B1: 드리프트 통제 — orchestration에 ${WRONG}종 없음"  "$(declared_has_count "$ORCH" "$WRONG")" "no"
+fi
 
 # === Part C — 선언 정합 드리프트 가드 ====================================
 # (M30) Part B가 "같은 사실을 여러 문서가 선언할 때의 드리프트"(커맨드 수)를 집행하듯, 아래 둘도
@@ -186,6 +238,7 @@ in_all_three() { # <token> <f1> <f2> <f3> → yes|no
 }
 
 # (C1) 상태값 선언 정합 — 네 값이 세 파일 전부에 등장(한 곳만 고치면 FAIL).
+if part_on C; then
 for st in 수정함 미해결 "원인만 규명" 확인함; do
     chk "C1: 상태값 '$st' 세 파일 전부에 등장" "$(in_all_three "$st" "$CONV" "$DBG_SKILL" "$DBG_TPL")" "yes"
 done
@@ -217,6 +270,7 @@ chk "C2: skills/debug/template.md 가 기준선 선언"     "$(has_token "$DBG_T
 #      무는 것: 개수 · 두 파일의 집합 일치(양쪽이 다 비면 `no`) · 열거 파일이 그 둘뿐 ·
 #      기록∩비기록 = 공집합 · 음성 통제.
 CONCEPTS="$ROOT/site/docs/concepts.md"
+fi
 
 roster_line() { # <file> → 명단 줄(없으면 빈 출력)
     [ -f "$1" ] || return 0
@@ -325,6 +379,7 @@ rosters_disjoint() { # <file> → yes|no
     echo yes
 }
 
+if part_on C; then
 chk "C3: 규약 명단 이름 6개"        "$(roster_count "$CONV")"     "6"
 chk "C3: 발행 페이지 명단 이름 6개" "$(roster_count "$CONCEPTS")" "6"
 chk "C3: 두 명단 집합 일치"     "$(sets_equal "$(roster_set "$CONV")" "$(roster_set "$CONCEPTS")")" "yes"
@@ -343,6 +398,7 @@ chk "C3: 명단 통제 — 규약에 phantom-cmd 없음"        "$(roster_has "$
 chk "C3: 명단 통제 — 발행 페이지에 phantom-cmd 없음" "$(roster_has "$CONCEPTS" phantom-cmd)" "no"
 chk "C3: 비기록 명단 통제 — 규약에 phantom-cmd 없음"        "$(nonwriter_has "$CONV" phantom-cmd)"     "no"
 chk "C3: 비기록 명단 통제 — 발행 페이지에 phantom-cmd 없음" "$(nonwriter_has "$CONCEPTS" phantom-cmd)" "no"
+fi
 
 # (C4) 2.0 stable 커맨드 **명단**(M41) — C-3과 **같은 부류**라 새 파트를 만들지 않고 여기 둔다.
 #      규약("2.0 안정성")이 그 명단의 열거처를 **규약과 README 둘**로 정하고, 다른 살아 있는 문서는
@@ -395,12 +451,14 @@ stable_files() { # → stable 명단 창을 가진 살아 있는 문서(레포 �
     done | LC_ALL=C sort -u | awk '{ s = s (s == "" ? "" : " ") $0 } END { print s }'
 }
 
+if part_on C; then
 chk "C4: 규약 stable 명단 이름 11개"   "$(stable_count "$CONV")"   "11"
 chk "C4: README stable 명단 이름 11개" "$(stable_count "$README")" "11"
 chk "C4: 두 stable 명단 집합 일치" "$(sets_equal "$(stable_set "$CONV")" "$(stable_set "$README")")" "yes"
 chk "C4: stable 열거 파일은 규약·README 둘뿐" "$(stable_files)" "README.md docs/conventions.md"
 chk "C4: stable 명단 통제 — 규약에 phantom-stable 없음"   "$(stable_has "$CONV" phantom-stable)"   "no"
 chk "C4: stable 명단 통제 — README에 phantom-stable 없음" "$(stable_has "$README" phantom-stable)" "no"
+fi
 
 # === Part D — 브랜치 간 협업 안전(M31) 선언 정합 =========================
 # (M31) Part B/C와 동형 — 규약(conventions 단일 원본)과 그것을 배선하는 스킬이 같은 메커니즘을
@@ -418,6 +476,7 @@ chk "C4: stable 명단 통제 — README에 phantom-stable 없음" "$(stable_has
 REL_SKILL="$ROOT/skills/release/SKILL.md"
 MS_SKILL="$ROOT/skills/milestone/SKILL.md"
 CONV_REL="$ROOT/docs/conventions-release.md"   # 규약 **조각**(M35 분할) — `pr` 모드의 단일 원본
+if part_on D; then
 COV_TOK='git diff --name-only'
 UNCOMMITTED_TOK='git status --porcelain'
 WARN_TOK='git log --all'
@@ -474,6 +533,7 @@ chk "D: 통제 — milestone SKILL 에 역방향 대조 토큰 없음" "$(has_to
 
 # 음성 통제 — 존재하지 않는 가짜 메커니즘 토큰은 규약에 없어야 한다(가드 구별력 입증, B1의 N+1종 부재와 동형).
 chk "D: 통제 — conventions에 가짜 토큰 없음" "$(has_token "$CONV" "git diff --bogus-only")" "no"
+fi
 
 # === Part E — 리뷰 검증 규율(M32) 선언 정합 ==============================
 # (M32) Part C/D와 동형 — 규약(conventions 단일 원본)과 그것을 배선하는 스킬·템플릿이 같은
@@ -505,6 +565,7 @@ in_both() { # <token> <f1> <f2> → yes|no
 }
 
 # (E1) 반증 시도 메커니즘이 규약과 review 스킬 둘 다에 선언(한 곳만 있으면 갈라짐 → FAIL).
+if part_on E; then
 chk "E1: 반증 시도($REFUT_TOK) 규약↔review SKILL 정합"  "$(in_both "$REFUT_TOK" "$CONV" "$REV_SKILL")" "yes"
 
 # (E2) 판정 계측 토큰이 규약·스킬·템플릿 세 곳 전부에 선언(계측 줄은 템플릿에도 자리가 있어야 한다).
@@ -512,6 +573,7 @@ chk "E2: 판정 계측($MEAS_TOK) 세 파일 전부에 등장"      "$(in_all_th
 
 # (E3) 재작업 라운드는 review 계측 줄과 impl 개요가 같은 값을 적으므로 세 곳 선언이 결합 조건이다.
 chk "E3: 재작업 라운드($REWORK_TOK) 세 파일 전부에 등장" "$(in_all_three "$REWORK_TOK" "$CONV" "$REV_TPL" "$IMPL_TPL")" "yes"
+fi
 
 # (E4) 계측 줄 **형식** 정합 — 토큰이 파일 어딘가에 있기만 해선 부족하다. 실제로 M32 구현 중 세 파일이
 # `재작업 라운드 {n}` / `재작업 라운드(rework) {n}` 두 이형으로 갈렸고(E1~E3는 전부 통과했다), 사람이
@@ -520,6 +582,7 @@ chk "E3: 재작업 라운드($REWORK_TOK) 세 파일 전부에 등장" "$(in_all
 same_line() { # <file> <tokA> <tokB> → yes|no  (두 토큰이 같은 한 줄에 있으면 yes)
     [ -f "$1" ] && grep -F "$2" "$1" 2>/dev/null | grep -qF "$3" && echo yes || echo no
 }
+if part_on E; then
 for pair in "conventions:$CONV" "review SKILL:$REV_SKILL" "review 템플릿:$REV_TPL"; do
     chk "E4: 계측 줄 골격(${MEAS_TOK}…(${REWORK_TOK})) ${pair%%:*}" \
         "$(same_line "${pair#*:}" "$MEAS_TOK" "($REWORK_TOK)")" "yes"
@@ -594,6 +657,7 @@ chk "E: 통제 — conventions에 가짜 연속부인 토큰 없음" "$(has_toke
 
 # 음성 통제 — 존재하지 않는 가짜 토큰은 규약에 없어야 한다(B1의 N+1종 부재·Part D 가짜 토큰과 동형).
 chk "E: 통제 — conventions에 가짜 반증 토큰 없음" "$(has_token "$CONV" "${REFUT_TOK}-bogus")" "no"
+fi
 
 # === Part F — 문서 자기서술 정합(M33) ====================================
 # (M33) Part B~E가 "여러 문서가 같은 사실을 선언할 때의 드리프트"를 집행하듯, 이 파트는 문서가
@@ -634,6 +698,7 @@ consumer_ok() { # <file> <name> <token> → yes|no
     if [ "$(has_command "$1" "$2")" = yes ]; then has_anchor "$1" "$3"; else echo yes; fi
 }
 
+if part_on F; then
 npairs=0
 for pair in $(anchor_pairs); do
     npairs=$((npairs + 1))
@@ -655,6 +720,7 @@ chk "F3: 앵커 맵의 이름이 전부 실제 커맨드 스킬" "$names_real" "
 
 # 음성 통제 — 존재하지 않는 가짜 앵커는 캐노니컬에 없어야 한다(B1 N+1종 부재와 동형).
 chk "F3: 통제 — 캐노니컬에 가짜 앵커 없음" "$(has_anchor "$CANON_CMD" "bogusanchor")" "no"
+fi
 
 # === Part G — 상호참조 무결성(M34 · M35에서 규약 문서 **집합**으로 일반화) ====
 # (M34) Part F가 문서의 **자기서술**을 집행한다면, Part G는 문서 **사이를 잇는 참조**를 집행한다 —
@@ -700,6 +766,7 @@ anchor_set() { grep -E '^#{2,3} ' "$1" 2>/dev/null | sed 's/^#* //' | tr -d ' \r
 
 # 집합을 훑어 파일마다 `anchors.<i>.txt`(그 파일의 앵커)를 만들고, 통제용으로 전체를 `anchors.txt`에
 # 모은다. 키는 **인덱스**다 — 파일명을 키로 쓰면 이름에 공백이 들었을 때 레코드가 깨진다.
+if part_on G; then
 conv_files > "$SBX/convfiles.txt"
 : > "$SBX/convbases.txt"
 : > "$SBX/anchors.txt"
@@ -710,6 +777,7 @@ while IFS= read -r cf; do
     anchor_set "$cf" > "$SBX/anchors.$NCONV.txt"
     cat "$SBX/anchors.$NCONV.txt" >> "$SBX/anchors.txt"
 done < "$SBX/convfiles.txt"
+fi
 
 # 인용 후보 줄 — 집합의 **어느 파일명이든** 든 줄. 스니펫 인클루드 지시어 줄(`8<--`)은 제외한다.
 # (M50) 살아 있는 문서마다 `grep` 둘을 띄우던 것을 **awk 한 번**으로 바꿨다. 파일 목록도 awk가
@@ -732,7 +800,9 @@ citation_lines() {
         }' < /dev/null
 }
 
+if part_on G; then
 citation_lines > "$SBX/citelines.txt"
+fi
 # 인용 = 후보 줄의 따옴표 구획. 골격 자리표({} 포함)와 빈 구획은 인용이 아니다(빈 줄로 떨어진다).
 # 레코드 형식은 `<인덱스 목록> <인용>` — 인용은 공백 제거 후라 공백을 담지 않는다.
 # 귀속은 그 줄에 등장한 규약 파일명들의 인덱스(쉼표 결합)다.
@@ -762,10 +832,12 @@ cite_records() {
         }
     }' "$SBX/citelines.txt"
 }
+if part_on G; then
 cite_records > "$SBX/cites.txt"
 
 NANCHOR=$(grep -c . "$SBX/anchors.txt")
 NCITE=$(grep -c . "$SBX/cites.txt")
+fi
 
 # 귀속된 파일이 둘이면 **어느 집합에든 있으면** 통과다(안전 측).
 # (M50) 이전 형태는 레코드마다 `grep -qxF`를 띄웠고, 그래서 **인용 이름이 `-`로 시작하면 grep이
@@ -808,6 +880,7 @@ cite_fixture() { # → 인용 하나가 실재하지 않는 앵커를 가리키�
 has_anchor_name() { grep -qxF -- "$1" "$SBX/anchors.txt" </dev/null && echo yes || echo no; }
 odd_quote_lines() { awk '{ n = gsub(/"/, "&"); if (n % 2 == 1) c++ } END { print c + 0 }' "$SBX/citelines.txt"; }
 
+if part_on G; then
 chk "G1: 살아 있는 인용이 전부 실재 앵커를 가리킴" "$(cite_miss)" "0"
 # (M54) 픽스처 통제 — **같은 판정 함수**를 실재하지 않는 앵커를 가리키는 목록에 건다. 이것이 없으면
 # `cite_miss`의 판정을 망가뜨려도 아무것도 붉지 않는다(M50 리뷰 권장 1이 연 자리, 세 사이클 이월).
@@ -856,6 +929,7 @@ chk "G3: 인용 줄 따옴표 종결(줄바꿈 인용 0)"       "$(odd_quote_lin
 #      남는 미탐지 넷: ⑴ 표지 미사용 ⑵ 백틱 경로 동반 ⑶ 규약이 아닌 파일로의 인용 ⑷ 위의 줄바꿈
 #      인용 예외. **전부 위반이 아니라 경계 밖**이며 규약이 양쪽에서 열거한다.
 SELFREF_JEOL=$(printf '\354\240\210')   # U+C808 — ps1은 Uni(0xC808)로 같은 문자를 만든다(ASCII 원본 규율)
+fi
 # 실패하면 **어느 파일의 무엇이 안 풀렸는지 이름을 출력한다**(M40의 자기고발 조치와 같은 취지).
 # 진단 문구가 **두 가지를 함께 말한다** — 해소되지 않는 자기참조이거나, 파일명이 두 줄 이상 앞에
 # 있는 끊긴 인용이다(위 ⑷ 참조). 어느 쪽인지는 사람이 그 줄과 앞 줄들을 보고 가르며, 어느 쪽이든
@@ -931,7 +1005,9 @@ BEGIN {
     close(CNT)
 }' < /dev/null
 }
+if part_on G; then
 selfref_scan "$SBX/living.txt" "$SBX/selfrefs.txt" "$SBX/selfmiss.txt"
+fi
 selfref_fixture() { # → 자기참조가 자기 파일에 없는 앵커를 가리키는 사본에서의 미해소 수
     _srf="$SBX/selfref-fix.md"
     {
@@ -943,16 +1019,20 @@ selfref_fixture() { # → 자기참조가 자기 파일에 없는 앵커를 가�
     selfref_scan "$SBX/living-fix.txt" "$SBX/selfrefs-fix.txt" "$SBX/selfmiss-fix.txt" > /dev/null
     cat "$SBX/selfmiss-fix.txt"
 }
+if part_on G; then
 SELF_MISS=$(cat "$SBX/selfmiss.txt")
 NSELF=$(grep -c . "$SBX/selfrefs.txt")
+fi
 selfref_has() { grep -qxF -- "$1" "$SBX/selfrefs.txt" </dev/null && echo yes || echo no; }
 
+if part_on G; then
 chk "G4: 자기참조가 전부 자기 파일 앵커를 가리킴"   "$SELF_MISS" "0"
 chk "G4: 자기참조 추출 positive-control(>0)"        "$([ "$NSELF" -gt 0 ] && echo ok || echo no)" "ok"
 chk "G4: 통제 — 가짜 이름(bogus-section) 자기참조 부재" "$(selfref_has 'bogus-section')" "no"
 # (M54) 픽스처 통제 — **같은 스캔**을 자기 파일에 없는 앵커를 가리키는 사본에 건다. 위 `G1`과 같은
 # 사유이고 같은 반환에서 왔다(M50 리뷰 권장 1 · 부인 기록 있음 · 세 사이클 이월).
 chk "G4: 픽스처 통제 — 미해소 자기참조를 실제로 잡는다" "$(selfref_fixture)" "1"
+fi
 
 # === Part H — 실행 환경 축 선언 정합 (M38-T06) ===========================
 # 규약이 실행 환경의 각 축에 **이름을 붙여 선언**하고(단일 원본: `docs/conventions.md`의
@@ -991,9 +1071,11 @@ env_axes() { # <file> → 공백 구분·정렬된 축 ASCII 이름 (선언 줄 
         tr ' \011' '\n\n' | grep -E '^[a-z][a-z-]*$' |
         LC_ALL=C sort | tr '\n' ' ' | sed 's/ *$//'
 }
+if part_on H; then
 CONV_AXES=$(env_axes "$CONV")
 READ_AXES=$(env_axes "$DISC_README")
 NAXES=$(printf '%s\n' "$CONV_AXES" | tr ' ' '\n' | grep -c .)
+fi
 
 # (H14~H16 · M40) 축 이름의 **해소 가능한 표기** `axis:<이름>`. 표기 이전에는 검사가 전부 `env-axes:`
 # 선언을 기점으로 돌아서, **선언에 없는 표 행**은 무엇을 적든 아무 검사도 걸리지 않았다(M38 실측:
@@ -1004,8 +1086,10 @@ table_axis_tokens() { # <file> → 정렬·중복제거된 표 행의 `axis:<이
     grep -E '^\|' "$1" 2>/dev/null | grep -o 'axis:[a-z][a-z-]*' | sed 's/^axis://' |
         LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ *$//'
 }
+if part_on H; then
 CONV_AXIS_TOKENS=$(table_axis_tokens "$CONV")
 NAXIS_TOK=$(printf '%s\n' "$CONV_AXIS_TOKENS" | tr ' ' '\n' | grep -c .)
+fi
 
 # (H17) 집합 일치만으로는 **표기가 아예 없는 행**을 못 잡는다 — 토큰이 없으면 집합에 기여하지 않아
 # 조용히 통과한다(그 행이 축 표 안의 산문으로 남는 자리다). 그래서 **데이터 행 수 == 표기 수**를
@@ -1020,8 +1104,10 @@ axis_table_data_rows() { # <file> → 축 표의 데이터 행(헤더·구분선
       f==3 { exit }
     ' "$1" 2>/dev/null
 }
+if part_on H; then
 NAXIS_ROWS=$(axis_table_data_rows "$CONV" | grep -c .)
 NAXIS_ROW_TOK=$(axis_table_data_rows "$CONV" | grep -c 'axis:[a-z]')
+fi
 
 # (H2) 선언된 축마다 규약 **표의 행**(`|`로 시작하는 줄)에 그 이름이 실재 — 선언만 늘리고 표를
 # 안 고치는 것(집행 없는 축을 집행되는 것처럼 적는 부류)을 막는다.
@@ -1041,9 +1127,11 @@ has_axis() { # <집합> <이름> → yes|no
 # (M39) 매핑의 단일 원본은 **규약 표 행의 `job:<이름>` 토큰**이고(별도 선언 줄 없음), 잡 이름 집합은
 # 워크플로의 `jobs:` 블록에서 **발견**한다(목록 하드코딩 금지 — 발견형 유지). H8은 그 토큰이 **선언된
 # 축의 행**에 있는지를 봐서, 미선언 행에 토큰을 숨겨 두는 반대 방향의 드리프트를 막는다.
+if part_on H; then
 WF="$ROOT/.github/workflows/tests.yml"
 AXIS_ROWS="$SBX/axisrows.txt"
 grep -E '^\|' "$CONV" 2>/dev/null > "$AXIS_ROWS"
+fi
 
 row_job_tokens() { # <행> → 그 행의 잡 이름들 (`job:<이름>` 토큰에서 접두사를 뗀 것)
     printf '%s\n' "$1" | grep -o 'job:[a-z][a-z0-9-]*' | sed 's/^job://'
@@ -1096,10 +1184,12 @@ ci_job_names() { # <workflow> → 정렬된 잡 키 (`jobs:` 블록의 2칸 들�
     awk '/^jobs:/{f=1;next} f&&/^[A-Za-z]/{f=0} f&&/^  [a-z][a-z0-9-]*:[ \011]*$/{gsub(/[ \011:]/,"");print}' \
         "$1" 2>/dev/null | LC_ALL=C sort | tr '\n' ' ' | sed 's/ *$//'
 }
+if part_on H; then
 AXIS_JOBS=$(env_axis_jobs "$CONV")
 CI_JOBS=$(ci_job_names "$WF")
 EXEMPT_JOBS=$(env_exempt_jobs "$CONV")
 NAXJOBS=$(printf '%s\n' "$AXIS_JOBS" | tr ' ' '\n' | grep -c .)
+fi
 
 axis_job_miss() { # 매핑이 가리킨 잡이 워크플로에 실재하지 않는 건수
     m=0
@@ -1113,11 +1203,13 @@ has_job() { # <집합> <이름> → yes|no
     case " $1 " in *" $2 "*) echo yes ;; *) echo no ;; esac
 }
 
+if part_on H; then
 chk "H1: 축 이름 추출 positive-control(>0)"        "$([ "$NAXES" -gt 0 ] && echo ok || echo no)" "ok"
 chk "H2: 선언된 축마다 규약 표 행 실재"            "$(axis_row_miss)" "0"
 chk "H3: 축 이름 집합 일치(규약 ↔ discover README)" "$([ -n "$CONV_AXES" ] && [ "$CONV_AXES" = "$READ_AXES" ] && echo yes || echo no)" "yes"
 chk "H4: 통제 — 가짜 축 이름(bogus-axis) 규약 부재" "$(has_axis "$CONV_AXES" bogus-axis)" "no"
 chk "H5: 통제 — 가짜 축 이름(bogus-axis) README 부재" "$(has_axis "$READ_AXES" bogus-axis)" "no"
+fi
 # (H10·H11) **커버리지** — 등재는 옵트인이 아니다. 워크플로에서 **발견한** 잡은 어느 축 행의
 # `job:` 토큰으로든 등재돼 있어야 한다. 없으면 표에 올리지 않는 것만으로 H7·H8을 피해 갈 수 있다 —
 # M38 리뷰가 그 옆문을 실측으로 열어 보였다(미등재 축의 집행 칸에 없는 잡 이름을 적어도 94/0 초록).
@@ -1135,6 +1227,7 @@ axis_job_cover() { # → "<등재된 잡 수> <미등재·미면제 잡 수>"
     done
     echo "$n $m"
 }
+if part_on H; then
 COVER=$(axis_job_cover)
 COVER_HITS=${COVER% *}
 COVER_MISS=${COVER#* }
@@ -1160,7 +1253,11 @@ chk "H16: 통제 — 가짜 축 표기(bogus-axis) 표 부재"  "$(has_axis "$CO
 # 0==0으로 공허 통과하므로 행 수 자체의 positive-control을 함께 둔다).
 chk "H17a: 축 표 데이터 행 추출 positive-control(>0)" "$([ "$NAXIS_ROWS" -gt 0 ] && echo ok || echo no)" "ok"
 chk "H17b: 축 표 데이터 행 수 == axis: 표기 수"       "$([ "$NAXIS_ROWS" = "$NAXIS_ROW_TOK" ] && echo yes || echo no)" "yes"
+fi
 
+# --- Part G (이어서) — 규약 집합 밖 대상 인용 · 열거 번호 인용 ---------------
+# 이 자리부터 다시 **G 케이스**다(케이스 표지가 파트다 — 파트 선택 인자가 무는 단위도 그것이다).
+# `run.ps1` 사본은 이 둘을 Part G 구획 안에 두므로 **두 사본의 선택 결과가 같다**(M64-T03).
 # (G5~G7 · M42) 규약 문서 집합 **밖**을 가리키는 인용. G1의 대조 집합은 `docs/conventions*.md`의 앵커
 # 뿐이라 `skills/*/SKILL.md`·`docs/*.md`를 가리킨 인용은 **어느 가드도 보지 않았다** — 네 사이클 미반영
 # (M35-impl 후속3)이고, M41이 그 실례를 하나 찾았다(`skills/impl/SKILL.md`의 절 이름이 인용과 어긋남).
@@ -1168,7 +1265,9 @@ chk "H17b: 축 표 데이터 행 수 == axis: 표기 수"       "$([ "$NAXIS_ROW
 # **유일성은 규약 집합에만** 유지한다(살아 있는 문서 전체로 넓히면 무관한 문서 간 이름 충돌이 터진다).
 # 골격은 G4와 같은 표지(`"…" 절`)를 쓴다 — 표지가 없으면 후보가 평범한 인용부호 산문으로 폭발한다.
 # 대상 파일이 레포에 **없으면 대조하지 않는다**(경로 자체가 틀린 경우는 이 파트의 경계 밖 — 규약 고지).
+if part_on G; then
 SKEL_UI=$(printf '\354\235\230')        # U+C758 — 인용 골격의 조사(`…`의 "…" 절). ps1은 Uni(0xC758)
+fi
 extdoc_cites_of() { # <file> → "<경로>\t<앵커>" (규약 집합 밖 대상만)
     awk -v J="$SELFREF_JEOL" -v UI="$SKEL_UI" -v BASES="$SBX/convbases.txt" '
         BEGIN { while ((getline b < BASES) > 0) if (b != "") BASE[++NB] = b }
@@ -1193,7 +1292,9 @@ extdoc_cites_of() { # <file> → "<경로>\t<앵커>" (규약 집합 밖 대상�
             }
         }' "$1"
 }
+if part_on G; then
 TAB=$(printf '\t')
+fi
 extdoc_misses() { # <레코드 파일> → 미해소 인용(사람이 읽을 형태)
     while IFS="$TAB" read -r p a; do
         [ -n "$a" ] || continue
@@ -1202,6 +1303,7 @@ extdoc_misses() { # <레코드 파일> → 미해소 인용(사람이 읽을 형
         grep -qxF -- "$a" "$SBX/extanchors.txt" </dev/null || printf '%s -> %s\n' "$p" "$a"
     done < "$1"
 }
+if part_on G; then
 : > "$SBX/extcites.txt"
 while IFS= read -r f; do
     [ -f "$f" ] || continue
@@ -1217,6 +1319,7 @@ chk "G6: 규약 밖 인용 추출 positive-control(>0)"   "$([ "$NEXTCITE" -gt 0
 printf -- '- `skills/impl/SKILL.md`%s "bogus-cross-anchor" %s\n' "$SKEL_UI" "$SELFREF_JEOL" > "$SBX/extfx.md"
 extdoc_cites_of "$SBX/extfx.md" > "$SBX/extfx.txt"
 chk "G7: 통제 — 주입한 깨진 규약 밖 인용을 잡는다" "$(extdoc_misses "$SBX/extfx.txt" | grep -c .)" "1"
+fi
 
 # (G8 · M44) 절 **안의 항목**을 열거 번호로 가리키는 인용을 금지한다. M43 리뷰 이슈 5가 그 부류다 —
 # 원장의 인용이 `묻지 않는 것 ⑷`를 가리켰는데 그 번호는 M40이 닫아 없앤 항목이었고, 인용을 옮긴
@@ -1235,9 +1338,11 @@ circ_list() {   # U+2460..U+2487 을 한 줄에 한 자씩 — 코드포인트 �
     _n=160; while [ "$_n" -le 191 ]; do printf "\342\221$(printf '\\%o' "$_n")\n"; _n=$((_n + 1)); done
     _n=128; while [ "$_n" -le 135 ]; do printf "\342\222$(printf '\\%o' "$_n")\n"; _n=$((_n + 1)); done
 }
+if part_on G; then
 circ_list > "$SBX/circ.txt"
 NCIRC=$(grep -c . "$SBX/circ.txt")
 CIRCBYTES=$(LC_ALL=C wc -c < "$SBX/circ.txt" | tr -d ' ')
+fi
 
 cite_lines_of() { # <문서> → 인용 줄(경로:줄번호:본문)
     grep -n '`[A-Za-z0-9_./-]*\.md`' "$1" 2>/dev/null | grep '"' | sed "s|^|$1:|"
@@ -1254,6 +1359,7 @@ g8_hits() { # <인용 줄 파일> → 위반 줄 수 (절 표지 뒤 열거 번�
     LC_ALL=C sort -u "$1.hits" | grep -c .
 }
 
+if part_on G; then
 : > "$SBX/g8cites.txt"
 while IFS= read -r f; do
     [ -f "$f" ] || continue
@@ -1273,6 +1379,7 @@ chk "G8b: 절 표지 뒤 열거 번호 인용 0건"              "$NG8" "0"
 { printf -- '- `docs/conventions.md`%s "%s" %s ' "$SKEL_UI" "bogus-anchor" "$SELFREF_JEOL"
   sed -n '24p' "$SBX/circ.txt"; } > "$SBX/g8fx.txt"
 chk "G8c: 통제 — 주입한 열거 번호 인용을 잡는다"      "$(g8_hits "$SBX/g8fx.txt")" "1"
+fi
 
 # === Part I — 축 상태 주장 정합 (M42) ====================================
 # 표가 **집행된다**고 적은 축을 산문이 **반대로** 적는 자리를 문다. 카운트는 B1·F1이, 명단은 C-3·C-4가,
@@ -1357,6 +1464,7 @@ bad_seps() { # <file> <키> → 꼬리에 금지 구분자가 있으면 1, 없�
 markers_of() { # <키> → 그 키가 선언한 표지 토큰(백틱·강조 제거, 한 줄에 하나)
     decl_tail "$CONV" "$1" | tr -d '`*' | tr ' ' '\n' | grep -v '^$'
 }
+if part_on I; then
 NEG_MARKS=$(markers_of 'state-neg:')
 PAST_MARKS=$(markers_of 'state-past:')
 NMARK=$(printf '%s\n' "$NEG_MARKS" | grep -c .)
@@ -1369,6 +1477,7 @@ NMARK=$(printf '%s\n' "$NEG_MARKS" | grep -c .)
 # 들이는 것이 아니라 **이미 통과하는 전송으로 나머지 둘을 맞추는** 것이다.
 NEG_MARKS_SP=$(printf '%s' "$NEG_MARKS" | tr '\n' ' ')
 PAST_MARKS_SP=$(printf '%s' "$PAST_MARKS" | tr '\n' ' ')
+fi
 
 # POS 집합 = 표에서 **집행 칸이 살아 있는** 축만이다. 전체 `axis:` 토큰을 쓰면 규약이 **의무화한**
 # 정직 표기(집행이 없는 축은 부정 상태어로 명시)가 곧 모순으로 잡혀, 그 축의 표 행 자체가 FAIL을
@@ -1389,7 +1498,9 @@ live_axes() { # → 집행 칸이 살아 있는 축 이름(공백 구분)
             if (name != "" && cell != "" && !dead) print name
         }' "$CONV" | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ *$//'
 }
+if part_on I; then
 POS_AXES=$(live_axes)
+fi
 
 contra_of() { # <file> → "<축>:<줄번호>" (모순 후보, 한 줄에 하나)
     awk -v AX="$POS_AXES" -v NEG="$NEG_MARKS_SP" -v PAST="$PAST_MARKS_SP" '
@@ -1421,6 +1532,7 @@ contra_count() { # 살아 있는 문서 전체의 후보 수
 }
 
 # (I1) 표지를 못 읽으면 아래 전부가 0==0으로 **공허 통과**한다 — 추출 자체를 먼저 문다.
+if part_on I; then
 chk "I1: state-neg 표지 추출 positive-control(>0)" "$([ "$NMARK" -gt 0 ] && echo ok || echo no)" "ok"
 # (I1b) POS 집합도 positive-control이 필요하다 — 표 형식이 바뀌어 집행 칸 추출이 어긋나면 POS가 비고
 # I2가 **0==0으로 조용히 통과**한다(H14가 무는 것은 `axis:` 토큰 집합이지 이 파생 집합이 아니다).
@@ -1486,6 +1598,7 @@ printf -- '- `%s` alpha\tbeta\n'      'state-neg:' > "$ICON/sep-tab.md"
 printf -- '- `%s` alpha\302\240beta\n' 'state-neg:' > "$ICON/sep-nbsp.md"
 chk "I12: 통제 — 탭 구분자를 잡는다"   "$(bad_seps "$ICON/sep-tab.md" 'state-neg:')"  "1"
 chk "I13: 통제 — NBSP 구분자를 잡는다" "$(bad_seps "$ICON/sep-nbsp.md" 'state-neg:')" "1"
+fi
 
 # (I14~I15) **구분자 집합을 규약에서 읽어 자기 구현을 검사한다**(M42 재작업 3). 집합이 세 매체
 # (규약의 한글 이름 · 여기 8진 바이트 · ps1의 `\uXXXX`)에 흩어져 문자열 대조로는 닫히지 않았고,
@@ -1511,6 +1624,7 @@ sep_hits() { # <코드포인트 목록> → 그중 몇 개를 잡는지
     done
     echo "$_h"
 }
+if part_on I; then
 SEP_CPS=$(markers_of 'sep-cps:')
 SEP_OK_CPS=$(markers_of 'sep-ok-cps:')
 NSEP=$(printf '%s\n' "$SEP_CPS" | grep -c .)
@@ -1527,7 +1641,11 @@ chk "I18: sep-cps 선언 줄이 규약에 정확히 1개"    "$(decl_count "$CON
 chk "I19: sep-ok-cps 선언 줄이 규약에 정확히 1개" "$(decl_count "$CONV" 'sep-ok-cps:')" "1"
 chk "I14: 규약이 선언한 구분자를 전부 잡는다"   "$(sep_hits "$SEP_CPS")"    "$NSEP"
 chk "I15: 통제 — 허용 문자는 잡지 않는다"       "$(sep_hits "$SEP_OK_CPS")" "0"
+fi
 
+# --- Part F (이어서) — 문서 자기서술 정합 · 러너 소스 규율 -------------------
+# 여기부터 다시 **F 케이스**다(F1b·F4~F20). 물리적 자리는 Part I 뒤지만 **케이스 표지가 파트**이고,
+# 파트 선택 인자가 무는 단위도 그것이다 — 두 사본이 같은 자리에서 같은 표지로 갈린다(M64-T03).
 declared_cases() {
     # **첫 매치 고정** — sed의 선행 `.*`는 탐욕이라 한 줄에 `cases:`가 둘이면 **마지막**을 집는데
     # ps1의 `[regex]::Match`는 **첫 번째**를 집는다(M38 리뷰 사소 4의 실측: 같은 입력에 sed 7 ↔
@@ -1550,7 +1668,9 @@ part_sum() {
     done
     echo "$s"
 }
+if part_on F; then
 chk "F1b: 파트별 내역 합 == 총계 선언" "$(part_sum)" "$(declared_cases)"
+fi
 
 # (F4~F5) **`run.ps1`의 비-ASCII 0줄 규율을 기계가 문다**(M42 재작업 3 — 자체 발의).
 # 규약과 이 하니스 README가 *"byte>127=0 규율이 유지된다"*고 적어 왔지만 **어느 케이스도, CI의 어느
@@ -1596,6 +1716,7 @@ nonascii_scan() { # → "<검사한 파일 수> <비-ASCII 줄 수>"
     done < "$_list"
     echo "$_n $_c"
 }
+if part_on F; then
 SCAN=$(nonascii_scan)
 NPS1_FOUND=$(ps1_files | grep -c .)
 NPS1_CHECKED=${SCAN% *}
@@ -1609,6 +1730,7 @@ chk "F5: tests/**/*.ps1 비-ASCII 0줄"        "$NPS1_BAD"     "0"
 # 입력에서도 붉어지지 않는다**(M42 리뷰 권장 3: ps1 사본이 그 상태였다). 목록 왕복에서 한 줄이라도
 # 잃으면 — 인용 없는 단어 분할, 인코딩 손실, 잘린 목록 — 두 수가 갈라진다.
 chk "F6: 검사한 파일 수 == 발견한 파일 수"    "$NPS1_CHECKED" "$NPS1_FOUND"
+fi
 # (F7) **발견 명세를 픽스처로 문다.** 위 세 축(대소문자·숨김·디렉터리)은 `tests/` 실물에는 그런 파일이
 # 없어 **실물만 훑어서는 영원히 초록**이다. 샌드박스에 넷을 만들어 `ps1_files_in`을 그대로 걸고 **정렬된
 # basename 목록**을 대조한다 — 수가 아니라 **이름**을 보는 이유는, 숨김을 빠뜨리고(-1) 대문자를
@@ -1631,9 +1753,11 @@ basename_join() { # (stdin: 경로 목록) → 정렬된 basename을 |로 이어
         awk '{ s = (NR == 1 ? $0 : s "|" $0) } END { print s }'
 }
 disc_spec() { ps1_files_in "$1" | basename_join; }   # <dir> → 정렬된 basename 한 줄
+if part_on F; then
 DISC_FIX=$(ps1_disc_fixture)
 chk "F7: 발견 명세 — 대소문자 구분·숨김 포함·디렉터리 제외" \
     "$(disc_spec "$DISC_FIX")" ".hidden.ps1|a.ps1|c.ps1"
+fi
 # (F8) **`F7`의 숨김 축 전제조건을 문다**(M43 — M42 리뷰 반환 권장 1의 처분). `F7`이 "숨김도 본다"를
 # 증명하려면 픽스처의 그 파일이 **실제로 숨김이어야** 한다. ps1 사본은 속성 설정을 `try/catch`로
 # 감싸는데, 그 단계가 조용히 실패하면 **숨김 축이 통째로 사라지고 러너는 아무 말도 하지 않는다**
@@ -1651,6 +1775,7 @@ disc_visible_count() { # <dir> → 숨김 미포함·최상위·정규 파일 �
     done
     echo "$_n"
 }
+if part_on F; then
 chk "F8: 숨김 픽스처가 숨김 미포함 열거에서 감춰진다(F7 전제조건)" "$(disc_visible_count "$DISC_FIX")" "1"
 
 # (F9~F12 · M45) **로케일 고정 규율** — F5(비-ASCII 0줄)와 같은 층위다: 문서가 아니라 **러너 소스**의
@@ -1682,6 +1807,7 @@ LOCALE_EXEMPT_TOK='locale-exempt:'
 # `[[:space:]]`와 `\s`는 무는 폭이 달라 그 자체가 두 셸 갈림의 씨앗이다(리뷰 반환 2).
 LOCALE_SITE_RE_SH='(^|[|;&(]|\$\()[[:blank:]]*(LC_ALL=C[[:blank:]]+)?(sort|uniq)([[:blank:]);|#]|$)'   # locale-exempt: detector-pattern
 LOCALE_SITE_RE_PS1='Sort-Object[[:blank:]]*(\||\)|#|$)'
+fi
 # **주석 줄 판정은 이 파일에 한 번만 둔다** — Part F(로케일 사이트) · Part J(변수 이름 경계) ·
 # Part K(공통 통제 토큰)가 **같은 술어**를 쓴다. 셋이 각자 적으면 그 순간 선언처가 셋이 되고 한 곳만
 # 고쳐도 나머지가 조용히 어긋난다(이 저장소가 반복해 데인 자리다).
@@ -1719,6 +1845,7 @@ locale_sites_in() { # <파일> <정규식> → 사이트 수 세기용(필터 �
 # 고정으로 봤는데, 문서는 *"ordinal 전용 헬퍼 경유"*라 적어 **구현이 문서보다 넓었다**(주석의 단어
 # 하나로 미고정 정렬이 통과했다 — 실측). 인자 없는 `Sort-Object`에는 **고정 형태가 애초에 없다** —
 # 헬퍼로 바꾸면 사이트가 아니게 되고, 남겨야 하면 **선언**한다. 그래서 탈출구는 `.sh`의 `LC_ALL=C` 하나다.
+if part_on F; then
 LOC_UNFIXED_SH=''; LOC_UNFIXED_PS1=''; NLOCSITE=0; NLOCPS1=0
 for f in "$ROOT"/tests/*/run.sh "$ROOT"/tests/lib/*.sh; do
     LOC_UNFIXED_SH="$LOC_UNFIXED_SH$(locale_scan_in "$f" "$LOCALE_SITE_RE_SH")
@@ -1771,6 +1898,7 @@ ENTRY_DOC="$ROOT/CLAUDE.md"
 ENTRY_CAP=$(LC_ALL=C grep -E '^- \*\*상한\*\*: \*\*[0-9]+줄\*\*' "$CONV" | LC_ALL=C sed -E 's/.*\*\*([0-9]+)줄\*\*.*/\1/' | head -1)
 [ -n "$ENTRY_CAP" ] || ENTRY_CAP=0
 ENTRY_CAP_DECLS=$(LC_ALL=C grep -cE '^- \*\*상한\*\*: \*\*[0-9]+줄\*\*' "$CONV")
+fi
 # **판정은 함수 하나에만 있다** — F15(실물)와 F16(픽스처)이 **같은 함수**를 부른다. 재작업 1이 고친
 # 자리가 여기다: 첫 판본은 F16이 비교를 인라인으로 재구현해 F15의 판정을 한 번도 호출하지 않았고,
 # 그래서 **F15의 판정식을 통째로 무력화해도 양 사본이 172/0 초록**이었다(리뷰 A1 실측 — 동어반복
@@ -1783,6 +1911,7 @@ entry_cap_verdict() { # <파일> <상한> → ok | over(n/cap) | nocap | nofile
 }
 # (F14) 추출 positive-control + 선언 유일성 — 정규식이나 규약 문구가 망가지면 상한이 빈 값이 되어
 # 아래 판정이 공허해진다(체크리스트 ⑴⑵ — G8b0·I7~I9와 동형).
+if part_on F; then
 chk "F14: 상한 선언 추출 positive-control(유일)" "$ENTRY_CAP_DECLS" "1"
 # (F15) 실제 판정 — 진입점 문서가 상한 이하인가.
 chk "F15: CLAUDE.md 줄 수 <= 규약의 상한" "$(entry_cap_verdict "$ENTRY_DOC" "$ENTRY_CAP")" "ok"
@@ -1795,6 +1924,37 @@ case "$(entry_cap_verdict "$SBX/entryover.md" "$ENTRY_CAP")" in
     *)     ENTRY_FIX_R=missed ;;
 esac
 chk "F16: 통제 — 판정 함수가 상한 초과 픽스처를 잡는다" "$ENTRY_FIX_R" "caught"
+fi
+
+# === F18~F20 (M64-T03) — 파트 선택 인자의 자기 정합 ======================
+# 러너가 **자기 인자에 대해 하는 서술**을 집행한다(F1·F1b와 같은 층위 — 그 둘은 케이스 수, 이쪽은
+# 파트 표지다). 셋 다 러너가 실제로 쓰는 **같은 함수**를 부른다 — `F16`의 교훈(픽스처 통제는
+# 「픽스처가 조건을 만족하는가」가 아니라 「실제 판정이 픽스처를 잡는가」를 물어야 한다)을 따른다.
+# 표지 명단을 README 선언 줄에서 뽑는다 — 합산 범위를 **그 한 줄**로 좁히는 것은 `part_sum`과 같다.
+part_labels_declared() {
+    grep -F 'cases:' "$DISC_README" 2>/dev/null | head -1 |
+        grep -oE 'Part [A-Z] [0-9]+' | sed 's/^Part //; s/ .*//' | tr '\n' ' ' | sed 's/ $//'
+}
+# (F18) 러너의 표지 명단 == README 내역이 여는 파트 — 추출이 0건이면 빈 문자열이 되어 **붉는다**
+# (선언을 통째로 지워도 초록이 되는 경로를 닫는다).
+if part_on F; then
+chk "F18: README 내역의 파트 표지 == 러너의 표지 명단" "$(part_labels_declared)" "$PART_LABELS"
+# (F19) 통제 — 없는 표지는 거부된다. `ZZ`는 **한 글자 표지가 될 수 없는** 토큰이라 파트가 늘어도
+# 이 통제가 낡지 않는다.
+chk "F19: 통제 — 없는 파트 표지는 거부된다" "$(part_known A),$(part_known ZZ)" "yes,no"
+# (F20) 부분 실행의 결과 줄 접두가 전수의 접두와 **다르다**. 같으면 부분 총계를 그대로 보고서에
+# 옮겨도 사람이 못 알아채므로, 이 다름이 그 경로를 닫는 기계다.
+_rp_full=$(result_prefix '')
+_rp_part=$(result_prefix ZZ)
+if [ -z "$_rp_full" ] || [ -z "$_rp_part" ]; then F20R=empty
+else
+    case "$_rp_part" in
+        "$_rp_full"*) F20R=same ;;
+        *)            F20R=distinct ;;
+    esac
+fi
+chk "F20: 부분 결과 줄 접두가 전수 결과 줄 접두와 다르다" "$F20R" "distinct"
+fi
 
 
 # === Part J (M48) — 러너 소스의 변수 이름 경계 ==========================
@@ -1870,6 +2030,7 @@ varbound_scan() { # → "<검사한 파일 수> <위반 줄 수>"
     done < "$_list"
     echo "$_n $_c"
 }
+if part_on J; then
 VBSCAN=$(varbound_scan)
 NVBFOUND=$(runner_src_files | grep -c .)
 NVBCHECKED=${VBSCAN% *}
@@ -1901,6 +2062,7 @@ chk "J4: 통제 — 심은 경계 위반을 잡는다" "$(varbound_scan_in "$SBX
 # 것이다). 뒷자리만 보면 스캔이 통째로 죽어도 `0`이라 초록이므로 **앞자리가 그 공허를 막는다**.
 printf 'echo "x ${NANN}\352\261\264 y"\n#  note $NANN\352\261\264 tail\n' > "$SBX/varfx0.sh"
 chk "J5: 통제 — 중괄호 형태와 주석 줄은 잡지 않는다" "$(varbound_probe "$SBX/varfx0.sh")" "1/0"
+fi
 # (J6) **발견 명세를 픽스처로 문다**(M48 재작업 1 — 리뷰 권장 3). `J2`는 발견과 소비를 **같은 함수**로
 # 재므로 명세 자체를 무는 것이 하나도 없었다. **이 케이스가 무는 것은 디렉터리 하나의 명세이지
 # 「어느 루트를 훑는가」가 아니다** — 라운드 0이 실측한 그 구멍(루트에서 `hooks/`를 빼면 24 → 22 파일로
@@ -1920,8 +2082,10 @@ runner_disc_fixture() { # <dir> 만들고 그 경로를 출력
     mkdir -p "$_d/dir.ps1" "$_d/dir.sh"   # 이름만 확장자인 디렉터리 — 발견되지 않는다
     echo "$_d"
 }
+if part_on J; then
 chk "J6: 통제 — 발견 명세를 픽스처로 문다(대소문자·숨김·디렉터리)" \
     "$(runner_src_files_in "$(runner_disc_fixture)" | basename_join)" ".hidden.ps1|a.sh|d.ps1"
+fi
 
 # === Part K (M48) — 하니스 공통 통제 보유 대조 ==========================
 # **기존 하니스가 공통으로 가진 통제를 새 하니스가 빠뜨린다** — M47 사이클의 반환 셋이 전부 이 부류였고
@@ -1956,10 +2120,12 @@ chk "J6: 통제 — 발견 명세를 픽스처로 문다(대소문자·숨김·�
 # **경계**(규약이 같은 문장으로 적는다): 이 검사가 무는 것은 **토큰의 존재**이지 그 통제가 **실제로
 # 동작하는가**가 아니다. 토큰을 두고 도달하지 못하게 만들면 이 파트는 초록이다 — 그 층은
 # `tests/mutation`과 규약이 요구하는 **케이스별 되돌림 실측**(사람)이 덮는다.
+if part_on K; then
 HC_DECL_RE='^<!-- harness-control: .* -->$'
 # (M50) 선언 줄 추출을 **한 번만** 한다 — 이전에는 부르는 자리마다 규약 전체를 다시 훑었고,
 # 그 자리 하나가 하니스마다 도는 루프 안에 있어 호출 수가 하니스 수에 비례했다. 값은 같다.
 LC_ALL=C grep -E "$HC_DECL_RE" "$CONV" > "$SBX/hclines.txt" 2>/dev/null || :
+fi
 hc_lines() { cat "$SBX/hclines.txt"; }
 hc_field() { # <선언 줄> <필드 번호> → 그 필드
     # (M50) 이전에는 `printf | sed | awk`로 세 프로세스를 썼고, 이 함수가 **하니스 x 선언 줄 x 필드
@@ -2045,6 +2211,7 @@ hc_wellformed() { # <선언 줄> → 네 필드가 다 있고 어느 것도 비�
     for _i in 1 2 3 4; do [ -n "$(hc_field "$1" "$_i")" ] || return 1; done
     return 0
 }
+if part_on K; then
 harness_dirs_in "$ROOT/tests" > "$SBX/harnesses.txt"
 NHCDECL=$(hc_lines | grep -c .)
 NHCNAME=$(hc_lines | while IFS= read -r _l; do hc_field "$_l" 1; done | LC_ALL=C sort -u | grep -c .)
@@ -2063,6 +2230,7 @@ chk "K2: 통제 이름 유일성 + 선언 줄 형식 정합(네 필드·빈 칸 
 chk "K3: 하니스 발견 positive-control(>0)" "$([ "$NHARNESS" -gt 0 ] && echo ok || echo no)" "ok"
 # (K4) 본 검사 — 면제를 뺀 모든 (하니스 x 셸) 조합이 자기 몫의 토큰을 갖는다.
 chk "K4: 면제 제외 하니스x셸 조합의 통제 토큰 미보유 0건" "$NHCMISS" "0"
+fi
 # (K5) 픽스처 통제 — 살아 있는 미보유가 0건이라 이것이 공허를 막는다. 기댓값 `1/caught`의 앞자리는
 # **발견 명세**(러너 하나뿐인 미끼 디렉터리는 하니스가 아니다)를, 뒷자리는 **판정**을 문다.
 # 픽스처 하니스는 토큰을 **주석으로만** 갖는다 — 주석 제외를 되돌리면 뒷자리가 `missed`로 바뀌어
@@ -2088,6 +2256,7 @@ hc_fixture() { # 토큰을 **주석에만** 가진 하니스 + 러너 하나뿐�
     harness_dirs_in "$_d" > "$_d/list.txt"
     printf '%s\n' "$_d/list.txt"
 }
+if part_on K; then
 HCFIXLIST=$(hc_fixture)
 HCFIXN=$(grep -c . "$HCFIXLIST")
 HCFIXR=$([ "$(hc_missing "$HCFIXLIST" | grep -c .)" -gt 0 ] && echo caught || echo missed)
@@ -2095,6 +2264,7 @@ chk "K5: 통제 — 토큰이 주석에만 있는 픽스처 하니스를 같은 
 # (K6) 면제 실재 — 면제 목록이 지목한 이름이 **실재하는 하니스**여야 한다. 하니스 이름이 바뀌거나
 # 사라지면 면제가 고아가 되어 그 통제가 아무도 모르게 헐거워진다(Part H의 면제 실재 검사와 같은 층).
 chk "K6: 면제 목록이 지목한 하니스 실재(고아 0)" "$(hc_orphan_exempt "$SBX/harnesses.txt" | grep -c .)" "0"
+fi
 
 # === Part L (M49) — 선언한 수 ↔ 열거 항목 수 ==============================
 # 문서가 **개수를 선언하고 곧이어 열거**하는 골격에서 둘이 어긋나는 것을 문다. 발단은 M48 라운드 0의
@@ -2109,6 +2279,7 @@ chk "K6: 면제 목록이 지목한 하니스 실재(고아 0)" "$(hc_orphan_exe
 #   구분자다). 수치의 단일 출처는 `docs/reports/M49-impl.md`다.
 #   경계: 어떤 항목의 **본문**이 아직 등장하지 않은 다음 번호를 언급하면 수가 부풀어 오른다(오탐).
 #   오늘 살아 있는 사이트에 그 형태는 0건이고, 규약이 같은 경계를 적는다.
+if part_on L; then
 CNT_WORDS=$(markers_of 'count-word:')
 CNT_COPS=$(markers_of 'count-copula:')
 CNT_WORDS_SP=$(printf '%s' "$CNT_WORDS" | tr '\n' ' ')
@@ -2122,6 +2293,7 @@ ENUM_S1_SP=$(head -20 "$SBX/lcirc.txt" | tr '\n' ' ')
 ENUM_S2_SP=$(tail -20 "$SBX/lcirc.txt" | tr '\n' ' ')
 NE1=$(printf '%s\n' "$ENUM_S1_SP" | tr ' ' '\n' | grep -c .)
 NE2=$(printf '%s\n' "$ENUM_S2_SP" | tr ' ' '\n' | grep -c .)
+fi
 # `LC_ALL=C`로 고정한다 — `index`·`length`·`substr`가 바이트 의미로 일관되고, 로케일에 따라 문자/
 # 바이트가 섞이는 축이 아예 없어진다(ps1 사본은 .NET 문자 의미로 일관되며, 쓰는 연산이 부분 문자열
 # 탐색과 그 뒤 자르기뿐이라 두 사본의 답이 같다).
@@ -2206,6 +2378,7 @@ enum_scan_in() { # <파일> → 후보마다 "CAND", 불일치마다 "BAD <파�
         }
     }' "$1"
 }
+if part_on L; then
 : > "$SBX/lscan.txt"
 while IFS= read -r _lf; do
     [ -f "$_lf" ] || continue
@@ -2220,6 +2393,7 @@ chk "L2: count-copula 선언 줄 정확히 1개" "$(decl_count "$CONV" 'count-co
 chk "L3: 표지 추출 positive-control(수사>0 · 조사>0)" \
     "$([ "$NCW" -gt 0 ] && [ "$NCC" -gt 0 ] && echo ok || echo no)" "ok"
 chk "L4: 열거 기호 두 계열 각 20자(양 사본이 자기 단언)" "$NE1/$NE2" "20/20"
+fi
 # (L5) **루트마다 묻는다.** *"발견이 0이면 FAIL"* 만으로는 **루트 하나가 사라지는 것**을 보지 못한다 —
 # 나머지 루트의 문서가 남아 수는 여전히 0보다 크고, 훑는 범위만 조용히 줄어든다. M48 리뷰가 정확히
 # 이 형태(`J1`)를 반환했으므로 같은 실수를 되풀이하지 않는다. 부류는 **발견 함수가 돌려준 경로에서**
@@ -2235,15 +2409,18 @@ living_roots() { # → 살아 있는 문서 목록에 나타난 최상위 루트
         END { n = 0; for (k in c) n++; print n }
     ' "$SBX/living.txt"
 }
+if part_on L; then
 chk "L5: 살아 있는 문서 루트 다섯 부류가 전부 나타난다(>0이 아니라 루트마다)" \
     "$(living_roots)/$([ "$NLIVING" -gt 0 ] && echo ok || echo no)" "5/ok"
 # (L6) 후보가 0이면 L7이 **0==0으로 조용히 통과**한다 — 추출 자체를 먼저 문다.
 chk "L6: 선언+열거 후보 추출 positive-control(>0)" "$([ "$NLCAND" -gt 0 ] && echo ok || echo no)" "ok"
 chk "L7: 살아 있는 문서의 선언 수 ↔ 열거 항목 수 불일치 0건" "$NLBAD" "0"
+fi
 # 픽스처 통제 둘 — **실제 판정을 픽스처에 건다**(픽스처가 조건을 만족하는가가 아니라 판정이 잡는가를
 # 묻는 형태. M46 리뷰 차단 #1의 판례). 픽스처 문자열은 **표지에서 파생**시킨다 — 러너 소스에 수사·
 # 조사를 리터럴로 적으면 ps1 사본이 ASCII-only 규율을 어기고, 이 사본도 자기 표지를 갖게 된다.
 enum_word_for() { printf '%s\n' "$CNT_WORDS" | awk -F= -v v="$1" '$2 + 0 == v { print $1; exit }'; }
+if part_on L; then
 LW3=$(enum_word_for 3)
 LCOP=$(printf '%s\n' "$CNT_COPS" | head -1)
 LE1=$(sed -n '21p' "$SBX/lcirc.txt"); LE2=$(sed -n '22p' "$SBX/lcirc.txt")
@@ -2283,6 +2460,7 @@ chk "L12: 음성 통제 — 수사가 낱말 안이면 표지가 아니다 / 공
 # M40에서 기전을 재현하지 못했고(그래서 `G2`가 중복 앵커 이름을 찍는다), M49 리뷰 차단 1의 재현에서도
 # `10/2`만으로는 원인이 보이지 않았다. 같은 일을 세 번째로 반복하지 않는다.
 chk "L13: 불일치 진단이 걸린 표지를 담는다"     "$(enum_scan_in "$SBX/lfa.md" | grep -c "^BAD .*:${LW3}${LCOP}:")" "1"
+fi
 
 # === Part M (M51) — 에픽(방향) 참조 정합 =================================
 # 사이클의 방향이 **직전 사이클의 후속 메모**가 아니라 **선언된 줄기**에서 오게 하는 장치다.
@@ -2295,10 +2473,12 @@ chk "L13: 불일치 진단이 걸린 표지를 담는다"     "$(enum_scan_in "$
 #   **묻지 않는 것**: 「이 마일스톤이 그 줄기에 정말 속하는가」는 의미 판정이라 정적으로 물을 수
 #   없다(M49의 「머리 위치」·M50의 「while-read 루프」와 같은 부류). 거짓 참조는 문서에 남는 눈에
 #   보이는 진술이라 리뷰의 영역이다.
+if part_on M; then
 EPIC_STATUSES=$(markers_of 'epic-status:')
 EPIC_MEMBER_MARK=$(markers_of 'epic-members:' | head -1)
 EPIC_SINCE=$(markers_of 'epic-since:' | head -1)
 NEPICSTAT=$(printf '%s\n' "$EPIC_STATUSES" | grep -c .)
+fi
 epic_list_into() { # <에픽목록 경로> <마일스톤목록 경로> <트리 루트>
     : > "$1"
     [ -d "$3/docs/epics" ] && ls "$3"/docs/epics/E*.md 2>/dev/null > "$1"
@@ -2377,6 +2557,7 @@ epic_scan() { # <에픽목록> <마일스톤목록>
         }
     }' < /dev/null
 }
+if part_on M; then
 epic_list_into "$SBX/epics.txt" "$SBX/msdocs.txt" "$ROOT"
 NMSDOC=$(grep -c . "$SBX/msdocs.txt")
 epic_scan "$SBX/epics.txt" "$SBX/msdocs.txt" > "$SBX/epicscan.txt"
@@ -2403,6 +2584,7 @@ chk "M5: 본 검사 — 에픽 참조 불일치 0건" "$NEPICBAD" "0"
 # 잡는가를 묻는 형태. M46 리뷰 차단 #1의 판례). 목록을 인자로 넘기므로 **살아 있는 목록을
 # 덮어쓰지 않는다.**
 EPIC_SN=${EPIC_SINCE#M}
+fi
 epic_fixture() { # <모드> → 사본 트리 경로. 모드: dangling | oneway | noref | clean | noepic
     _d="$SBX/epicfix-$1"
     rm -rf "$_d" 2>/dev/null
@@ -2454,6 +2636,7 @@ epic_bad_in() { # <사본 트리> → 그 트리에서 **실제 판정**이 낸 
     epic_list_into "$SBX/fx-epics.txt" "$SBX/fx-ms.txt" "$1"
     epic_scan "$SBX/fx-epics.txt" "$SBX/fx-ms.txt" | grep -c '^BAD '
 }
+if part_on M; then
 chk "M6: 픽스처 통제 — 실재하지 않는 에픽을 가리키면 판정이 잡는다" \
     "$(epic_bad_in "$(epic_fixture dangling)")" "1"
 chk "M7: 픽스처 통제 — 역방향이 끊기면 판정이 잡는다" \
@@ -2482,6 +2665,7 @@ chk "M13: 픽스처 통제 — 에픽이 남의 마일스톤을 등재하면 잡
 # 창을 지우면 앞자리가, 과거 예외를 지우면 뒷자리가 어긋난다.
 chk "M14: 음성 통제 — 블록 밖 산문 / 과거 마일스톤 등재는 붉지 않는다" \
     "$(epic_bad_in "$(epic_fixture prose)")/$(epic_bad_in "$(epic_fixture past)")" "0/0"
+fi
 
 # === Part N (M52) — 상태 확인 항목 선언 정합 =============================
 # 확인 항목 목록의 선언처를 규약 한 곳으로 만들고 `/tide:status`·`/tide:fleet`이 **읽기만** 하게 한
@@ -2490,8 +2674,10 @@ chk "M14: 음성 통제 — 블록 밖 산문 / 과거 마일스톤 등재는 �
 #   단일 원본은 `docs/conventions.md`의 "상태 확인 항목과 시작점 판단 (선언)" 절.
 #   **소비자 대조에 ASCII 토큰만 쓴다**(`status-items:`·`M{N}-impl.md`) — ps1 사본이 한글 리터럴을
 #   가질 수 없으므로 두 사본이 **문자 그대로 같은 술어**를 쓰게 하는 자리다.
+if part_on N; then
 NSIABSENT=$(markers_of 'status-items-absent:' | grep -c .)
 NSI=$(markers_of 'status-items:' | grep -c .)
+fi
 si_rows_in() { # <규약 경로> → 「무엇을 읽는가」 표의 행 수(선언 줄 이후·다음 제목 전까지)
     LC_ALL=C awk '
         index($0, "status-items:") > 0 { win = 1; next }
@@ -2517,6 +2703,7 @@ si_fixture() { # <모드> → 사본 규약 경로 (clean | norow | notoken)
     esac
     printf '%s' "$_sf"
 }
+if part_on N; then
 chk "N1: status-items 선언 줄 정확히 1개" "$(decl_count "$CONV" 'status-items:')" "1"
 chk "N2: autonomy-level 선언 줄 정확히 1개" "$(decl_count "$CONV" 'autonomy-level:')" "1"
 # (N3) **복합 기댓값**. 앞자리는 추출 positive-control, 뒷자리는 **없는 키로 같은 추출 경로를 한 번
@@ -2548,6 +2735,7 @@ chk "N9: 소비자에 옛 열거의 흔적이 없다 (status/fleet)" \
 # 그 편집이 리뷰의 눈에 걸리는 것이 이 자리의 방어다(규약이 그 한계를 함께 적는다).
 AUTLINES=$(markers_of 'autonomy-lines:' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ *$//')
 AUTDEF=$(markers_of 'autonomy-default:' | head -1)
+fi
 auton_scan() { # <skills 루트> -> "이름=줄수" 를 ordinal 정렬해 한 줄로
     for _ad in "$1"/*/; do
         [ -f "$_ad/SKILL.md" ] || continue
@@ -2593,6 +2781,7 @@ auton_default_ok() { # -> ok|no : 선언된 사이트 전부가 기본값 토큰
 }
 # (N10) 부재의 의미를 선언 하나가 정하고, 그 값이 값 집합의 원소인지까지 **복합**으로 묻는다 —
 # 집합 밖의 기본값은 "파일이 없으면 무슨 뜻인가"를 미정으로 만든다.
+if part_on N; then
 chk "N10: autonomy-default 선언 1개 / 값이 값 집합의 원소" \
     "$(decl_count "$CONV" 'autonomy-default:')/$(markers_of 'autonomy-level:' | grep -cx "$AUTDEF")" "1/1"
 chk "N11: autonomy-lines 선언 줄 정확히 1개" "$(decl_count "$CONV" 'autonomy-lines:')" "1"
@@ -2623,6 +2812,7 @@ chk "N17: fleet-cycle 시작점 - 참조 1 / 그 문단의 열거 0" \
         $0 == "" { flush(); next }
         { buf[++m] = $0; if (index($0, "status-items:") > 0) has = 1 }
         END { flush(); print n + 0 }' "$ROOT/skills/fleet-cycle/SKILL.md")" "ok/0"
+fi
 
 # --- 바닥 표지 공존 금지 (M52 리뷰 라운드 1 차단 1) -------------------------
 # `autonomy-lines:`가 세는 것은 **조건이 아니라 언급**이라, 조건을 한 게이트에서 다른 게이트로
@@ -2635,8 +2825,10 @@ floor_marks() { # 선언 줄의 백틱 구획 토큰(공백을 포함할 수 있
         for (i = 2; i <= n; i += 2) if (a[i] != "") print a[i]
     }'
 }
+if part_on N; then
 FLOORTAB=$(floor_marks | tr '\n' '\t')
 NFLOOR=$(floor_marks | grep -c .)
+fi
 floor_hits_in() { # <SKILL.md 경로> → 자율 토큰과 바닥 표지가 같은 항목 창에 있는 창 수
     # **창은 들여쓰기를 안다**(재작업 3). 첫 판본은 «항목 줄이면 무조건 새 창»이라 **하위 불릿이 부모의
     # 창에서 빠져나갔고**, 바닥 게이트 항목 바로 아래에 하위 불릿으로 조건을 달면 표지와 다른 창이 되어
@@ -2698,6 +2890,7 @@ floor_fixture() { # <모드> → 사본 skills 루트 (clean | attach | nest)
 }
 # (N18)(N19) 선언 줄 유일성과 **추출 positive-control** — 표지 추출이 비면 아래 본 검사가 «항상 0»으로
 # 공허해진다. 백틱 구획 파싱이 망가지는 것이 그 경로라 수를 직접 단언한다.
+if part_on N; then
 chk "N18: floor-marks 선언 줄 정확히 1개" "$(decl_count "$CONV" 'floor-marks:')" "1"
 chk "N19: 바닥 표지 추출 positive-control(>0)" "$([ "$NFLOOR" -gt 0 ] && echo ok || echo no)" "ok"
 # (N20) **본 검사.** 자율 토큰이 바닥 표지와 같은 항목 창에 있으면 붉는다.
@@ -2718,6 +2911,7 @@ MAXES=$(decl_tail "$CONV" 'mutation-axes:' | LC_ALL=C awk -v q="\`" '{
     for (i = 2; i <= n; i += 2) if (a[i] != "") print a[i]
 }')
 NMAX=$(printf '%s\n' "$MAXES" | grep -c .)
+fi
 axis_desc_in() { # <규약 경로> <축 토큰> → **그 절 안에서** 그 축을 서술하는 줄 수
     # **창은 선언 줄부터 다음 최상위 체크리스트 항목 전까지다.** 파일 전역을 훑으면 서술을 **지우지
     # 않고 다른 절로 옮기는** 편집이 초록으로 지나간다 — 같은 피해에 이르는 다른 모양이고,
@@ -2752,6 +2946,7 @@ axis_fixture() { # <모드> → 사본 규약 경로 (clean | nodesc | moved)
     esac
     printf '%s' "$_axf"
 }
+if part_on N; then
 chk "N24: mutation-axes 선언 줄 정확히 1개" "$(decl_count "$CONV" 'mutation-axes:')" "1"
 # (N25) 추출 positive-control — 백틱 구획 파싱이 망가지면 아래 본 검사가 «축 0개»로 공허 통과한다.
 chk "N25: 되돌림 축 추출 positive-control(>0)" "$([ "$NMAX" -gt 0 ] && echo ok || echo no)" "ok"
@@ -2765,16 +2960,19 @@ chk "N28: 음성 통제 - 손대지 않은 사본은 붉지 않는다" "$(axis_m
 # (실측: 창 좁히기를 되돌린 변이가 240/0 초록이었다). 규약의 「성립한 적대 변이는 픽스처로 승격한다」가
 # 이 자리를 가리킨다.
 chk "N29: 적대 통제 - 서술을 절 밖으로 옮기면 잡는다" "$(axis_missing "$(axis_fixture moved)")" "1"
+fi
 
 # --- Part O: 회고 후속 항목의 소비 (M54) -------------------------------------
 # 회고가 적은 후속 항목이 다음 사이클에 닿는지를 문다. 무는 것은 **선언의 유일성 · 상태 값의 집합
 # 소속 · 소비자의 배선**까지이고, 처분이 타당한가는 리뷰의 영역이다(규약이 같은 경계를 적는다).
+if part_on O; then
 RETRO="$ROOT/docs/reports/retro.md"
 # **꼬리를 정규화한다** — 앞뒤·중복 공백을 남기면 빈 값 검사에서 ` ` + `` + ` ` 가 선언 줄의
 # 선행 공백과 맞아떨어져 **빈 상태 칸이 조용히 통과한다**(실측: O6이 got 0/want 1로 붉었다).
 RSTAT=$(decl_tail "$CONV" 'retro-status:' | LC_ALL=C awk '{ $1 = $1; print }')
 RBLK=$(decl_tail "$CONV" 'retro-block:' | LC_ALL=C awk '{ print $1 }')
 RFIRST=$(printf '%s' "$RSTAT" | LC_ALL=C awk '{ print $1 }')
+fi
 retro_vals() { # <retro 경로> → 마커 창 안 데이터 행의 상태 값(정규화)을 `[값]`으로 한 줄씩
     # **창은 ASCII 마커 블록이다** — 절 제목(한글)을 매칭하면 제목이 바뀔 때 조용히 창을 잃고
     # `run.ps1` 사본이 byte>127=0 규율 아래 같은 판정을 쓸 수 없다(에픽 블록과 같은 근거).
@@ -2851,6 +3049,7 @@ mst_hits() { # 선언된 상태 값 중 milestone 스킬에 등장하는 **서�
     done
     echo "$_mh"
 }
+if part_on O; then
 chk "O1: retro-status 선언 줄 정확히 1개" "$(decl_count "$CONV" 'retro-status:')" "1"
 chk "O2: retro-block 선언 줄 정확히 1개" "$(decl_count "$CONV" 'retro-block:')" "1"
 # (O3) 추출 positive-control — 마커·표 파싱이 망가지면 아래 본 검사가 «행 0개»로 공허 통과한다.
@@ -2868,6 +3067,7 @@ chk "O8: 부재 통제 - 회고 문서가 없으면 행 0개" "$(retro_rows "$SB
 chk "O9: 오탐 방향 - 괄호 주석이 붙은 집합 안 값은 통과" "$(retro_bad "$(retro_fixture paren)")" "0"
 # (O10·O11) 소비자의 배선. 읽는다는 사실은 있어야 하고, **규칙을 다시 열거하면 안 된다**.
 chk "O10: milestone 스킬이 회고 문서를 가리킨다" "$([ "$(grep -cF -- 'docs/reports/retro.md' "$ROOT/skills/milestone/SKILL.md")" -ge 1 ] && echo ok || echo no)" "ok"
+fi
 retro_blocks() { # <retro 경로> → 마커 시작 표지의 수 (창이 몇 개인가)
     # **창은 문서 전체에서 하나여야 한다.** 규약이 *"읽는 범위는 최상단 회고 섹션의 그 표뿐"*
     # 이라 못박는데 위 `retro_vals`의 파서는 **파일 안 마커 블록을 전부** 읽는다 — 새 섹션에
@@ -2880,6 +3080,7 @@ retro_blocks() { # <retro 경로> → 마커 시작 표지의 수 (창이 몇 �
         END { print n + 0 }
     ' "$1"
 }
+if part_on O; then
 chk "O11: 복제 금지 - 스킬이 상태 값 집합을 열거하지 않는다" "$([ "$(mst_hits)" -le 1 ] && echo ok || echo no)" "ok"
 # (O12~O14 · M58) **소비 창의 유일성.** 위 파서가 전부 읽으므로 창이 둘이 되면 규약이 금지한
 # *"이력을 가로질러 세기"* 가 그대로 성립한다. 그 상태를 여기서 붉힌다.
@@ -2888,11 +3089,14 @@ chk "O12: 본 검사 - 마커 창이 정확히 1개" "$(retro_blocks "$RETRO")" 
 chk "O13: 픽스처 통제 - 창이 둘이면 잡는다" "$(retro_blocks "$(retro_fixture dup)")" "2"
 # 오탐 방향 — 손대지 않은 사본은 그대로 1이다. 여기서 갈리면 픽스처 생성이 창을 건드린 것이다.
 chk "O14: 오탐 방향 - 손대지 않은 사본은 창이 1개" "$(retro_blocks "$(retro_fixture clean)")" "1"
+fi
 
 # --- Part P: 완료 기준 대조 (M55) --------------------------------------------
 # 마일스톤이 요구한 것을 impl이 번호로 대조했는가. 무는 것은 **빠짐과 유령**까지이고
 # *"충족이 사실인가"* 는 리뷰의 영역이다(규약이 같은 경계를 적는다).
+if part_on P; then
 CRITV=$(decl_tail "$CONV" 'criteria-verdict:' | LC_ALL=C awk '{ $1 = $1; print }')
+fi
 # **선언을 잃었을 때의 기본값을 두 사본에 못박는다.** 그러지 않으면 `sh`는 `[ n -ge "" ]`가 죽어
 # 대상이 비고, `ps1`은 `[int]''`가 **0**이라 **모든 마일스톤**을 대상으로 삼는다 — 같은 트리에서
 # 다른 판정이 된다(되돌림 `p2-key` 실측: sh 263/6 vs ps1 262/7). 형식이 어긋나면 **어느 마일스톤도
@@ -2916,10 +3120,12 @@ esac
 # ps1은 **집합 밖**(`@() -notcontains ''`)으로 센다 — 같은 트리에서 다른 수다(실측: 선언을 지우고
 # 판정 칸 하나를 비우면 `P9`가 sh 10 · ps1 11). 원문에 박으면 파생 토큰이 **거기서 나오므로** 한
 # 자리로 끝난다 — 아래 두 대입에 따로 폴백을 두지 않는 이유이고, 두면 그것이 두 번째 선언처다.
+if part_on P; then
 CRITUNSET=zzz-criteria-verdict-unset
 [ -n "$CRITV" ] || CRITV=$CRITUNSET
 CRITOK=$(printf '%s' "$CRITV" | LC_ALL=C awk '{ print $1 }')
 CRITALT=$(printf '%s' "$CRITV" | LC_ALL=C awk '{ print $NF }')
+fi
 crit_nums() { # <마일스톤 경로> → 완료 기준의 **최상위** 번호
     # 창은 그 절 하나다 — 파일 전역을 훑으면 다른 절의 번호 목록이 섞인다.
     # 창 열기는 **줄 끝 CR만 벗기고 여전히 정확히 비교**한다(`decl_lines`와 **같은 형태** — M56).
@@ -3068,11 +3274,13 @@ crit_eol_same() { # → LF·CRLF 픽스처에서 **같은 번호**가 나오면 
 # (어떤 값이 다른 값 안에 들어 있는 그 둘). 러너는 값의 위치도 낱말도 알지 않는다.
 # 쌍이 도출되지 않으면(선언에 포함 관계가 없거나 선언을 잃었을 때) 판정은 **항상 `no`**가 되고
 # `P17`이 **붉어 그 사실을 드러낸다** — 조용히 공허해지지 않는다.
+if part_on P; then
 CRITPAIR=$(printf '%s' "$CRITV" | LC_ALL=C awk '{ for (i = 1; i <= NF; i++) for (j = 1; j <= NF; j++) if (i != j && index($i, $j) > 0) { print $i, $j; exit } }')
 CRITSUP=$(printf '%s' "$CRITPAIR" | LC_ALL=C awk '{ print $1 }')
 [ -n "$CRITSUP" ] || CRITSUP=$CRITOK
 CRITSUB=$(printf '%s' "$CRITPAIR" | LC_ALL=C awk '{ print $NF }')
 [ -n "$CRITSUB" ] || CRITSUB=$CRITOK
+fi
 crit_reenum() { # <파일> → 포함 쌍의 **두 값이 모두** 파일에 나타나면 yes, 아니면 no
     [ -f "$1" ] || { echo no; return; }
     LC_ALL=C awk -v vals="$CRITPAIR" '
@@ -3121,6 +3329,7 @@ crit_skill_fixture() { # <모드> → 스킬 사본 경로
     esac
     printf '%s' "$_csf"
 }
+if part_on P; then
 chk "P1: criteria-verdict 선언 줄 정확히 1개" "$(decl_count "$CONV" 'criteria-verdict:')" "1"
 chk "P2: criteria-since 선언 줄 정확히 1개" "$(decl_count "$CONV" 'criteria-since:')" "1"
 # (P3) 추출 positive-control — 기준 파싱이 망가지면 «집합이 같다»가 «0 == 0»으로 공허 통과한다.
@@ -3165,6 +3374,7 @@ chk "P18: 오탐 방향 - 값 하나만 쓰는 줄은 통과" "$(crit_reenum "$(
 # 줄 단위 창이던 시절 이 형태가 초록으로 통과했다(`adv-enum-split`). 창이 줄로 되돌아가면
 # 여기서 붉는다 — 되돌림이 아니라 **상시로** 무는 자리다.
 chk "P19: 픽스처 통제 - 두 줄에 나눠 적은 열거도 잡는다" "$(crit_reenum "$(crit_skill_fixture split)")" "yes"
+fi
 
 # --- Part Q: 판정 비교의 Ordinal 고정 (M57) -----------------------------------
 # M42-T03이 *"이 파일의 모든 단언이 여기를 지난다"* 며 판정 비교를 Ordinal로 못박았다. 그 처방이
@@ -3229,6 +3439,7 @@ vq_fixture() { # <모드> → 사본 경로
     ' "$_vqsrc" > "$_vqf"
     printf '%s' "$_vqf"
 }
+if part_on Q; then
 chk "Q1: 판정 자리 추출 positive-control(>0)" "$([ "$(vq_sites)" -gt 0 ] && echo ok || echo no)" "ok"
 chk "Q2: 본 검사 - 미고정·미선언 판정 자리 0건" "$(vq_total)" "0"
 # 픽스처 통제 — **실제 판정을 사본에 건다**(M46 판례). 두 방향을 각각 깬다.
@@ -3237,6 +3448,7 @@ chk "Q4: 픽스처 통제 - 면제 선언을 잃으면 잡는다" "$(vq_scan "$(
 # 오탐 방향 — **선언한 자리는 통과한다**. 여기서 붉으면 면제 경로가 죽은 것이고, 그러면 규약이
 # 「선언하면 된다」고 적는 것이 거짓이 된다.
 chk "Q5: 오탐 방향 - 미고정이어도 선언하면 통과" "$(vq_scan "$(vq_fixture redecl)")" "0"
+fi
 
 # --- Part R: 릴리즈 커버리지 bookkeeping 선언 정합 (M58) ---------------------
 # 커버리지 체크가 대상에서 빼는 집합이 **규약과 릴리즈 스킬 두 곳**에 적혀 있었고 기계가 둘을
@@ -3259,6 +3471,7 @@ bk_fixture() { # → 릴리즈 스킬 사본에 토큰 하나를 심은 것 (실
     { cat "$REL_SKILL"; printf 'zzz %s zzz\n' "$(bk_tokens | LC_ALL=C awk '{ print $1; exit }')"; } > "$_bkf"
     printf '%s' "$_bkf"
 }
+if part_on R; then
 chk "R1: coverage-bookkeeping 선언 줄 정확히 1개" "$(decl_count "$CONV" "$BK_KEY")" "1"
 # (R2) 추출 positive-control — 토큰이 0개면 아래 본 검사가 «복제 0»으로 공허하게 통과한다.
 chk "R2: 토큰 추출 positive-control(>0)" "$([ "$(bk_tokens | LC_ALL=C awk '{ print NF }')" -gt 0 ] && echo ok || echo no)" "ok"
@@ -3269,6 +3482,7 @@ chk "R4: 픽스처 통제 - 토큰이 새면 잡는다" "$(bk_dup_in "$(bk_fixtu
 # (R5) 배선 — 열거하지 않는 것만으로는 부족하다. **목록을 통째로 지워도** R3은 0이라 초록이므로,
 # 소비자가 선언 이름을 **가리키는지**를 함께 문다(그러지 않으면 이 검사가 공허해진다).
 chk "R5: 배선 - release 스킬이 선언 이름을 가리킨다" "$(has_token "$REL_SKILL" "$BK_KEY")" "yes"
+fi
 
 # --- Part S: 게시 가용성 축 · 게시 불가 종료 선언 정합 (M59) ------------------
 # release 절차가 「닿는 원격이 있다」를 전제해 원격 불가 환경에서 정상 결과가 실패로 보고되던
@@ -3293,6 +3507,7 @@ ts_fixture() { # → 종료 상태 토큰을 **지운** 릴리즈 스킬 사본(
     fi
     printf '%s' "$_tsf"
 }
+if part_on S; then
 chk "S1: push-availability 선언 줄 정확히 1개" "$(decl_count "$CONV_REL" "$PA_KEY")" "1"
 chk "S2: terminal-state 선언 줄 정확히 1개" "$(decl_count "$CONV_REL" "$TS_KEY")" "1"
 # (S3) 추출 positive-control — 꼬리가 비면 아래 본 검사가 빈 토큰을 찾아 **공허하게** 갈린다.
@@ -3301,13 +3516,16 @@ chk "S3: 두 선언 꼬리 추출 positive-control"     "$([ -n "$(pa_token)" ] 
 # 여기가 붉어 재서술처가 함께 고쳐진다.
 chk "S4: 본 검사 - release 스킬이 종료 상태 이름을 갖는다" "$(has_token "$REL_SKILL" "$(ts_token)")" "yes"
 chk "S5: 본 검사 - 커맨드 카탈로그가 종료 상태 이름을 갖는다" "$(has_token "$CMD_CANON" "$(ts_token)")" "yes"
+fi
 # (S6) 배선 — 종료 상태만 물으면 **축 이름**이 사라져도 초록이다(축이 종료 상태의 트리거다).
 # 무는 것은 선언 **키**가 아니라 그 키가 이름 붙인 **병기어**다(키의 꼬리 콜론을 벗긴 것) —
 # 소비자에 재서술되는 것이 병기어이기 때문이다(규약의 ASCII 병기어 규율).
 pa_name() { printf '%s' "${PA_KEY%:}"; }
+if part_on S; then
 chk "S6: 배선 - release 스킬이 push 축 이름을 갖는다" "$(has_token "$REL_SKILL" "$(pa_name)")" "yes"
 # (S7) 픽스처 통제 — **실제 판정을 사본에 건다**(M46 판례). 이름이 빠지면 S4가 잡아야 한다.
 chk "S7: 픽스처 통제 - 이름이 빠지면 잡는다" "$(has_token "$(ts_fixture)" "$(ts_token)")" "no"
+fi
 
 # --- Part T: 러너 소스 개행 계약 (M59 리뷰 차단 1 → M60) --------------------
 # `.gitattributes`가 `*.sh`를 `eol=lf`로 못박고 사유까지 적어 두었는데 확인하는 기계가 0개였다.
@@ -3373,6 +3591,7 @@ b
     fi
     printf '%s' "$_efx"
 }
+if part_on T; then
 chk "T1: source-eol 선언 줄 정확히 1개" "$(decl_count "$CONV" "$EOL_KEY")" "1"
 # (T2) 추출 positive-control — 패턴이 0개면 아래 「검출 0」이 공허하다.
 chk "T2: eol=lf 패턴 추출 positive-control(>0)" "$([ "$(eol_globs | grep -c .)" -gt 0 ] && echo ok || echo no)" "ok"
@@ -3388,6 +3607,7 @@ chk "T6: 음성 통제 - LF 사본은 통과" "$(crlf_in "$(eol_fixture lf)")" "
 # 자리를 열었다: 앞선 판본은 `has_token "$GITATTR" 'eol=lf'`라 **주석 처리된 선언에도 초록**이었고
 # T2보다 약해 **독립으로 붉을 수 없었다** — 검사가 아니라 주장이었다.
 chk "T7: 배선 - 다른 .gitattributes를 주면 추출이 그것을 따른다" "$(eol_globs "$(eol_ga_fixture)")" "*.zzz"
+fi
 
 # --- Part U: 측정 시점 규율 + 대조의 조용한 제외 노출 (M60) ------------------
 # 하니스는 impl 보고서를 **입력으로 읽는데**(Part P), `crit_targets`가 보고서 없는 마일스톤을
@@ -3409,6 +3629,7 @@ skipped_ms() { # [추가 마일스톤 번호] → 제외된 번호
     return 0
 }
 skipped_n() { skipped_ms "${1-}" | grep -c .; }
+if part_on U; then
 chk "U1: measure-order 선언 줄 정확히 1개" "$(decl_count "$CONV" "$MO_KEY")" "1"
 # (U2) 추출 positive-control — 꼬리가 비면 아래 결합이 빈 토큰으로 공허하게 성립한다.
 chk "U2: 병기어 추출 positive-control" "$([ -n "$(mo_name)" ] && echo ok || echo no)" "ok"
@@ -3422,6 +3643,7 @@ chk "U6: 대조에서 제외된 마일스톤 0개" "$(skipped_n)" "0"
 # (U7) 픽스처 통제 — 노출이 공허하지 않다. **차이로 묻는다**: 기준선이 0이 아닐 수 있고(작업 중
 # 사이클이 정확히 그 상태다) 절대값으로 물으면 그때 통제가 기준선을 재게 된다.
 chk "U7: 픽스처 통제 - 제외가 하나 늘면 수도 하나 는다" "$(( $(skipped_n 9999) - $(skipped_n) ))" "1"
+fi
 
 
 # --- Part V: 되돌림 표를 기계가 읽는다 (M61) ---------------------------------
@@ -3430,6 +3652,7 @@ chk "U7: 픽스처 통제 - 제외가 하나 늘면 수도 하나 는다" "$(( $
 # 검사한다고 적혀 있었으나 구현은 토큰 존재만 보아 `T2`보다 엄격히 약했고, 되돌림 여덟 행에서
 # **단독으로 붉은 적이 없었다**(항상 `T2`·`T3`과 함께만). **표를 읽을 수 있었다면 기계가 지목했을
 # 것이다.** 그 표를 **선언 형식**으로 만들고 여기서 읽는다. 형식의 단일 원본은 규약이다.
+if part_on V; then
 RVB_KEY='reversal-block:'
 RVC_KEY='reversal-columns:'
 RVS_KEY='reversal-sep:'
@@ -3457,6 +3680,7 @@ case "$_rvs0" in
             *) RVN=$_rvs1 ;;
         esac ;;
 esac
+fi
 rv_col() { # <토큰> → 선언된 열 순서에서 그 열의 1-기반 위치 (없으면 0)
     printf '%s\n' "$RVCOL" | LC_ALL=C awk -v t="$1" '{ for (i = 1; i <= NF; i++) if ($i == t) { print i; exit } ; print 0; exit }'
 }
@@ -3774,6 +3998,7 @@ cf_restated() { # <병기어> → 그 병기어를 **백틱 토큰**으로 가�
     done
     echo "$_cfn"
 }
+if part_on V; then
 chk "V1: control-form 선언 줄 정확히 1개" "$(decl_count "$CONV" "$CF_KEY")" "1"
 chk "V2: reversal-block 선언 줄 정확히 1개" "$(decl_count "$CONV" "$RVB_KEY")" "1"
 chk "V3: reversal-columns 선언 줄 정확히 1개" "$(decl_count "$CONV" "$RVC_KEY")" "1"
@@ -3853,6 +4078,7 @@ chk "V31: 본 검사 - 규약이 그 병기어의 정의 줄을 정확히 하나
 # 토큰은 어느 파일에도 없으므로 기준선이 구조로 상수 0이다**(규약 `control-form:`이 요구하는 같은
 # 줄 서술). 이 케이스가 없으면 `cf_restated`가 인자를 무시해도 `V29`가 초록이다.
 chk "V32: 배선 - 다른 병기어를 주면 재서술처가 0이다" "$(cf_restated zzz-other-form)" "0"
+fi
 
 # --- Part W: 검사 범위 선언 (M62) --------------------------------------------
 # 「X를 검사했다」의 **범위를 검사자가 정하고 아무도 보지 않는** 자리다. 외부 저장소의 첫 전면
@@ -3862,6 +4088,7 @@ chk "V32: 배선 - 다른 병기어를 주면 재서술처가 0이다" "$(cf_res
 # 재서술처가 낡아도 초록이다. 단일 원본은 `docs/conventions.md`의 "검사 범위 선언" 절.
 #   무는 것은 **선언의 유일성 · 병기어의 세 자리 공존 · 경계 표지의 실재**까지다. 「선언한 범위가
 #   실제로 돌린 검색과 같은가」는 정적으로 판정되지 않으며 규약이 그 경계를 같은 절에 적는다.
+if part_on W; then
 SCOPE_KEY='scope-decl:'
 SCOPE_LIM_KEY='scope-limits:'
 # 병기어는 **선언에서 온다**(러너에 박으면 값을 바꿔도 초록이다 — `control-form:`의 `V28`~`V32`와
@@ -3871,6 +4098,7 @@ SCOPE_ALIAS=$(decl_tail "$CONV" "$SCOPE_KEY" | LC_ALL=C awk '{ print $1 }')
 [ -n "$SCOPE_ALIAS" ] || SCOPE_ALIAS=zzz-scope-decl-unset
 SCOPE_MARKS=$(markers_of "$SCOPE_LIM_KEY")
 NSCM=$(printf '%s\n' "$SCOPE_MARKS" | grep -c .)
+fi
 scope_all() { # <병기어> → 규약·review 스킬·review 템플릿·impl 템플릿 **넷** 전부에 있으면 yes
     # **M63에서 넷이 됐다** — M62 리뷰가 *"impl 템플릿과 리뷰 스킬에는 넣고 리뷰 템플릿만 비었는데
     # 사유가 없다"* 를 지적했고, 그 자리를 채우면 재서술처가 하나 는다. 결합을 함께 넓히지 않으면
@@ -3957,6 +4185,7 @@ marks_used_in() { # <파일> <선언 키> <표지들> → 그 **선언 줄이 �
 }
 # 픽스처 — 표지 하나는 선언과 **같은 절**에, 다른 하나는 **다른 절**에 둔다. 절 창이 살아 있으면 1,
 # 창이 파일 전역으로 되돌아가면 2가 되어 아래 `W22`가 붉는다(판정을 망가뜨렸을 때 붉는 통제다).
+if part_on W; then
 MK_FIX="$SBX/marks-crosssection.md"
 {
     printf '## Sec A\n'
@@ -4093,12 +4322,152 @@ chk "W27: measure-cache 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps 
 # 없어야 한다.**
 chk "W28: scope-limits 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$SCOPE_LIM_KEY")" "0"
 chk "W29: verify-scope 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$VS_KEY")" "0"
+fi
 
+# (W31~W41 · M64-T04) **측정 배당** — 규약이 `sh` 축 판정의 책임처와 보고서 값의 출처를 가르는 선언
+# 줄 둘을 세웠고(`measure-axis:` · `measure-axis-job:`), 재서술처 셋(impl 스킬 · impl 템플릿 · release
+# 스킬)은 그 값을 **가리키기만** 한다. 무는 것은 규약이 같은 자리에 적은 셋 — 선언의 존재 · 값의 집합
+# 소속 · 지목한 잡의 실재 — 까지다. *"이번 CI 실행이 이 트리를 봤는가"* 는 Part U의 「순서 그 자체」와
+# 같은 이유로 정적으로 판정되지 않는다. `measure-cache:`(`W13`~`W18`)와 **같은 층**이라 새 파트를
+# 만들지 않았다 — 파트를 가르는 기준은 무는 층이다.
+#
+# 결합은 **양방향**이다. 한 방향만 두면 반쪽이다 — 선언된 값이 재서술처에서 사라지는 것은 `W36`이,
+# 재서술처가 **선언에 없는 값**을 말하는 것은 `W37`이 문다. 앞의 것만 있으면 선언에서 값을 하나 지워도
+# 재서술처가 옛 값을 계속 말하는 채 초록이다(Part H가 `axis:` 표기를 양방향으로 대조하는 것과 같은 판단).
+axis_sites_have() { # <값> → 재서술처 셋 전부가 그 값을 **백틱 토큰**으로 가지면 yes
+    for _axs in "$IMPL_SKILL" "$IMPL_TPL" "$REL_SKILL"; do
+        [ "$(scope_tok "$_axs" "$1")" = yes ] || { echo no; return; }
+    done
+    echo yes
+}
+axis_site_tokens() { # → 재서술처 셋이 백틱으로 적은 배당 값 토큰(한 줄에 하나, 중복 포함)
+    for _axs in "$IMPL_SKILL" "$IMPL_TPL" "$REL_SKILL"; do
+        grep -o '`axis-[a-z0-9-]*`' "$_axs" 2>/dev/null
+    done | tr -d '`'
+}
+axis_site_miss() { # → 선언된 값 중 재서술처 셋이 **함께** 갖지 않는 값의 수
+    _axm=0
+    for _axv in $MA_VALS; do
+        [ "$(axis_sites_have "$_axv")" = yes ] || _axm=$((_axm + 1))
+    done
+    echo "$_axm"
+}
+# (W42~W43 · M64 재작업 1) **적용 범위의 집행** — 축의 이름은 참조 구현 저장소의 사정이라 사용자 스킬
+# (재서술처 셋)은 병기어만 가리키고 축 이름을 적지 않는다(M64 리뷰 차단 2). 무는 형태는 「백틱 이름 +
+# 공백 0개 이상 + 축」이다(붙여 쓴 형태도 같은 피해에 이른다 — M64 재작업 1 리뷰). **백틱 없는 「이름 + 축」은 묻지 않는다** — release 스킬의 게시 가용성 축 서술이 백틱
+# 없는 영문 이름으로 축을 부르는 정당한 사용이라, 그 형태까지 금지하면 그 줄들이 붉는다(경계 — README에
+# 실측과 함께 적는다). 「축」은 바이트로 적는다(`LC_ALL=C` 바이트 매칭 — ps1은 코드포인트 U+CD95).
+AXIS_NAME_RE=$(printf '`[A-Za-z][A-Za-z0-9._-]*` *\354\266\225')
+axis_name_hits() { # <파일> → 「백틱 이름 + 공백 0개 이상 + 축」 형태가 든 줄 수
+    [ -f "$1" ] || { echo 0; return; }
+    LC_ALL=C grep -cE "$AXIS_NAME_RE" "$1" 2>/dev/null
+}
+axis_name_sites() { # → 재서술처 셋의 그 줄 수 합
+    _axn=0
+    for _axs in "$IMPL_SKILL" "$IMPL_TPL" "$REL_SKILL"; do
+        _axn=$((_axn + $(axis_name_hits "$_axs")))
+    done
+    echo "$_axn"
+}
+# (W44~W48 · M64 재작업 2) **이름의 직접 금지** — `W42`는 「백틱 이름 + 축」 형태만 봐서, 참조 구현
+# 문서의 문장을 그대로 옮긴 「로컬 값은 `pwsh`(과 5.1)」·「CI `posix` 잡」 같은 줄이 지나갔다(M64 재작업 1
+# 리뷰 차단 2). 규약이 참조 구현의 축 이름을 선언하고(`measure-axis-names:`) 러너는 그 이름과 지목한
+# 잡 이름을 **백틱 토큰으로** 스킬 셋에서 센다. 오늘 `skills/`에 그런 토큰이 0이라 기준선이 0이다.
+# **백틱 없는 이름은 묻지 않는다** — `sh`·`bash` 같은 이름은 맨 낱말·명령 조각으로 흔히 나와 맨 낱말
+# 금지는 오탐이 된다(경계 — README에 적는다).
+axis_name_token_hits() { # <파일> → 선언된 축·잡 이름이 백틱 토큰으로 든 줄 수(이름마다 센 합)
+    [ -f "$1" ] || { echo 0; return; }
+    _ant=0
+    for _anv in $MN_VALS $MJ_JOB; do
+        _ant=$((_ant + $(grep -cF "\`$_anv\`" "$1" 2>/dev/null)))
+    done
+    echo "$_ant"
+}
+axis_name_token_sites() { # → 재서술처 셋의 그 줄 수 합
+    _ans=0
+    for _axs in "$IMPL_SKILL" "$IMPL_TPL" "$REL_SKILL"; do
+        _ans=$((_ans + $(axis_name_token_hits "$_axs")))
+    done
+    echo "$_ans"
+}
+axis_site_orphan() { # → 재서술처가 적은 배당 값 토큰 중 선언에 없는 것의 수
+    _axm=0
+    for _axt in $(axis_site_tokens); do
+        case " $MA_VALS " in *" $_axt "*) : ;; *) _axm=$((_axm + 1)) ;; esac
+    done
+    echo "$_axm"
+}
+if part_on W; then
+MA_KEY='measure-axis:'
+MJ_KEY='measure-axis-job:'
+# 값은 **공백·탭으로 가르고 이름 형태의 토큰만** 취한다(ps1은 `-split '[ \t]+'` — `W13`과 같은 폭).
+# 꼬리 끝의 탭 한 글자가 토큰에 붙어 결합 판정까지 함께 붉히면 `W40`·`W41`이 단독 행을 가질 수 없다.
+MA_VALS=$(decl_tail "$CONV" "$MA_KEY" | tr ' \011' '\n\n' | grep -E '^[a-z][a-z0-9-]*$' | tr '\n' ' ' | sed 's/ *$//')
+NMAV=$(printf '%s\n' "$MA_VALS" | tr ' ' '\n' | grep -c .)
+MJ_JOB=$(decl_tail "$CONV" "$MJ_KEY" | tr ' \011' '\n\n' | grep -E '^[a-z][a-z0-9-]*$' | head -1)
+NAXT=$(axis_site_tokens | grep -c .)
+MA_WF="$ROOT/.github/workflows/tests.yml"
+chk "W31: measure-axis 선언 줄 정확히 1개" "$(decl_count "$CONV" "$MA_KEY")" "1"
+chk "W32: measure-axis-job 선언 줄 정확히 1개" "$(decl_count "$CONV" "$MJ_KEY")" "1"
+# (W33~W35) 추출 positive-control 셋 — 각각 0이면 아래 본 검사가 **0 == 0**으로 공허 통과한다.
+# `W35`는 재서술처 쪽 추출이다: 토큰 형태(`axis-` 접두)가 바뀌어 아무것도 긁히지 않으면 `W37`이 공허다.
+chk "W33: 배당 축 값 추출 positive-control(>0)" "$([ "$NMAV" -gt 0 ] && echo ok || echo no)" "ok"
+chk "W34: 배당 잡 추출 positive-control" "$([ -n "$MJ_JOB" ] && echo ok || echo no)" "ok"
+chk "W35: 재서술처의 배당 토큰 추출 positive-control(>0)" "$([ "$NAXT" -gt 0 ] && echo ok || echo no)" "ok"
+# (W36~W38) **본 검사**.
+chk "W36: 선언된 배당 값마다 재서술처 셋이 백틱 토큰으로 갖는다" "$(axis_site_miss)" "0"
+chk "W37: 재서술처가 선언에 없는 배당 값을 말하지 않는다" "$(axis_site_orphan)" "0"
+# (W38) 지목한 잡의 실재 — 잡 이름 집합은 Part H와 **같은 함수**(`ci_job_names`)로 발견한다. 지목한
+# 잡이 워크플로에 없으면 배당은 **아무 데도 가리키지 않는 선언**이 된다.
+chk "W38: 배당이 지목한 CI 잡이 워크플로에 실재" "$(has_job "$(ci_job_names "$MA_WF")" "$MJ_JOB")" "yes"
+# (W39) **배선** — `W18`과 같은 형태(인자로 준 토큰 하나만 읽고 그 토큰은 어느 파일에도 없어 기준선이
+# **구조로 상수**다). 이 케이스가 없으면 `axis_sites_have`가 인자를 무시해도 `W36`이 초록이다.
+chk "W39: 배선 - 선언에 없는 값을 주면 재서술처 결합이 성립하지 않는다" "$(axis_sites_have zzz-other-axis)" "no"
+# (W40~W41) 꼬리 구분자 — `W26`~`W29`와 같은 헬퍼·같은 사유.
+chk "W40: measure-axis 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$MA_KEY")" "0"
+chk "W41: measure-axis-job 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$MJ_KEY")" "0"
+# (W42) **본 검사** — 재서술처 셋이 축 이름을 백틱으로 적지 않는다(적용 범위).
+chk "W42: 재서술처 셋이 축 이름을 백틱으로 적지 않는다" "$(axis_name_sites)" "0"
+# (W43) **통제** — 같은 판정 함수가 픽스처 한 줄을 잡는다. 픽스처를 건 값과 걸지 않은 값의 **차이**를
+# 묻는다(`control-reads-delta`) — 기준선이 0이 아닐 때도 이 통제는 자기가 무는 반응만 잰다.
+AXN_FIX="$SBX/axis-name-fixture.md"
+# 픽스처는 **두 줄**이다 — 공백 하나 형태와 붙여 쓴 형태. 붙여 쓴 형태가 없으면 정규식의 「공백 0개
+# 이상」을 공백 하나로 되돌려도 이 통제가 초록이다(M64 재작업 1 리뷰 사소 7).
+{ cat "$IMPL_TPL" 2>/dev/null; echo; echo '| 로컬 `pwsh` 축 |'; echo '| 로컬 `pwsh`축 |'; } > "$AXN_FIX"
+chk "W43: 통제 — 판정 함수가 백틱 축 이름 픽스처를 잡는다" "$(( $(axis_name_hits "$AXN_FIX") - $(axis_name_hits "$IMPL_TPL") ))" "2"
+MN_KEY='measure-axis-names:'
+MN_VALS=$(decl_tail "$CONV" "$MN_KEY" | tr ' \011' '\n\n' | LC_ALL=C grep -E '^[a-z][a-z0-9-]*$' | tr '\n' ' ' | sed 's/ *$//')
+NMNV=$(printf '%s\n' "$MN_VALS" | tr ' ' '\n' | grep -c .)
+chk "W44: measure-axis-names 선언 줄 정확히 1개" "$(decl_count "$CONV" "$MN_KEY")" "1"
+# (W45) 추출 positive-control — 0이면 `W46`이 잡 이름 하나만 세는 반쪽 검사가 된다.
+chk "W45: 참조 구현 축 이름 추출 positive-control(>0)" "$([ "$NMNV" -gt 0 ] && echo ok || echo no)" "ok"
+# (W46) **본 검사**.
+chk "W46: 재서술처 셋에 참조 구현의 축·잡 이름이 백틱 토큰으로 없다" "$(axis_name_token_sites)" "0"
+# (W47) **통제** — 실물과, 선언된 첫 축 이름 · 지목한 잡 이름의 백틱 토큰 **두 줄**을 붙인 픽스처의
+# **차이**를 묻는다. 두 줄인 이유는 `W46`의 두 절반(축 이름 · 잡 이름)을 각각 통제하기 위해서다 — 한 줄이던
+# 동안 세는 루프에서 잡 이름을 빼도 초록이었다(M64 재작업 2 리뷰 사소 4).
+AXT_FIX="$SBX/axis-token-fixture.md"
+AXT_FIRST=$(printf '%s\n' $MN_VALS | head -1)
+{ cat "$IMPL_TPL" 2>/dev/null; echo; printf '| 로컬 `%s` |\n' "$AXT_FIRST"; printf '| CI `%s` |\n' "$MJ_JOB"; } > "$AXT_FIX"
+chk "W47: 통제 — 판정 함수가 선언된 이름의 백틱 토큰 픽스처를 잡는다" "$(( $(axis_name_token_hits "$AXT_FIX") - $(axis_name_token_hits "$IMPL_TPL") ))" "2"
+chk "W48: measure-axis-names 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$MN_KEY")" "0"
+fi
+
+# **`F1`은 전수 실행에서만 돈다**(M64-T03) — 부분 실행에서 이 대조가 돌면 구조상 언제나 붉어
+# 통제가 공허해진다. 부분 실행의 결과 줄은 아래에서 **다른 접두**로 나가므로 그 총계를 케이스 수
+# 선언과 견줄 수 있다는 오해도 함께 닫힌다.
+if part_full; then
 chk "F1: README cases 선언 == 실제 케이스 수" "$(declared_cases)" "$((pass + fail + 1))"
+fi
 
 echo
-echo "# 결과: PASS=$pass FAIL=$fail (실제 커맨드 스킬 N=$N)"
+if part_full; then
+    echo "$RESULT_FULL_PREFIX PASS=$pass FAIL=$fail (실제 커맨드 스킬 N=$N)"
+else
+    echo "$(result_prefix "$PART_SEL") PASS=$pass FAIL=$fail"
+fi
 [ "$fail" -eq 0 ] || exit 1
+part_full || exit 0
 echo "# discover 감지 임계값(≥2→hint·<2→none·단일 레포→none·숨김 미카운트) + 단일 원본 동결(B1 카운트 정합·B2 사이트 셸·B3 카탈로그 완전성, 캐노니컬=docs/commands.md, 실제 ${N}종) + 선언 정합(C1 상태값 네 값×세 파일·부재 통제·C2 기준선×세 템플릿·C3 phase 명단 기록·비기록 두 목록의 규약↔발행 페이지 집합 일치·유일 열거처·서로소·음성 통제·D 브랜치 협업 안전 커버리지(커밋 diff·미커밋 범위 두 토큰 — 규약↔스킬↔캐노니컬 카탈로그)·번호경고 규약↔스킬 정합·PR CI 확인 규약조각↔스킬 정합·E 리뷰 검증 규율 반증 시도·판정 계측·재작업 라운드 규약↔스킬↔템플릿 정합 + 계측 줄 골격 형식 정합 + 재검증 선언 + 교차·음성 통제 · F 문서 자기서술 정합 = 역할 앵커 추출·캐노니컬 행 실재·소비자 전파 + 케이스 수 자기 정합 · G 상호참조 무결성 = 인용 추출·앵커 실재 대조 + 추출 0건·이름 유일성·줄바꿈 인용 통제 + 규약 집합 밖 대상 인용의 파일별 앵커 대조(골격 조사 요구·주입 통제 — 대상 파일 부재는 경계 밖) · I 축 상태 주장 정합 = 표가 집행된다고 적은 축을 산문이 반대로 적는 자리(표지는 규약이 단일 선언처, 창=불릿 블록, 인용·이력 서술·무대상 세 통제 — 축 이름이 아닌 대상의 모순과 반대 방향은 경계 밖) · H 실행 환경 축 선언 정합 = 축 이름 추출·규약 표 행 실재·집합 일치·표의 job: 토큰이 가리킨 잡의 워크플로 실재와 선언 축 행 소속(고아 0)·커버리지(실재 잡의 등재 또는 면제 선언)·면제 선언의 실재·무토큰 축 통제·axis: 표기 양방향 정합·데이터 행 수 대조·음성 통제 — 잡을 지목하지 않는 집행 칸과 잡을 지목한 칸의 나머지 서술은 사람의 리뷰 영역이라 여기서 묻지 않음) 확인됨 (참조 구현 기준)"
 
 # --- 뮤테이션 선언 (M47) — `tests/mutation`이 읽는다 -------------------------
@@ -4116,3 +4485,4 @@ echo "# discover 감지 임계값(≥2→hint·<2→none·단일 레포→none·
 # mutates: docs/conventions.md :: declared-change-set :: D7: conventions :: caught
 # mutates: docs/conventions.md :: mutation-negative-control-sentinel :: D7: conventions :: missed
 # mutates-to: tests/discover/run.sh :: printf '**`%s`**' "$_mm" :: printf '`%s`' "$_mm" :: W24: 적대 통제 :: caught
+# mutates-to: tests/discover/run.sh :: '`axis-[a-z0-9-]*`' :: '`zzz-[a-z0-9-]*`' :: W35: 재서술처의 배당 토큰 추출 :: caught

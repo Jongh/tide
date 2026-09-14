@@ -27,7 +27,16 @@
 # baseline) are built from code points so the source carries no byte > 127. git mutating verbs live only
 # in setup (init only).
 #
-# Usage: & tests\discover\run.ps1   (exit 0 if all pass, exit 1 if any fail)
+# Usage: & tests\discover\run.ps1              (full run -- exit 0 if all pass, 1 if any fail)
+#        & tests\discover\run.ps1 -Part W      (partial -- one part label only, M64-T03)
+#
+# PART SELECTION (M64-T03): with no argument the FULL run is unchanged -- backward compatibility is the
+# contract. With one, only that part's case-computation blocks run and the rest is REALLY skipped --
+# filtering the `Chk` calls alone would leave the computation running and save nothing, so the guards
+# wrap the COMPUTATION, not the assertion. Function definitions and the path constants that cross part
+# boundaries stay OUTSIDE the guards (a later part uses an earlier part's helper).
+
+param([string]$Part = '')
 
 $ErrorActionPreference = 'SilentlyContinue'
 
@@ -83,6 +92,34 @@ function Chk($desc, $got, $want) {
     if ([string]::Equals([string]$got, [string]$want, [System.StringComparison]::Ordinal)) { $script:pass++; Write-Host ("PASS  {0,-56} ({1})" -f $desc, $got) }
     else { $script:fail++; Write-Host ("FAIL  {0,-56} (got {1}, want {2})" -f $desc, $got, $want) }
 }
+# --- part selection (M64-T03) ------------------------------------------
+# The roster is a RUNNER-SIDE PROBE (same shape as the canonical command names of C-3): the declaration
+# site is the `cases:` line of that harness README, and `F18` binds this roster to the part labels on
+# that line. An unknown label is a LOUD FAILURE, never a quiet zero-case green (same positive-control
+# shape as F3/F4).
+$script:PART_SEL = $Part
+$PART_LABELS = 'A B C D E F G H I J K L M N O P Q R S T U V W'
+function PartKnown($label) {   # <label> -> yes|no
+    if ((' ' + $PART_LABELS + ' ').Contains(' ' + $label + ' ')) { return 'yes' } else { return 'no' }
+}
+function PartOn($label) {      # true when no selection (full run) or when the selection matches
+    return ($script:PART_SEL -eq '' -or [string]::Equals($script:PART_SEL, $label, [System.StringComparison]::Ordinal))
+}
+function PartFull() { return ($script:PART_SEL -eq '') }
+# THE RESULT LINE HAS A DIFFERENT SHAPE IN A PARTIAL RUN (M64-T03) -- with the same shape a partial
+# total could be copied into a report and nobody would notice. A different prefix closes that path, and
+# `F20` checks the difference THROUGH THE SAME FUNCTION that prints it.
+$RESULT_FULL_PREFIX = '# result:'
+function ResultPrefix($label) {   # [label] -> the result-line prefix (full prefix when no label)
+    if ($null -eq $label -or $label -eq '') { return $RESULT_FULL_PREFIX }
+    return ("# partial result (Part {0}):" -f $label)
+}
+if ($script:PART_SEL -ne '' -and (PartKnown $script:PART_SEL) -eq 'no') {
+    Write-Host ("FAIL  {0,-56} (got {1}, want one of {2})" -f 'part-select: unknown part label', $script:PART_SEL, $PART_LABELS)
+    Write-Host ("`n{0} PASS=0 FAIL=1" -f (ResultPrefix $script:PART_SEL))
+    exit 1
+}
+
 function W($path, $text) { $d = Split-Path $path -Parent; if (-not (Test-Path $d)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }; Set-Content -Path $path -Value $text -Encoding utf8 }
 function GitInit($d) { New-Item -ItemType Directory -Force -Path $d | Out-Null; & git -C $d init -q }   # dir must exist before init
 
@@ -99,6 +136,7 @@ function DetectHint($parent) {
 function MkTideRepo($d) { GitInit $d; W (Join-Path $d 'docs\milestones\M1.md') '# M1' }
 
 try {
+    if (PartOn 'A') {
     Write-Host "# tide discover live test (PowerShell)"
     Write-Host "# sandbox: $sbx`n"
 
@@ -134,6 +172,7 @@ try {
     Chk "A: 2 children + hidden tide child -> hint N=2 (hidden not counted)" (DetectHint $PH) 'hint N=2'
     Chk "A: hidden child (.hidden-svc) not discovered" ([bool]((Discover $PH) -match 'hidden')).ToString() 'False'
     Chk "A: discover = svc-a,svc-b (hidden excluded)" ((Discover $PH) -join ',') 'svc-a,svc-b'
+    }
 
     # === Part B -- single-source freeze: canonical catalog + drift guard ====
     # (M22) the command catalog is single-sourced in docs/commands.md; the site page is a snippet shell.
@@ -153,12 +192,16 @@ try {
     $N = @(Get-ChildItem (Join-Path $ROOT 'skills') -Directory -ErrorAction SilentlyContinue |
         Where-Object { -not $_.Name.StartsWith('.', [System.StringComparison]::Ordinal) } |
         Where-Object { Test-Path (Join-Path $_.FullName 'SKILL.md') }).Count
+    if (PartOn 'B') {
     Chk "B: actual command skill count measured (>0)" $(if ($N -gt 0) { 'ok' } else { 'no' }) 'ok'
+    }
 
     $README    = Join-Path $ROOT 'README.md'
     $CONV      = Join-Path $ROOT 'docs\conventions.md'
     $CANON_CMD = Join-Path $ROOT 'docs\commands.md'        # new canonical command catalog (single source)
+    if (PartOn 'B') {
     $SITE_CMD  = Join-Path $ROOT 'site\docs\commands.md'   # site shell (snippet include)
+    }
     $SITE_GS   = Join-Path $ROOT 'site\docs\getting-started.md'
     $ORCH      = Join-Path $ROOT 'docs\orchestration.md'      # included into the site body; carries a count declaration
 
@@ -176,11 +219,13 @@ try {
         if ($null -eq $raw) { return 'no' }
         if ($raw.Contains("$count$JONG")) { return 'yes' } else { return 'no' }
     }
+    if (PartOn 'B') {
     Chk "B1: docs/commands.md declares N$JONG (canonical)" (DeclaredHasCount $CANON_CMD $N) 'yes'
     Chk "B1: README.md declares N$JONG"                    (DeclaredHasCount $README $N)    'yes'
     Chk "B1: docs/conventions.md declares N$JONG"          (DeclaredHasCount $CONV $N)      'yes'
     Chk "B1: site/docs/getting-started.md declares N$JONG" (DeclaredHasCount $SITE_GS $N)   'yes'
     Chk "B1: docs/orchestration.md declares N$JONG"        (DeclaredHasCount $ORCH $N)      'yes'
+    }
 
     # (B2) the site catalog page is a snippet shell -- has the include AND re-declares neither the count
     #      nor the catalog table. Re-duplication (catalog regression) -> FAIL, enforcing single-sourcing.
@@ -192,7 +237,9 @@ try {
         if ($raw.Contains('|---|---|---|---|')) { return 'no' }                     # catalog table re-declared
         return 'yes'
     }
+    if (PartOn 'B') {
     Chk "B2: site/docs/commands.md is a snippet shell (not re-duplicated)" (IsSnippetShell $SITE_CMD $N) 'yes'
+    }
 
     # (B3) catalog completeness -- each command name appears as /tide:<name> in the canonical catalog.
     #      Catches name-level drift (missing/renamed command) that the count-only guard could not.
@@ -204,6 +251,7 @@ try {
         $pat = '/tide:' + $name + '([^a-z-]|$)'
         if ($raw -match $pat) { return 'yes' } else { return 'no' }
     }
+    if (PartOn 'B') {
     $allNamesOk = 'yes'
     # same dot filter as the count above (M38-T04) -- one meaning, both places.
     foreach ($d in (Get-ChildItem (Join-Path $ROOT 'skills') -Directory -ErrorAction SilentlyContinue |
@@ -224,6 +272,7 @@ try {
     Chk "B1: drift control -- conventions has no $WRONG$JONG"          (DeclaredHasCount $CONV $WRONG)      'no'
     Chk "B1: drift control -- site/getting-started has no $WRONG$JONG" (DeclaredHasCount $SITE_GS $WRONG)   'no'
     Chk "B1: drift control -- orchestration has no $WRONG$JONG"        (DeclaredHasCount $ORCH $WRONG)      'no'
+    }
 
     # === Part C -- declaration-consistency drift guard ======================
     # (M30) Part B enforces drift across documents declaring the same fact (command count); these two are
@@ -249,6 +298,7 @@ try {
     }
 
     # (C1) status-set consistency -- all four values in all three files; fixing only one -> FAIL.
+    if (PartOn 'C') {
     foreach ($st in @($ST_FIXED, $ST_OPEN, $ST_CAUSE, $ST_CONFIRM)) {
         Chk "C1: status '$st' in all three files" (InAllThree $st $CONV $DBG_SKILL $DBG_TPL) 'yes'
     }
@@ -285,6 +335,7 @@ try {
     $CONCEPTS = Join-Path $ROOT 'site\docs\concepts.md'
     $ROSTER_NEEDLES = @('phase','milestone','impl','review','release','debug','cycle')
     $NONWRITER_NEEDLES = @('`status`','`fleet`','`retro`','`fleet-verify`','`kickoff`','`fleet-cycle`')
+    }
 
     function RosterLine($file) {
         $raw = ReadUtf8 $file
@@ -470,6 +521,7 @@ try {
         return 'yes'
     }
 
+    if (PartOn 'C') {
     Chk "C3: conventions roster holds 6 names"    (RosterCount $CONV)     6
     Chk "C3: published page roster holds 6 names" (RosterCount $CONCEPTS) 6
     Chk "C3: the two rosters are identical" (SetsEqual (RosterSet $CONV) (RosterSet $CONCEPTS)) 'yes'
@@ -509,6 +561,7 @@ try {
     $STABLE_NEEDLES = @('`/tide:kickoff`','`/tide:milestone`','`/tide:impl`','`/tide:review`',
                         '`/tide:cycle`','`/tide:release`','`/tide:retro`','`/tide:status`',
                         '`/tide:fleet`','`/tide:fleet-cycle`','`/tide:fleet-verify`')
+    }
     function StableWindow($file) {
         $raw = ReadUtf8 $file
         if ($null -eq $raw) { return '' }
@@ -550,12 +603,14 @@ try {
         return ((OrdinalSortUnique $hits) -join ' ')
     }
 
+    if (PartOn 'C') {
     Chk "C4: conventions stable roster holds 11 names" (StableCount $CONV)   11
     Chk "C4: README stable roster holds 11 names"      (StableCount $README) 11
     Chk "C4: the two stable rosters are identical" (SetsEqual (StableSet $CONV) (StableSet $README)) 'yes'
     Chk "C4: only conventions + README enumerate the stable roster" (StableFiles) 'README.md docs/conventions.md'
     Chk "C4: stable control -- conventions has no 'phantom-stable'" (StableHas $CONV 'phantom-stable')   'no'
     Chk "C4: stable control -- README has no 'phantom-stable'"      (StableHas $README 'phantom-stable') 'no'
+    }
 
     # === Part D -- cross-branch collaboration safety (M31) declaration consistency ==========
     # (M31) Same class as Part B/C -- bind the conventions single source and the skill that wires it.
@@ -572,6 +627,7 @@ try {
     $REL_SKILL = Join-Path $ROOT 'skills\release\SKILL.md'
     $MS_SKILL  = Join-Path $ROOT 'skills\milestone\SKILL.md'
     $CONV_REL  = Join-Path $ROOT 'docs\conventions-release.md'   # conventions FRAGMENT (M35 split)
+    if (PartOn 'D') {
     $COV_TOK  = 'git diff --name-only'
     $UNCOMMITTED_TOK = 'git status --porcelain'
     $WARN_TOK = 'git log --all'
@@ -626,6 +682,7 @@ try {
 
     # negative control: a bogus mechanism token must NOT appear in conventions (guard discriminates).
     Chk "D: control -- conventions has no bogus token" (HasToken $CONV 'git diff --bogus-only') 'no'
+    }
 
     # === Part E -- review verification discipline (M32) declaration consistency =============
     # (M32) Same class as Part C/D -- bind the conventions single source to the skill AND template that
@@ -654,6 +711,7 @@ try {
     }
 
     # (E1) the refutation mechanism is declared in BOTH the convention and the review skill.
+    if (PartOn 'E') {
     Chk "E1: refutation ($REFUT_TOK) conventions <-> review SKILL" (InBoth $REFUT_TOK $CONV $REV_SKILL) 'yes'
 
     # (E2) the metrics token is declared in all three (the metrics line needs a slot in the template too).
@@ -661,6 +719,7 @@ try {
 
     # (E3) review metrics line and impl overview carry the same rework value -> three-way declaration bind.
     Chk "E3: rework round ($REWORK_TOK) in all three files" (InAllThree $REWORK_TOK $CONV $REV_TPL $IMPL_TPL) 'yes'
+    }
 
     # (E4) metrics-line FORMAT consistency -- token presence anywhere in the file is not enough. During the
     # M32 implementation the three files actually diverged into two spellings of the same fixed line (with
@@ -675,6 +734,7 @@ try {
         }
         return 'no'
     }
+    if (PartOn 'E') {
     foreach ($pair in @(@('conventions', $CONV), @('review SKILL', $REV_SKILL), @('review template', $REV_TPL))) {
         Chk "E4: metrics-line skeleton ($MEAS_TOK...($REWORK_TOK)) in $($pair[0])" (SameLine $pair[1] $MEAS_TOK "($REWORK_TOK)") 'yes'
     }
@@ -753,6 +813,7 @@ try {
 
     # negative control: a bogus token must NOT appear in conventions (same intent as B1's N+1 absence).
     Chk "E: control -- conventions has no bogus refutation token" (HasToken $CONV "$REFUT_TOK-bogus") 'no'
+    }
 
     # === Part F -- document self-description consistency (M33) ==============
     # (M33) Part B-E enforce drift ACROSS documents declaring one fact; this part enforces what a document
@@ -807,6 +868,7 @@ try {
         return 'yes'
     }
 
+    if (PartOn 'F') {
     $pairs = AnchorPairs
     foreach ($p in $pairs) {
         $aname = $p.Split('=')[0]; $atok = $p.Split('=')[1]
@@ -827,6 +889,7 @@ try {
 
     # negative control -- a bogus anchor must NOT appear in the canonical catalog (same intent as B1 N+1).
     Chk "F3: control -- canonical has no bogus anchor" (HasAnchor $CANON_CMD 'bogusanchor') 'no'
+    }
 
     # === Part G -- cross-reference integrity (M34; generalized to a FILE SET in M35) =====
     # (M34) Part F enforces what a document says ABOUT ITSELF; Part G enforces the REFERENCES BETWEEN
@@ -910,6 +973,7 @@ try {
     # hashtable keys are case-INsensitive by default, which would diverge from grep -x.
     # $gAnchorSets is parallel to $gConvFiles (one HashSet per file); $gAnchors is the flat list over the
     # WHOLE set, used by the positive control and the set-wide duplicate check.
+    if (PartOn 'G') {
     $gConvFiles  = @(ConvFiles)
     $gConvBases  = @($gConvFiles | ForEach-Object { Split-Path $_ -Leaf })
     $gAnchorSets = @()
@@ -962,6 +1026,7 @@ try {
     $aset = New-Object 'System.Collections.Generic.HashSet[string]'
     $dset = New-Object 'System.Collections.Generic.HashSet[string]'
     foreach ($a in $gAnchors) { if (-not $aset.Add($a)) { [void]$dset.Add($a) } }
+    }
     # a citation is OK when it resolves in the anchor set of ANY file named on its line (safe side).
     # (M54) THE VERDICT IS A FUNCTION so the same verdict can run against a fixture. M46's precedent
     # asks not "does the fixture meet the condition" but "does the REAL verdict run on it", and until
@@ -975,6 +1040,7 @@ try {
         }
         return $n
     }
+    if (PartOn 'G') {
     $gMiss = CiteMissOf $gCites $gCiteOwners
 
     Chk "G1: every live citation resolves to a real anchor" ([string]$gMiss) '0'
@@ -1026,6 +1092,7 @@ try {
     $JEOL = Uni 0xC808
     $srPathRe = '`[A-Za-z0-9_./-]+\.(md|sh|ps1|json|yml)`'
     $srRe = '"([^"]*)"[ \t]*' + $JEOL
+    }
     function HasConvBase($s) {
         if ($null -eq $s) { return $false }
         foreach ($b in $gConvBases) { if ($s.Contains($b)) { return $true } }
@@ -1068,8 +1135,10 @@ try {
     }
     return $gSelfMiss
     }
+    if (PartOn 'G') {
     $gSelfMiss = SelfMissOf (LivingDocs)
     $gSelf = $script:srSpans
+    }
     function SelfRefFixture {
         $f = Join-Path $sbx 'selfref-fix.md'
         # BUILD THE LINE FIRST. Inside an array literal, ' str ' + $char + ' str ' does NOT fold into
@@ -1081,6 +1150,7 @@ try {
             (New-Object System.Text.UTF8Encoding($false)))
         return $f
     }
+    if (PartOn 'G') {
     $selfSet = New-Object 'System.Collections.Generic.HashSet[string]'
     foreach ($s in $gSelf) { [void]$selfSet.Add($s) }
 
@@ -1102,6 +1172,7 @@ try {
     # Part G asks about anchors, not about path existence.
     $UI = Uni 0xC758
     $extPathRe = '`([A-Za-z0-9_./-]+\.md)`'
+    }
     function ExtCitesOf($path) {
         $out = @()
         $raw = ReadUtf8 $path
@@ -1135,6 +1206,7 @@ try {
         }
         return $miss
     }
+    if (PartOn 'G') {
     $gExtCites = @()
     foreach ($p in (LivingDocs)) { $gExtCites += @(ExtCitesOf $p) }
     $gExtMiss = @(ExtMissOf $gExtCites)
@@ -1164,6 +1236,7 @@ try {
     #   (1 live line is that shape and is legitimate) / whether a name-cited item really EXISTS is not
     #   compared (5 live sites, 0 observed defects) / a citation split across lines is missed.
     $ORD_SET = @(0x2460..0x2487 | ForEach-Object { [char]$_ })
+    }
     function CiteLinesOf($path) {   # citation lines of one doc: backticked .md path AND a quote
         if (-not (Test-Path -LiteralPath $path)) { return @() }
         return @([System.IO.File]::ReadAllLines($path) |
@@ -1181,6 +1254,7 @@ try {
         }
         return $hits
     }
+    if (PartOn 'G') {
     $g8Cites = @()
     foreach ($p in (LivingDocs)) { $g8Cites += @(CiteLinesOf $p) }
     $g8Hits = @(OrdinalAfterJeol $g8Cites)
@@ -1194,6 +1268,7 @@ try {
     # Fixture control -- inject one violation in M43 issue 5's actual shape (U+2477) and it must be caught.
     $g8Fx = @('- `docs/conventions.md`' + $UI + ' "bogus-anchor" ' + $JEOL + ' ' + [char]0x2477)
     Chk "G8c: control -- injected ordinal sub-index citation is caught" ([string](@(OrdinalAfterJeol $g8Fx)).Count) '1'
+    }
 
     # === Part H -- execution-environment axis declaration consistency (M38-T06) =====
     # The convention NAMES each axis of the execution environment (single source: the
@@ -1249,9 +1324,11 @@ try {
         # ORDER is part of the verdict.
         return ((OrdinalSort $names) -join ' ')
     }
+    if (PartOn 'H') {
     $convAxes = EnvAxes $CONV
     $readAxes = EnvAxes $DISC_README
     $nAxes = @($convAxes -split ' ' | Where-Object { $_ -ne '' }).Count
+    }
 
     # (H14..H16 / M40) `axis:<name>` -- the RESOLVABLE notation for axis names. Before it, every check
     # started from the `env-axes:` declaration, so a table row NOT in the declaration escaped all of
@@ -1268,8 +1345,10 @@ try {
         }
         return ((OrdinalSortUnique $tok) -join ' ')   # .sh twin: `LC_ALL=C sort -u` (M42-T03)
     }
+    if (PartOn 'H') {
     $convAxisTokens = TableAxisTokens $CONV
     $nAxisTok = @($convAxisTokens -split ' ' | Where-Object { $_ -ne '' }).Count
+    }
 
     # (H17) Set equality alone cannot see a row carrying NO notation -- it contributes nothing to the
     # set and passes quietly (that is exactly the "prose inside the axis table" seat). So the DATA ROW
@@ -1289,6 +1368,7 @@ try {
         }
         return $out
     }
+    if (PartOn 'H') {
     $axisDataRows = @(AxisTableDataRows $CONV)
     $nAxisRows = $axisDataRows.Count
     $nAxisRowTok = @($axisDataRows | Where-Object { $_ -match 'axis:[a-z]' }).Count
@@ -1303,6 +1383,7 @@ try {
         $hit = @($convLines | Where-Object { $_.StartsWith('|', [System.StringComparison]::Ordinal) -and $_.Contains($needle) }).Count
         if ($hit -eq 0) { $axisRowMiss++ }
     }
+    }
     function HasAxis($set, $name) {
         if ((" $set " ).Contains(" $name ")) { return 'yes' } else { return 'no' }
     }
@@ -1311,7 +1392,9 @@ try {
     # (M39) The mapping's single source is the TABLE ROW's `job:<name>` tokens (no separate line); the
     # job NAMES are DISCOVERED from the workflow's `jobs:` block (no hardcoded roster). H8 checks the
     # token sits in a DECLARED axis row, closing the opposite drift (hiding a token in an undeclared row).
+    if (PartOn 'H') {
     $axisRows = @($convLines | Where-Object { $_.StartsWith('|', [System.StringComparison]::Ordinal) })
+    }
     function RowJobTokens($row) {
         return @([regex]::Matches($row, 'job:[a-z][a-z0-9-]*') | ForEach-Object { $_.Value.Substring(4) })
     }
@@ -1354,6 +1437,7 @@ try {
         }
         return ((OrdinalSort $out) -join ' ')   # .sh twin: `LC_ALL=C sort` (no -u) -- M42-T03
     }
+    if (PartOn 'H') {
     $WF = Join-Path $ROOT '.github\workflows\tests.yml'
     $axesList = @($convAxes -split ' ' | Where-Object { $_ -ne '' })
     $axisJobs = EnvAxisJobs $axisRows $axesList
@@ -1426,6 +1510,7 @@ try {
     # count; the row-count positive control keeps 0==0 from passing vacuously.
     Chk "H17a: axis table data-row extraction positive control (>0)" $(if ($nAxisRows -gt 0) { 'ok' } else { 'no' }) 'ok'
     Chk "H17b: axis table data-row count == axis: notation count" $(if ($nAxisRows -eq $nAxisRowTok) { 'yes' } else { 'no' }) 'yes'
+    }
 
     # === Part I -- axis state-claim consistency (M42) ==============================
     # Bites the place where the TABLE says an axis is enforced and PROSE says the opposite. Counts are
@@ -1495,8 +1580,10 @@ try {
         if ($null -eq $tail) { return @() }
         return @(($tail -replace '[`*]', '') -split ' ' | Where-Object { $_ -ne '' })
     }
+    if (PartOn 'I') {
     $negMarks = @(MarkersOf 'state-neg:')
     $pastMarks = @(MarkersOf 'state-past:')
+    }
     # POS set = ONLY axes whose enforcement cell is alive. Using every `axis:` token would turn the
     # convention's own MANDATED honest notation (an axis with no enforcement is written with a
     # state-neg marker) into a contradiction, so that axis's own table row would FAIL (measured in
@@ -1519,7 +1606,9 @@ try {
         }
         return @(OrdinalSortUnique $out)   # sh twin is `LC_ALL=C sort -u`; culture sort would split them
     }
+    if (PartOn 'I') {
     $axNames = @(LiveAxes)
+    }
     function ContraOf($path) {
         $out = @()
         $raw = ReadUtf8 $path
@@ -1546,6 +1635,7 @@ try {
         return $out
     }
     # (I1) if the markers cannot be read every assertion below passes 0==0 VACUOUSLY -- bite extraction first.
+    if (PartOn 'I') {
     Chk "I1: state-neg marker extraction positive control (>0)" $(if ($negMarks.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
     # (I1b) the POS set needs its own positive control: if the table layout shifts and the enforcement
     # cell stops being extracted, POS goes empty and I2 passes VACUOUSLY (0==0). H14 bites the `axis:`
@@ -1608,6 +1698,7 @@ try {
     [System.IO.File]::WriteAllText($fxNbsp, ('- `state-neg:` alpha' + [char]0x00A0 + 'beta' + "`n"), $noBom)
     Chk "I12: control -- a TAB separator is caught" (BadSeps $fxTab 'state-neg:') '1'
     Chk "I13: control -- an NBSP separator is caught" (BadSeps $fxNbsp 'state-neg:') '1'
+    }
 
     # (I14~I15) READ THE SEPARATOR SET FROM THE CONVENTION AND CHECK THIS IMPLEMENTATION AGAINST IT
     # (M42 rework 3). The set lives in three media -- Korean names in the convention, octal bytes in the
@@ -1626,6 +1717,7 @@ try {
         }
         return $h
     }
+    if (PartOn 'I') {
     $sepCps = @(MarkersOf 'sep-cps:')
     $sepOkCps = @(MarkersOf 'sep-ok-cps:')
     # (I16~I19) THE SAME GUARDS THE OTHER DECLARATION KEYS ALREADY CARRY (M42 review blocker 1).
@@ -1639,7 +1731,12 @@ try {
     Chk "I19: exactly one sep-ok-cps declaration line in the convention" (DeclCount $CONV 'sep-ok-cps:') '1'
     Chk "I14: every separator the convention declares is caught" ([string](SepHits $sepCps)) ([string]$sepCps.Count)
     Chk "I15: control -- an allowed character is not caught" ([string](SepHits $sepOkCps)) '0'
+    }
 
+    # --- Part F (continued) -- document self-description + runner-source discipline ----
+    # From here the cases are F again (F1b, F4-F20). They sit physically after Part I, but THE CASE
+    # LABEL IS THE PART, and that is also the unit the part-selection argument bites -- both copies
+    # split at the same place under the same label (M64-T03).
     function DeclaredCases() {
         # FIRST match, deliberately -- the sh side now pins the same end (M38 review minor 4: sed's
         # greedy leading `.*` took the LAST `cases:` on a line while .NET takes the FIRST).
@@ -1663,7 +1760,9 @@ try {
         foreach ($m in [regex]::Matches($line, 'Part [A-Z] ([0-9]+)')) { $s += [int]$m.Groups[1].Value }
         return [string]$s
     }
+    if (PartOn 'F') {
     Chk "F1b: per-part breakdown sums to declared total" (PartSum) (DeclaredCases)
+    }
 
     # (F4~F5) MACHINE-BITE THE byte>127 = 0 RULE FOR THIS FILE AND ITS SIBLINGS (M42 rework 3, self-raised).
     # The convention and this harness's README have long said the rule "holds", but NO case and no CI job
@@ -1722,6 +1821,7 @@ try {
         }
         return @($checked, $bad)
     }
+    if (PartOn 'F') {
     $ps1Scan = NonAsciiScan
     $ps1Found = (Ps1Files).Count
     Chk "F4: ps1 runner discovery positive control (>0)" $(if ($ps1Found -gt 0) { 'ok' } else { 'no' }) 'ok'
@@ -1729,6 +1829,7 @@ try {
     # (F6) COMPARE DISCOVERY WITH CONSUMPTION -- F4 only sees "discovery returned nothing", but the failure
     # that actually happened was "discovery returned everything and consumption dropped it all".
     Chk "F6: files checked == files discovered" ([string]$ps1Scan[0]) ([string]$ps1Found)
+    }
     # (F7) BITE THE DISCOVERY SPEC WITH A FIXTURE. The three axes above (case, hidden, directories) cannot
     # be exercised by scanning the real tests/ tree -- no such file exists there, so that scan stays green
     # forever no matter how wrong the spec is. Build four files plus a decoy directory in the sandbox, run
@@ -1754,9 +1855,11 @@ try {
         [Array]::Sort($names, [System.StringComparer]::Ordinal)
         return ($names -join '|')
     }
+    if (PartOn 'F') {
     $discFix = Ps1DiscFixture
     Chk "F7: discovery spec -- case-sensitive, hidden included, directories excluded" `
         (DiscSpec $discFix) '.hidden.ps1|a.ps1|c.ps1'
+    }
     # (F8) BITE F7's HIDDEN-AXIS PRECONDITION (M43 -- disposition of M42 review recommendation 1).
     # For F7 to prove "hidden files are discovered", the fixture's hidden file must ACTUALLY be hidden.
     # Setting the attribute lives in a try/catch here, and if that step fails quietly the hidden axis
@@ -1771,8 +1874,10 @@ try {
         return [string]@(Get-ChildItem -Path $dir -File |
             Where-Object { $_.Name.EndsWith('.ps1', [System.StringComparison]::Ordinal) }).Count
     }
+    if (PartOn 'F') {
     Chk "F8: hidden fixture stays hidden to a non-Force enumeration (F7 precondition)" `
         (DiscVisibleCount $discFix) '1'
+    }
 
     # ONE SEAT FOR THE COMMENT PREDICATE (M49-T02). Part F (locale pinning), Part J (variable-name
     # boundary) and Part K (shared control tokens) all need "is this line a comment?". It used to be
@@ -1814,9 +1919,11 @@ try {
     # The blank-space class is pinned to ASCII space+tab on BOTH sides as well
     # (sh [[:blank:]] under LC_ALL=C <-> ps1 [ \t]) -- [[:space:]] vs \s bite different widths, which is
     # itself a seed of two-shell divergence (review return item 2).
+    if (PartOn 'F') {
     $LOCALE_EXEMPT_TOK = 'locale-exempt:'
     $LOCALE_SITE_RE_SH = '(^|[|;&(]|\$\()[ \t]*(LC_ALL=C[ \t]+)?(sort|uniq)([ \t);|#]|$)'
     $LOCALE_SITE_RE_PS1 = 'Sort-Object[ \t]*(\||\)|#|$)'
+    }
     # The `Ordinal` escape hatch is GONE (rework 1 -- review blocker 2). The first draft treated any line
     # containing the string 'Ordinal' as pinned while the docs said "via an ordinal-only helper", so the
     # implementation was WIDER than the documentation: one word in a comment let an unpinned sort through
@@ -1841,6 +1948,7 @@ try {
         foreach ($l in [System.IO.File]::ReadAllLines($path)) { if ($l -match $regex) { $n++ } }
         return $n
     }
+    if (PartOn 'F') {
     $locUnfixed = @(); $nLocSh = 0; $nLocPs1 = 0
     foreach ($p in @(Get-ChildItem (Join-Path $root 'tests') -Directory | ForEach-Object { Join-Path $_.FullName 'run.sh' }) +
                    @(Get-ChildItem (Join-Path $root 'tests/lib') -Filter '*.sh' -File | ForEach-Object { $_.FullName })) {
@@ -1895,6 +2003,7 @@ try {
     $capLines  = @([IO.File]::ReadAllLines($CONV) | Where-Object { $_ -match $CAP_RE })
     $ENTRY_CAP = if ($capLines.Count -ge 1) { [int]([regex]::Match($capLines[0],'([0-9]+)' + $CAP_UNIT).Groups[1].Value) } else { 0 }
     $ENTRY_DOC = Join-Path $ROOT 'CLAUDE.md'
+    }
 
     # THE VERDICT LIVES IN ONE FUNCTION -- F15 (real file) and F16 (fixture) both call it. This is what
     # rework 1 fixed: the first version had F16 re-implement the comparison inline, so it never invoked
@@ -1910,6 +2019,7 @@ try {
 
     # (F14) extraction positive-control + declaration uniqueness -- if the regex or the conventions
     # wording breaks, the cap becomes empty and the verdict below passes vacuously.
+    if (PartOn 'F') {
     Chk "F14: cap declaration extraction positive-control (unique)" ([string]$capLines.Count) '1'
     # (F15) the actual verdict.
     Chk "F15: CLAUDE.md line count <= conventions cap" (EntryCapVerdict $ENTRY_DOC $ENTRY_CAP) 'ok'
@@ -1919,6 +2029,39 @@ try {
     [IO.File]::WriteAllLines($overPath, @(1..($ENTRY_CAP + 1) | ForEach-Object { 'x' }))
     $entryFixR = if ((EntryCapVerdict $overPath $ENTRY_CAP) -like 'over*') { 'caught' } else { 'missed' }
     Chk "F16: control -- verdict function catches the over-cap fixture" $entryFixR 'caught'
+    }
+
+    # === F18-F20 (M64-T03) -- the part-selection argument, checked against itself ====
+    # This enforces what the runner says ABOUT ITS OWN ARGUMENT (same layer as F1/F1b -- those bite the
+    # case count, these bite the part labels). All three call THE SAME FUNCTIONS the runner really uses,
+    # per the F16 lesson: a fixture control must ask "does the real verdict catch it?", never "does the
+    # fixture satisfy the condition?". The labels come out of the README declaration LINE -- the same
+    # one-line scope PartSum uses.
+    function PartLabelsDeclared() {
+        $raw = ReadUtf8 $DISC_README
+        if ($null -eq $raw) { return '' }
+        $line = ($raw -split "`r?`n" | Where-Object { $_.Contains('cases:') } | Select-Object -First 1)
+        if ($null -eq $line) { return '' }
+        $out = @()
+        foreach ($m in [regex]::Matches($line, 'Part ([A-Z]) [0-9]+')) { $out += $m.Groups[1].Value }
+        return ($out -join ' ')
+    }
+    # (F18) the runner's roster == the parts the README breakdown opens. An extraction of 0 leaves an
+    # empty string and REDDENS (deleting the declaration outright cannot go green).
+    if (PartOn 'F') {
+    Chk "F18: README breakdown part labels == the runner roster" (PartLabelsDeclared) $PART_LABELS
+    # (F19) control -- an unknown label is rejected. `ZZ` can never be a one-letter label, so this
+    # control does not go stale when a part is added.
+    Chk "F19: control -- an unknown part label is rejected" ((PartKnown 'A') + ',' + (PartKnown 'ZZ')) 'yes,no'
+    # (F20) the partial result-line prefix DIFFERS from the full one. Were they the same, a partial
+    # total copied into a report would read as a full one; this difference is the machine that stops it.
+    $rpFull = ResultPrefix ''
+    $rpPart = ResultPrefix 'ZZ'
+    $f20r = if ($rpFull -eq '' -or $rpPart -eq '') { 'empty' }
+            elseif ($rpPart.StartsWith($rpFull, [System.StringComparison]::Ordinal)) { 'same' }
+            else { 'distinct' }
+    Chk "F20: the partial result prefix differs from the full one" $f20r 'distinct'
+    }
 
 
     # === Part J (M48) -- variable-name boundary in runner sources =========
@@ -1957,8 +2100,10 @@ try {
     # helper do. Bytes are read raw and mapped 1:1 onto U+0000..U+00FF through ISO-8859-1, so the .NET
     # regex class [U+0080-U+00FF] is BYTE-EQUIVALENT to the twin's octal [\200-\377] under LC_ALL=C.
     # Matching is done with -cmatch (case-sensitive), which is what `grep -E` does on the other side.
+    if (PartOn 'J') {
     $LATIN1 = [System.Text.Encoding]::GetEncoding(28591)
     $VARBOUND_RE = '\$[A-Za-z_][A-Za-z0-9_]*[' + [char]0x0080 + '-' + [char]0x00FF + ']'
+    }
     function RunnerSrcFilesIn($dir) {
         if (-not (Test-Path $dir)) { return @() }
         return @(Get-ChildItem -Path $dir -Recurse -Force -File | Where-Object {
@@ -1970,7 +2115,9 @@ try {
     # hole the M48 round-0 review measured (drop 'hooks' from the roots and both copies stayed green);
     # round 1's J6 did not close that axis either. So J1 asks the question PER ROOT: delete a root and
     # the composite loses a slot, which no longer equals the expected value.
+    if (PartOn 'J') {
     $VARBOUND_ROOTS = @('tests', 'hooks')
+    }
     function RunnerSrcFiles() {
         $acc = @()
         foreach ($vbRoot in $VARBOUND_ROOTS) { $acc += @(RunnerSrcFilesIn (Join-Path $ROOT $vbRoot)) }
@@ -2018,6 +2165,7 @@ try {
         }
         return @($checked, $bad)
     }
+    if (PartOn 'J') {
     $vbScan = VarBoundScan
     $vbFound = (@(RunnerSrcFiles)).Count
     if ([string]$vbScan[1] -ne '0') {
@@ -2042,7 +2190,9 @@ try {
     # bytes the .sh twin writes with octal escapes.
     $KOBYTES = [byte[]](0xEA, 0xB1, 0xB4)
     $LFBYTE = [byte[]](0x0A)
+    }
     function AsciiBytes([string]$s) { return [System.Text.Encoding]::ASCII.GetBytes($s) }
+    if (PartOn 'J') {
     $varFx1 = Join-Path $sbx 'varfx1.sh'
     [System.IO.File]::WriteAllBytes($varFx1,
         [byte[]]((AsciiBytes 'echo "x $NANN') + $KOBYTES + (AsciiBytes ' y"') + $LFBYTE))
@@ -2057,6 +2207,7 @@ try {
         [byte[]]((AsciiBytes 'echo "x ${NANN}') + $KOBYTES + (AsciiBytes ' y"') + $LFBYTE +
                  (AsciiBytes '#  note $NANN') + $KOBYTES + (AsciiBytes ' tail') + $LFBYTE))
     Chk "J5: control -- braced form and comment lines are not caught" (VarBoundProbe $varFx0) '1/0'
+    }
     # (J6) BITE THE DISCOVERY SPEC WITH A FIXTURE (M48 rework 1 -- review recommendation 3). J2 measures
     # discovery and consumption with the SAME function, so nothing bit the spec itself.
     # WHAT J6 BITES IS THE SPEC FOR ONE DIRECTORY, NOT WHICH ROOTS GET WALKED -- the round-0 hole
@@ -2085,8 +2236,10 @@ try {
         [Array]::Sort($names, [System.StringComparer]::Ordinal)
         return ($names -join '|')
     }
+    if (PartOn 'J') {
     Chk "J6: control -- the discovery spec bitten by a fixture (case, hidden, directories)" `
         (RunnerDiscSpec (RunnerDiscFixture)) '.hidden.ps1|a.sh|d.ps1'
+    }
 
     # === Part K (M48) -- shared harness controls, checked against a list ===
     # A NEW HARNESS DROPS A CONTROL THE EXISTING ONES ALL HAVE -- all three M47 returns were of that
@@ -2211,6 +2364,7 @@ try {
         foreach ($hcFld in $fields) { if ([string]::IsNullOrEmpty($hcFld)) { return $false } }
         return $true
     }
+    if (PartOn 'K') {
     $hcDecls = @(HcLines)
     $harnessList = @(HarnessDirsIn (Join-Path $ROOT 'tests'))
     # ordinal dedup of the control names (a bare Sort-Object is banned and its uniqueness would be
@@ -2243,6 +2397,7 @@ try {
     Chk "K3: harness discovery positive control (>0)" $(if ($harnessList.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
     # (K4) the check itself -- every (harness x shell) pair that is not exempt carries its token.
     Chk "K4: no missing control token across harness x shell (exemptions aside)" ([string]$hcMiss.Count) '0'
+    }
     # (K5) fixture control -- live misses are 0, so this is what keeps K4 from being vacuous. In the
     # expected '1/caught' the first field bites the DISCOVERY SPEC (a decoy directory with only one runner
     # is not a harness) and the second bites the VERDICT. The fixture harness carries EVERY DECLARED TOKEN
@@ -2272,6 +2427,7 @@ try {
         [System.IO.File]::WriteAllText((Join-Path $d 'zz-decoy/run.sh'), "echo hello`n", $enc)   # no run.ps1
         return $d
     }
+    if (PartOn 'K') {
     $hcFixDirs = @(HarnessDirsIn (HcFixture))
     $hcFixR = if ((@(HcMissing $hcFixDirs)).Count -gt 0) { 'caught' } else { 'missed' }
     Chk "K5: control -- a comment-only-token fixture harness is caught by the same function" `
@@ -2280,6 +2436,7 @@ try {
     # harness and the exemption is orphaned, quietly loosening that control (same layer as Part H's
     # exemption-freshness case).
     Chk "K6: every exempted name is a real harness (orphans 0)" ([string](@(HcOrphanExempt $harnessList)).Count) '0'
+    }
 
     # === Part L (M49) -- declared count vs enumerated item count ===========
     # A document that STATES A COUNT and then ENUMERATES must not disagree with its own enumeration.
@@ -2296,6 +2453,7 @@ try {
     #   docs/reports/M49-impl.md.
     #   Boundary: if an item's BODY names a sibling number that has not appeared yet, the run inflates
     #   (a false positive). Zero live sites have that shape today; the convention records the same bound.
+    if (PartOn 'L') {
     $cntWords = @(MarkersOf 'count-word:')
     $cntCops = @(MarkersOf 'count-copula:')
     $lWord = @(); $lVal = @()
@@ -2306,6 +2464,7 @@ try {
     # Two SEPARATE series -- merging them in one window fuses two different enumerations into one.
     $ENUM_S1 = @(0x2460..0x2473 | ForEach-Object { [char]$_ })
     $ENUM_S2 = @(0x2474..0x2487 | ForEach-Object { [char]$_ })
+    }
     # BLANK and LIST-ITEM tests are pinned to ASCII space+tab, the same width as the twin's awk under
     # LC_ALL=C. Trim()/\s here would strip every Unicode space and split the two copies -- that is
     # exactly the class F17 above was built for, so it is not repeated here.
@@ -2378,6 +2537,7 @@ try {
         }
         return $out
     }
+    if (PartOn 'L') {
     $lScan = @()
     $lLiving = @(LivingDocs)
     foreach ($p in $lLiving) { $lScan += @(EnumScanIn $p) }
@@ -2389,6 +2549,7 @@ try {
     Chk "L3: marker extraction positive control (numerals>0, copulas>0)" `
         $(if ($lWord.Count -gt 0 -and $cntCops.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
     Chk "L4: 20 enumerators in each series (each copy self-asserts)" ("{0}/{1}" -f $ENUM_S1.Count, $ENUM_S2.Count) '20/20'
+    }
     # (L5) ASK PER ROOT. "extraction is not zero" cannot see ONE ROOT DISAPPEARING -- the other roots
     # still yield documents, the count stays above zero, and the scanned range quietly shrinks. The M48
     # review returned exactly that shape (J1), so the same mistake is not repeated here. The classes are
@@ -2408,6 +2569,7 @@ try {
         }
         return $c.Count
     }
+    if (PartOn 'L') {
     Chk "L5: all five living-doc root classes appear (per root, not just >0)" `
         ("{0}/{1}" -f (LivingRootClasses $lLiving), $(if ($lLiving.Count -gt 0) { 'ok' } else { 'no' })) '5/ok'
     # (L6) With zero candidates L7 would pass as 0 == 0 -- ask about the extraction itself first.
@@ -2431,8 +2593,10 @@ try {
     $lfd = Join-Path $sbx 'lfd.md'
     [System.IO.File]::WriteAllText($lfd, ($lw3 + ' ' + $lcop + ': ' + $ENUM_S2[0] + ' a ' + $ENUM_S2[1] + ' b ' +
         $ENUM_S2[2] + " c`n"), $u8)
+    }
     function LBadCount($p) { return [string](@(EnumScanIn $p | Where-Object { $_.StartsWith('BAD ', [System.StringComparison]::Ordinal) })).Count }
     function LCandCount($p) { return [string](@(EnumScanIn $p | Where-Object { $_ -eq 'CAND' })).Count }
+    if (PartOn 'L') {
     Chk "L8: control -- a declaration that LOST an item is caught by the real verdict" (LBadCount $lfa) '1'
     Chk "L9: control -- a declaration that GAINED an item is caught by the real verdict" (LBadCount $lfb) '1'
     # (L10) Two negative controls -- without circled enumerators there is no candidate (the window is
@@ -2475,6 +2639,7 @@ try {
     $lTokMark = ':' + $lw3 + $lcop + ':'
     Chk "L13: the mismatch diagnostic carries the marker it matched" `
         ([string](@(EnumScanIn $lfa | Where-Object { $_.StartsWith('BAD ', [System.StringComparison]::Ordinal) -and $_.Contains($lTokMark) })).Count) '1'
+    }
 
     # === Part M (M51) -- epic (direction) reference integrity =================
     # The direction of a cycle must come from a DECLARED TRUNK, not from whatever the previous
@@ -2489,7 +2654,9 @@ try {
     #   NOT ASKED: whether a milestone really belongs to that trunk. That is a semantic judgement and
     #   cannot be asked statically (same class as M49's "head position" and M50's "while-read loop").
     #   A false reference is a VISIBLE STATEMENT in the document, so it belongs to review.
+    if (PartOn 'M') {
     $epicStatuses = @(MarkersOf 'epic-status:')
+    }
     # `[string](@() | Select-Object -First 1)` is **$null**, not '' -- and `$null -ne ''` is TRUE,
     # so an emptiness guard written as `-ne ''` reads a MISSING declaration as present. The twin's
     # `[ -n "$x" ]` catches it exactly. Force a real string here and keep the two copies identical.
@@ -2499,10 +2666,12 @@ try {
         if ($a.Count -gt 0) { return [string]$a[0] }
         return ''
     }
+    if (PartOn 'M') {
     $epicSince = EpicFirstMarker 'epic-since:'
     $epicMemberMark = EpicFirstMarker 'epic-members:'
     $epicSinceNum = 0
     if ($epicSince -ne '') { $epicSinceNum = [int](($epicSince -replace '[^0-9]', '')) }
+    }
     function EpicNumOf([string]$t) {
         $d = $t -replace '[^0-9]', ''
         if ($d -eq '') { return 0 }
@@ -2594,6 +2763,7 @@ try {
         }
         return $out
     }
+    if (PartOn 'M') {
     $epicScan = @(EpicScan (EpicFilesIn $ROOT) (MilestoneFilesIn $ROOT))
     $nMsDoc = (@(MilestoneFilesIn $ROOT)).Count
     $nEpicOpen = @($epicScan | Where-Object { $_ -match '^OPEN [1-9]' }).Count
@@ -2620,6 +2790,7 @@ try {
     # Three fixture controls that RUN THE REAL VERDICT on the fixture (M46 review blocker 1's precedent).
     # The lists are passed in, so a fixture never overwrites the living lists.
     $epicSn = $epicSince -replace '[^0-9]', ''
+    }
     function EpicFixture([string]$mode) {
         $d = Join-Path $sbx ("epicfix-" + $mode)
         if (Test-Path -LiteralPath $d) { Remove-Item -Recurse -Force $d }
@@ -2680,6 +2851,7 @@ try {
         return [string](@(EpicScan (EpicFilesIn $root) (MilestoneFilesIn $root) |
             Where-Object { $_.StartsWith('BAD ', [System.StringComparison]::Ordinal) })).Count
     }
+    if (PartOn 'M') {
     Chk "M6: control -- a reference to a non-existent epic is caught by the real verdict" `
         (EpicBadIn (EpicFixture 'dangling')) '1'
     Chk "M7: control -- a broken reverse direction is caught by the real verdict" `
@@ -2711,6 +2883,7 @@ try {
     # the past exception and the second does.
     Chk "M14: negative control -- prose outside the block / a past milestone entry stay green" `
         ("{0}/{1}" -f (EpicBadIn (EpicFixture 'prose')), (EpicBadIn (EpicFixture 'past'))) '0/0'
+    }
 
     # === Part N (M52) -- status-item declaration consistency ==================
     # The convention declares the check-item list ONCE and /tide:status + /tide:fleet only READ it.
@@ -2718,8 +2891,10 @@ try {
     # grew to eight, so fleet's decision rules could not fire for lack of data (M52-T01 measurement).
     # Consumer checks use ASCII tokens ONLY (`status-items:`, `M{N}-impl.md`) so this copy keeps
     # byte>127 = 0 while both twins use LITERALLY THE SAME predicate.
+    if (PartOn 'N') {
     $nSiAbsent = @(MarkersOf 'status-items-absent:').Count
     $nSi = @(MarkersOf 'status-items:').Count
+    }
     function SiRowsIn([string]$path) {
         $win = $false; $n = 0
         foreach ($l in [System.IO.File]::ReadAllLines($path)) {
@@ -2750,6 +2925,7 @@ try {
         [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
         return $f
     }
+    if (PartOn 'N') {
     Chk "N1: status-items declaration line is exactly 1" (DeclCount $CONV 'status-items:') '1'
     Chk "N2: autonomy-level declaration line is exactly 1" (DeclCount $CONV 'autonomy-level:') '1'
     # (N3) COMPOUND expectation. The first half is the extraction positive-control; the second re-runs
@@ -2785,6 +2961,7 @@ try {
     # visible to review is the defense here -- the convention states that limit alongside.
     $autLines = ((OrdinalSort @(MarkersOf 'autonomy-lines:')) -join ' ')
     $autDef = @(MarkersOf 'autonomy-default:')[0]
+    }
     function AutonScan([string]$root) {
         $out = New-Object System.Collections.Generic.List[string]
         foreach ($d in ([System.IO.Directory]::GetDirectories($root))) {
@@ -2839,6 +3016,7 @@ try {
     }
     # (N10) COMPOUND -- one declaration fixes the meaning of absence, and its value must be a member of
     # the value set. A default outside the set leaves "what does a missing file mean" undecided.
+    if (PartOn 'N') {
     Chk "N10: autonomy-default declared once / value is in the value set" `
         ("{0}/{1}" -f (DeclCount $CONV 'autonomy-default:'), @(@(MarkersOf 'autonomy-level:') | Where-Object { $_ -eq $autDef }).Count) '1/1'
     Chk "N11: autonomy-lines declaration line is exactly 1" (DeclCount $CONV 'autonomy-lines:') '1'
@@ -2860,6 +3038,7 @@ try {
     $fcBul = 0
     $fcBuf = New-Object System.Collections.Generic.List[string]
     $fcHas = $false
+    }
     function FcFlush() {
         if ($script:fcHas) {
             foreach ($b in $script:fcBuf) {
@@ -2869,6 +3048,7 @@ try {
         $script:fcHas = $false
         $script:fcBuf.Clear()
     }
+    if (PartOn 'N') {
     foreach ($l in [System.IO.File]::ReadAllLines($fcPath)) {
         if ($l -eq '') { FcFlush; continue }
         [void]$fcBuf.Add($l)
@@ -2877,6 +3057,7 @@ try {
     FcFlush
     Chk "N17: fleet-cycle start point -- reference 1 / enumeration 0 in that paragraph" `
         ("{0}/{1}" -f $(if ($fcRef -gt 0) { 'ok' } else { 'no' }), $fcBul) 'ok/0'
+    }
 
     # --- floor-mark co-existence ban (M52 review round 1, blocker 1) ----------
     # `autonomy-lines:` counts MENTIONS, not conditions, so MOVING a condition from one gate to another
@@ -2894,7 +3075,9 @@ try {
         }
         return @($out)
     }
+    if (PartOn 'N') {
     $floorMarks = @(FloorMarks)
+    }
     function IndOf([string]$s) {
         $n = 0
         while ($n -lt $s.Length -and $s[$n] -eq ' ') { $n++ }
@@ -2962,6 +3145,7 @@ try {
     }
     # (N18)(N19) Declaration uniqueness and the EXTRACTION positive-control -- if extraction comes back
     # empty the main check below is vacuously 0, and a broken backtick-span parse is exactly that path.
+    if (PartOn 'N') {
     Chk "N18: floor-marks declaration line is exactly 1" (DeclCount $CONV 'floor-marks:') '1'
     Chk "N19: floor-mark extraction positive-control (>0)" $(if ($floorMarks.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
     # (N20) THE MAIN CHECK. An autonomy token sharing an item window with a floor mark is a hit.
@@ -2984,6 +3168,7 @@ try {
         $i++
         if (($i % 2) -eq 0 -and $_ -ne '') { $_ }
     })
+    }
     # THE WINDOW IS THAT SECTION -- from the declaration line to the next top-level checklist item.
     # Scanning the whole file lets an edit that MOVES the description to another section (rather than
     # deleting it) sail through green: same damage, different shape. M53-T03's adversarial mutation
@@ -3027,6 +3212,7 @@ try {
         [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
         return $f
     }
+    if (PartOn 'N') {
     Chk "N24: mutation-axes declaration line is exactly 1" (DeclCount $CONV 'mutation-axes:') '1'
     # (N25) Extraction positive-control -- a broken backtick-span parse makes the check below vacuous.
     Chk "N25: reversal-axis extraction positive-control (>0)" $(if (@($mAxes).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
@@ -3040,11 +3226,13 @@ try {
     # the window to the section. Without this case, REVERTING that narrowing reddens nothing (measured:
     # 240/0 green). The convention's "a landed adversarial mutation is promoted to a fixture" points here.
     Chk "N29: adversarial control -- moving the description out of the section is caught" ([string](AxisMissing (AxisFixture 'moved'))) '1'
+    }
 
     # --- Part O: consuming the retro follow-up ledger (M54) ----------------
     # Asks whether what the retro wrote reaches the next cycle. What is bitten is the declaration's
     # uniqueness, the status values' set membership and the consumer's wiring -- whether a disposition
     # is *sound* is the review's layer (the convention writes the same boundary).
+    if (PartOn 'O') {
     $RETRO = Join-Path $ROOT 'docs/reports/retro.md'
     # NORMALIZE THE TAIL -- leaving the leading space in place makes " " + "" + " " match the
     # declaration line's own leading blank, so an EMPTY status cell slips through silently
@@ -3054,6 +3242,7 @@ try {
     $rBlk = @(((DeclTail $CONV 'retro-block:') -split '\s+') | Where-Object { $_ -ne '' })[0]
     if ($null -eq $rBlk) { $rBlk = '' }
     $rFirst = if ($rStatSet.Count -gt 0) { $rStatSet[0] } else { '' }
+    }
     function RetroVals([string]$path) {
         # THE WINDOW IS AN ASCII MARKER BLOCK -- matching a (Korean) section heading would silently
         # lose the window when the heading changes, and this copy cannot carry it under the
@@ -3155,6 +3344,7 @@ try {
         }
         return $n
     }
+    if (PartOn 'O') {
     Chk "O1: retro-status declaration line is exactly 1" (DeclCount $CONV 'retro-status:') '1'
     Chk "O2: retro-block declaration line is exactly 1" (DeclCount $CONV 'retro-block:') '1'
     # (O3) Extraction positive-control -- a broken marker/table parse makes the main check vacuous.
@@ -3180,11 +3370,13 @@ try {
     Chk "O13: control -- two windows are caught" ([string](RetroBlocks (RetroFixture 'dup'))) '2'
     # False-positive direction -- an untouched copy still has exactly one.
     Chk "O14: false-positive direction -- untouched copy has one window" ([string](RetroBlocks (RetroFixture 'clean'))) '1'
+    }
 
     # --- Part P: completion-criteria cross-check (M55) ----------------------
     # Did impl walk its own milestone's criteria BY NUMBER? What is bitten is omissions and ghosts;
     # whether a "met" is TRUE is the review's layer (the convention writes the same boundary).
     # The two Korean headings are assembled from code points -- this copy stays byte>127 = 0.
+    if (PartOn 'P') {
     $CRIT_H  = '## ' + (Uni 0xC644,0xB8CC) + ' ' + (Uni 0xAE30,0xC900)          # wan-ryo gi-jun
     $CRIT_HD = $CRIT_H + ' ' + (Uni 0xB300,0xC870)                             # + dae-jo
     # PIN THE EMPTY-DECLARATION DEFAULT ON THE DECLARATION ITSELF. Left alone, '' makes the .sh
@@ -3203,14 +3395,18 @@ try {
     $critV = (((DeclTail $CONV 'criteria-verdict:') -split '\s+') | Where-Object { $_ -ne '' }) -join ' '
     if ($critV -eq '') { $critV = $critUnset }
     $critSet = @($critV -split ' ' | Where-Object { $_ -ne '' })
+    }
     $critSinceTok = @(((DeclTail $CONV 'criteria-since:') -split '\s+') | Where-Object { $_ -ne '' })[0]
+    if (PartOn 'P') {
     if ($null -eq $critSinceTok) { $critSinceTok = '' }
+    }
     # PIN THE DEFAULT IN BOTH COPIES. Left alone, [int]'' is 0 here (every milestone becomes a
     # target) while the .sh twin's `[ n -ge "" ]` dies and NO milestone does -- same tree, two
     # verdicts (measured by reversal p2-key: sh 263/6 vs ps1 262/7). A malformed token now means
     # NO targets on both sides, so the extraction positive-control reddens either way.
     $critN = if ($critSinceTok -match '^M[0-9]+$') { $critSinceTok.Substring(1) } else { '999999' }
     # The derived tokens fall out of the PINNED declaration above -- no fallback of their own.
+    if (PartOn 'P') {
     $critOk = $critSet[0]
     # M56 -- the value that CONTAINS another declared value, derived from the set itself (no
     # positions, no words baked in). The .sh twin derives the same token the same way.
@@ -3229,6 +3425,7 @@ try {
     if ($critSup -eq '') { $critSup = $critOk }
     if ($critSub -eq '') { $critSub = $critOk }
     $critAlt = $critSet[$critSet.Count - 1]
+    }
     function CritSortJoin($nums) {
         # No bare Sort-Object anywhere: cast to int and use Array::Sort so the order is fixed,
         # matching the .sh twin's `LC_ALL=C sort -n`.
@@ -3456,6 +3653,7 @@ try {
         [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
         return $f
     }
+    if (PartOn 'P') {
     Chk "P1: criteria-verdict declaration line is exactly 1" (DeclCount $CONV 'criteria-verdict:') '1'
     Chk "P2: criteria-since declaration line is exactly 1" (DeclCount $CONV 'criteria-since:') '1'
     # (P3) Extraction positive-control -- a broken parse makes "the sets match" vacuous (0 == 0).
@@ -3500,6 +3698,7 @@ try {
     # still a re-enumeration. Under the per-line window this shape passed green; narrowing the
     # window back to a line reddens here. It bites ALWAYS, not only under reversal.
     Chk "P19: control -- an enumeration split over two lines is caught" (CritReenum (CritSkillFixture 'split')) 'yes'
+    }
 
     # --- Part Q: the verdict comparison is pinned to Ordinal (M57) ------------
     # M42-T03 pinned the verdict comparison saying "every assertion in this file flows through
@@ -3511,9 +3710,11 @@ try {
     # one of the two lines above it, must hold an Ordinal comparison or a declared
     # `verdict-exempt: <reason>`. Three lines because the verdict is written both as a one-liner
     # and as `if (...) {` + body. Exemption is DECLARED, never silent (same idiom as locale-exempt).
+    if (PartOn 'Q') {
     $VERDICT_MARK = (Uni 0x24) + 'script:pass++'
     $VERDICT_ORD = 'StringComparison]::Ordinal'
     $VERDICT_EXEMPT = 'verdict-exempt:'
+    }
     function VqScan([string]$path) {
         if (-not (Test-Path $path)) { return 0 }
         $lines = [System.IO.File]::ReadAllLines($path)
@@ -3566,6 +3767,7 @@ try {
         [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
         return $f
     }
+    if (PartOn 'Q') {
     Chk "Q1: verdict-site extraction positive-control (>0)" $(if ((VqSites) -gt 0) { 'ok' } else { 'no' }) 'ok'
     Chk "Q2: main check -- verdict sites neither pinned nor declared: 0" ([string](VqTotal)) '0'
     # Fixture controls -- the REAL verdict runs on the copy (M46 precedent), two directions.
@@ -3574,6 +3776,7 @@ try {
     # False-positive direction -- a DECLARED site passes. Reddening here would make the
     # convention's "declare it and you are done" a lie.
     Chk "Q5: false-positive direction -- unpinned but declared passes" ([string](VqScan (VqFixture 'redecl'))) '0'
+    }
 
     # --- Part R: release-coverage bookkeeping declaration (M58) ---------------
     # The set the coverage check subtracts lived in TWO places (conventions and the release
@@ -3603,6 +3806,7 @@ try {
         [System.IO.File]::WriteAllLines($f, $lines.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
         return $f
     }
+    if (PartOn 'R') {
     Chk "R1: coverage-bookkeeping declaration line is exactly 1" (DeclCount $CONV $BK_KEY) '1'
     # (R2) extraction positive-control -- zero tokens would make the main check vacuously green.
     Chk "R2: token extraction positive-control (>0)" $(if (@(BkTokens).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
@@ -3613,6 +3817,7 @@ try {
     # (R5) wiring -- not re-enumerating is not enough: DELETING the reference also scores 0, so ask
     # whether the consumer points at the declaration name (otherwise this check goes vacuous).
     Chk "R5: wiring -- the release skill points at the declaration name" (HasToken $REL_SKILL $BK_KEY) 'yes'
+    }
 
     # --- Part S: publish-availability axis / unpublishable terminal state (M59) -
     # The release procedure assumed a reachable remote, so a correct tree (add/commit/tag done)
@@ -3639,6 +3844,7 @@ try {
         [System.IO.File]::WriteAllLines($f, $lines.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
         return $f
     }
+    if (PartOn 'S') {
     Chk "S1: push-availability declaration line is exactly 1" (DeclCount $CONV_REL $PA_KEY) '1'
     Chk "S2: terminal-state declaration line is exactly 1" (DeclCount $CONV_REL $TS_KEY) '1'
     # (S3) extraction positive-control -- an empty tail would make the checks below split on an
@@ -3648,14 +3854,17 @@ try {
     # Change the value in the conventions and these go red, so restatement sites get fixed too.
     Chk "S4: main check -- release skill carries the terminal-state name" (HasToken $REL_SKILL (TsToken)) 'yes'
     Chk "S5: main check -- command catalog carries the terminal-state name" (HasToken $CMD_CANON (TsToken)) 'yes'
+    }
     # (S6) wiring -- asking only about the terminal state leaves the AXIS name free to vanish
     # while staying green, and the axis is what triggers that state. What is bound is not the
     # declaration KEY but the ASCII alias it names (the key minus its trailing colon) -- the alias
     # is what gets restated in consumers (the conventions' ASCII-alias rule).
     function PaName { return $PA_KEY.TrimEnd(':') }
+    if (PartOn 'S') {
     Chk "S6: wiring -- release skill carries the push axis name" (HasToken $REL_SKILL (PaName)) 'yes'
     # (S7) fixture control -- the REAL verdict runs on the copy (M46 precedent).
     Chk "S7: control -- a missing name is caught" (HasToken (TsFixture) (TsToken)) 'no'
+    }
 
     # --- Part T: runner source EOL contract (M59 review blocker 1 -> M60) -------
     # `.gitattributes` pins `*.sh` to `eol=lf` and even writes the reason in a comment
@@ -3711,6 +3920,7 @@ try {
         [System.IO.File]::WriteAllBytes($f, $bytes)
         return $f
     }
+    if (PartOn 'T') {
     Chk "T1: source-eol declaration line is exactly 1" (DeclCount $CONV $EOL_KEY) '1'
     # (T2) extraction positive-control -- zero patterns makes "0 detected" vacuous.
     Chk "T2: eol=lf pattern extraction positive-control (>0)" $(if (@(EolGlobs).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
@@ -3722,6 +3932,7 @@ try {
     Chk "T5: control -- a CRLF copy is caught" (CrlfIn (EolFixture 'crlf')) 'yes'
     # (T6) negative control -- an LF-only copy must not redden (false-positive direction).
     Chk "T6: negative control -- an LF copy passes" (CrlfIn (EolFixture 'lf')) 'no'
+    }
     function EolGaFixture {
         $f = Join-Path $sbx 'gitattr-probe'
         [System.IO.File]::WriteAllLines($f, @('# probe','*.zzz text eol=lf'), (New-Object System.Text.UTF8Encoding($false)))
@@ -3731,7 +3942,9 @@ try {
     # different one. A refutation pass (M60 review) opened this: the earlier form was
     # `HasToken $GITATTR 'eol=lf'`, which stayed green even for a COMMENTED-OUT declaration and
     # was strictly weaker than T2 -- it could never redden on its own. That is a claim, not a check.
+    if (PartOn 'T') {
     Chk "T7: wiring -- a different .gitattributes changes the extraction" (@(EolGlobs (EolGaFixture)) -join ',') '*.zzz'
+    }
 
     # --- Part U: measurement-order rule + exposing the silent skip (M60) --------
     # The harness READS the impl report (Part P), yet `crit_targets` silently skips milestones
@@ -3755,6 +3968,7 @@ try {
         return $out.ToArray()
     }
     function SkippedN([string]$extra) { return @(SkippedMs $extra).Count }
+    if (PartOn 'U') {
     Chk "U1: measure-order declaration line is exactly 1" (DeclCount $CONV $MO_KEY) '1'
     # (U2) extraction positive-control -- an empty tail would bind the empty token everywhere.
     Chk "U2: alias extraction positive-control" $(if ((MoName) -ne '') { 'ok' } else { 'no' }) 'ok'
@@ -3767,6 +3981,7 @@ try {
     Chk "U6: milestones skipped by the criteria cross-check: 0" ([string](SkippedN '')) '0'
     # (U7) fixture control -- the exposure is not vacuous: adding a report-less number raises it.
     Chk "U7: control -- a new skip raises the count by one" ([string]((SkippedN '9999') - (SkippedN ''))) '1'
+    }
 
     # --- Part V: the machine READS the reversal table (M61) ------------------
     # The checklist's REVERSAL MEASUREMENT demands "neuter each case one by one and confirm THAT
@@ -3775,6 +3990,7 @@ try {
     # weaker than `T2` and NEVER reddened alone across eight rows (always with `T2`/`T3`). Had the
     # table been readable, the machine would have named it. Here the table becomes a DECLARED
     # format and this part reads it; the format's single source is the convention.
+    if (PartOn 'V') {
     $RVB_KEY = 'reversal-block:'
     $RVC_KEY = 'reversal-columns:'
     $RVS_KEY = 'reversal-sep:'
@@ -3798,6 +4014,7 @@ try {
     $RVN = 999999
     $rvs0 = @(("" + (DeclTail $CONV $RVN_KEY)).Trim() -split '\s+' | Where-Object { $_ -ne '' })
     if ($rvs0.Count -gt 0 -and $rvs0[0] -match '^M([0-9]+)$') { $RVN = [int]$Matches[1] }
+    }
     function RvCol([string]$tok) {
         for ($i = 0; $i -lt $RVCOL.Count; $i++) { if ($RVCOL[$i] -ceq $tok) { return ($i + 1) } }
         return 0
@@ -4160,6 +4377,7 @@ try {
         foreach ($f in @($DISCR, $SITER)) { if ((HasToken $f $needle) -eq 'yes') { $n++ } }
         return $n
     }
+    if (PartOn 'V') {
     Chk "V1: control-form declaration line is exactly 1" (DeclCount $CONV $CF_KEY) '1' 
     Chk "V2: reversal-block declaration line is exactly 1" (DeclCount $CONV $RVB_KEY) '1'
     Chk "V3: reversal-columns declaration line is exactly 1" (DeclCount $CONV $RVC_KEY) '1'
@@ -4249,6 +4467,7 @@ try {
     # same-line justification `control-form:` asks for). Without it `CfRestated` could ignore its
     # argument and `V29` would stay green.
     Chk "V32: wiring -- another alias leaves no restatement site" ([string](CfRestated 'zzz-other-form')) '0'
+    }
 
     # --- Part W: inspection-scope declaration (M62) ---------------------------
     # "I checked X" leaves the SCOPE to the inspector and nobody looks at it. In the first full cycle
@@ -4260,6 +4479,7 @@ try {
     # section. What is bitten: declaration uniqueness, the co-term living in all three seats, and the
     # boundary markers being really used. Whether the DECLARED scope equals the search actually run is
     # not statically decidable, and the convention writes that boundary in the same section.
+    if (PartOn 'W') {
     $SCOPE_KEY     = 'scope-decl:'
     $SCOPE_LIM_KEY = 'scope-limits:'
     # The co-term COMES FROM THE DECLARATION (hard-coding it here would keep every axis green when the
@@ -4280,6 +4500,7 @@ try {
     if ($SCOPE_ALIAS -eq '') { $SCOPE_ALIAS = 'zzz-scope-decl-unset' }
     $SCOPE_MARKS = @(MarkersOf $SCOPE_LIM_KEY)
     $NSCM = $SCOPE_MARKS.Count
+    }
     function ScopeAll([string]$alias) {
         # FOUR SITES SINCE M63 -- the M62 review noted that the alias sat in the impl template and the
         # review SKILL while the review TEMPLATE was empty with no stated reason; filling that slot adds
@@ -4375,6 +4596,7 @@ try {
     # fixture -- one marker sits in the declaration's own section, the other in a DIFFERENT section.
     # With the section window the answer is 1; if the window regresses to file-wide it becomes 2 and
     # `W22` reddens (a control that does not redden when the judgement is broken is not a control).
+    if (PartOn 'W') {
     $MK_FIX = Join-Path $SBX 'marks-crosssection.md'
     [System.IO.File]::WriteAllLines($MK_FIX, [string[]]@(
         '## Sec A',
@@ -4523,10 +4745,166 @@ try {
     # is still above zero. An invisible character must not be able to retire a boundary marker.
     Chk "W28: no forbidden separator in the scope-limits declaration tail" (BadSeps $CONV $SCOPE_LIM_KEY) '0'
     Chk "W29: no forbidden separator in the verify-scope declaration tail" (BadSeps $CONV $VS_KEY) '0'
+    }
 
+    # (W31-W41 / M64-T04) MEASUREMENT ALLOCATION -- the convention plants two declaration lines that
+    # split WHO JUDGES the sh axis from WHERE A REPORTED VALUE COMES FROM (`measure-axis:` /
+    # `measure-axis-job:`), and three restatement sites (impl skill / impl template / release skill)
+    # only POINT at those values. What is bitten is exactly the three things the convention names at
+    # the same place: the declaration exists, the values belong to the set, the named job is real.
+    # "Did this CI run really see this tree" is not statically decidable (same boundary as Part U's
+    # "the order itself"). Same LAYER as `measure-cache:` (`W13`-`W18`), so no new part -- parts are
+    # split by the layer they bite.
+    #
+    # The binding runs BOTH WAYS. One way alone is half the job: a declared value vanishing from a
+    # site is `W36`'s, a site naming a value the declaration does NOT carry is `W37`'s. With only the
+    # first, deleting a value from the declaration leaves the sites repeating the old value and green
+    # (same judgement as Part H's bidirectional `axis:` notation check).
+    function AxisSitesHave([string]$v) {   # -> yes when ALL three sites carry the value as a backticked token
+        foreach ($f in @($IMPL_SKILL, $IMPL_TPL, $REL_SKILL)) { if ((ScopeTok $f $v) -ne 'yes') { return 'no' } }
+        return 'yes'
+    }
+    function AxisSiteTokens() {   # -> the backticked allocation tokens the three sites write (duplicates kept)
+        $out = @()
+        foreach ($f in @($IMPL_SKILL, $IMPL_TPL, $REL_SKILL)) {
+            $raw = ReadUtf8 $f
+            if ($null -eq $raw) { continue }
+            foreach ($mm in [regex]::Matches($raw, '`axis-[a-z0-9-]*`')) { $out += $mm.Value.Trim('`') }
+        }
+        return $out
+    }
+    function AxisSiteMiss() {   # -> declared values that the three sites do not carry TOGETHER
+        $m = 0
+        foreach ($v in $MA_VALS) { if ((AxisSitesHave $v) -ne 'yes') { $m++ } }
+        return [string]$m
+    }
+    # (W42-W43 / M64 rework 1) ENFORCING THE SCOPE -- axis names belong to the reference repository, so
+    # the user skills (the three sites) point at the co-terms only and never name an axis (M64 review
+    # blocker 2). The shape bitten is "backticked name + zero or more spaces + the axis noun" (the glued form reaches the same harm -- M64 rework 1 review). An UNBACKTICKED name +
+    # axis noun is NOT asked: the release skill names its publication-availability axis that way on
+    # purpose, and banning that form file-wide would redden those lines (boundary -- the README records it
+    # with the measurement). The axis noun is built from its code point (U+CD95; ASCII-only source).
+    $AXIS_NAME_RE = '`[A-Za-z][A-Za-z0-9._-]*` *' + [string][char]0xCD95
+    function AxisNameHits($file) {   # -> lines holding "backticked name + zero or more spaces + axis noun"
+        $raw = ReadUtf8 $file
+        if ($null -eq $raw) { return 0 }
+        return @($raw -split "`r?`n" | Where-Object { $_ -cmatch $AXIS_NAME_RE }).Count
+    }
+    function AxisNameSites() {   # -> sum of those lines over the three sites
+        $n = 0
+        foreach ($f in @($IMPL_SKILL, $IMPL_TPL, $REL_SKILL)) { $n += (AxisNameHits $f) }
+        return [string]$n
+    }
+    # (W44-W48 / M64 rework 2) DIRECT BAN ON THE NAMES -- `W42` sees only "backticked name + axis noun",
+    # so a line copied verbatim from the reference repo's docs (the local value comes from backticked pwsh,
+    # or "the CI backticked-posix job") went through (M64 rework 1 review blocker 2). The convention now
+    # declares the reference repo's axis names (`measure-axis-names:`) and the runner counts those names,
+    # plus the named job, as BACKTICKED TOKENS at the three sites. `skills/` holds none today, so the
+    # baseline is 0. BARE names are not asked -- sh/bash appear as plain words and command fragments, so a
+    # bare-word ban would be a false positive (boundary -- the README records it).
+    function AxisNameTokenHits($file) {   # -> lines holding a declared axis/job name as a backticked token (summed per name)
+        $raw = ReadUtf8 $file
+        if ($null -eq $raw) { return 0 }
+        $lines = $raw -split "`r?`n"
+        $n = 0
+        foreach ($v in (@($MN_VALS) + @($MJ_JOB))) {
+            if ($null -eq $v -or $v -eq '') { continue }
+            $tok = '`' + $v + '`'
+            $n += @($lines | Where-Object { $_.Contains($tok) }).Count
+        }
+        return $n
+    }
+    function AxisNameTokenSites() {   # -> sum of those lines over the three sites
+        $n = 0
+        foreach ($f in @($IMPL_SKILL, $IMPL_TPL, $REL_SKILL)) { $n += (AxisNameTokenHits $f) }
+        return [string]$n
+    }
+    function AxisSiteOrphan() {   # -> allocation tokens written at the sites that the declaration lacks
+        $m = 0
+        foreach ($t in @(AxisSiteTokens)) { if ($MA_VALS -cnotcontains $t) { $m++ } }
+        return [string]$m
+    }
+    if (PartOn 'W') {
+    $MA_KEY = 'measure-axis:'
+    $MJ_KEY = 'measure-axis-job:'
+    # values are split on SPACE/TAB and only NAME-SHAPED tokens are kept (the .sh twin: `tr ' \011'` +
+    # `grep -E`; same width as `W13`). A trailing tab glued to a token would redden the binding too, and
+    # then `W40`/`W41` could never own a row alone.
+    $MA_VALS = @()
+    $maTail = DeclTail $CONV $MA_KEY
+    if ($null -ne $maTail) { $MA_VALS = @($maTail -split '[ \t]+' | Where-Object { $_ -cmatch '^[a-z][a-z0-9-]*$' }) }
+    $MJ_JOB = ''
+    $mjTail = DeclTail $CONV $MJ_KEY
+    if ($null -ne $mjTail) {
+        $mjA = @($mjTail -split '[ \t]+' | Where-Object { $_ -cmatch '^[a-z][a-z0-9-]*$' })
+        if ($mjA.Count -gt 0) { $MJ_JOB = $mjA[0] }
+    }
+    $NAXT = @(AxisSiteTokens).Count
+    $MA_WF = Join-Path $ROOT '.github\workflows\tests.yml'
+    Chk "W31: measure-axis declaration line is exactly 1" (DeclCount $CONV $MA_KEY) '1'
+    Chk "W32: measure-axis-job declaration line is exactly 1" (DeclCount $CONV $MJ_KEY) '1'
+    # (W33-W35) three extraction positive-controls -- at 0 each check below passes VACUOUSLY (0 == 0).
+    # `W35` is the SITE side: if the token shape (the `axis-` prefix) changes and nothing is scraped,
+    # `W37` is vacuous.
+    Chk "W33: allocation value extraction positive-control (>0)" $(if ($MA_VALS.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "W34: allocation job extraction positive-control" $(if ($MJ_JOB -ne '') { 'ok' } else { 'no' }) 'ok'
+    Chk "W35: restatement-site allocation token extraction positive-control (>0)" $(if ($NAXT -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # (W36-W38) MAIN CHECKS.
+    Chk "W36: every declared allocation value is a backticked token at all three sites" (AxisSiteMiss) '0'
+    Chk "W37: no site names an allocation value the declaration lacks" (AxisSiteOrphan) '0'
+    # (W38) the named job is real -- the job set is discovered with the SAME function as Part H
+    # (`CiJobNames`). A job missing from the workflow makes the allocation a declaration pointing nowhere.
+    Chk "W38: the CI job the allocation names exists in the workflow" $(if ($MJ_JOB -ne '' -and (' ' + (CiJobNames $MA_WF) + ' ').Contains(' ' + $MJ_JOB + ' ')) { 'yes' } else { 'no' }) 'yes'
+    # (W39) WIRING -- same shape as `W18` (it reads only the token it is handed, which is in no file, so
+    # the baseline is CONSTANT BY CONSTRUCTION). Without it `AxisSitesHave` could ignore its argument and
+    # `W36` would stay green.
+    Chk "W39: wiring -- a value outside the declaration does not satisfy the site binding" (AxisSitesHave 'zzz-other-axis') 'no'
+    # (W40-W41) tail separators -- same helper and same reason as `W26`-`W29`.
+    Chk "W40: no forbidden separator in the measure-axis declaration tail" (BadSeps $CONV $MA_KEY) '0'
+    Chk "W41: no forbidden separator in the measure-axis-job declaration tail" (BadSeps $CONV $MJ_KEY) '0'
+    # (W42) MAIN CHECK -- the three sites never write an axis name in backticks (the scope).
+    Chk "W42: the three sites never name an axis in backticks" (AxisNameSites) '0'
+    # (W43) CONTROL -- the same verdict function catches one fixture line. It asks the DIFFERENCE between
+    # the fixture and the real file (`control-reads-delta`), so a non-zero baseline cannot fool it.
+    $axnFix = Join-Path $sbx 'axis-name-fixture.md'
+    $axnLine = '| ' + (Uni 0xB85C,0xCEEC) + ' `pwsh` ' + [string][char]0xCD95 + ' |'
+    # The fixture has TWO lines -- one space and glued. Without the glued line, reverting the regex's
+    # "zero or more spaces" to a single space would leave this control green (M64 rework 1 review minor 7).
+    $axnGlued = '| ' + (Uni 0xB85C,0xCEEC) + ' `pwsh`' + [string][char]0xCD95 + ' |'
+    [System.IO.File]::WriteAllText($axnFix, ([string](ReadUtf8 $IMPL_TPL)) + "`n" + $axnLine + "`n" + $axnGlued + "`n", (New-Object System.Text.UTF8Encoding $false))
+    Chk "W43: control -- the verdict function catches a backticked axis-name fixture" ([string]((AxisNameHits $axnFix) - (AxisNameHits $IMPL_TPL))) '2'
+    $MN_KEY = 'measure-axis-names:'
+    $MN_VALS = @()
+    $mnTail = DeclTail $CONV $MN_KEY
+    if ($null -ne $mnTail) { $MN_VALS = @($mnTail -split '[ \t]+' | Where-Object { $_ -cmatch '^[a-z][a-z0-9-]*$' }) }
+    Chk "W44: measure-axis-names declaration line is exactly 1" (DeclCount $CONV $MN_KEY) '1'
+    # (W45) extraction positive-control -- at 0, `W46` would count the job name alone (half a check).
+    Chk "W45: reference axis-name extraction positive-control (>0)" $(if ($MN_VALS.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # (W46) MAIN CHECK.
+    Chk "W46: the three sites carry no reference axis or job name as a backticked token" (AxisNameTokenSites) '0'
+    # (W47) CONTROL -- the DIFFERENCE between the real file and a fixture with TWO lines: the first
+    # declared axis name and the named job, each backticked. Two lines so both halves of `W46` are
+    # controlled -- with one line, dropping the job name from the counting loop stayed green (M64
+    # rework 2 review, minor 4).
+    $axtFix = Join-Path $sbx 'axis-token-fixture.md'
+    $axtFirst = if ($MN_VALS.Count -gt 0) { $MN_VALS[0] } else { '' }
+    [System.IO.File]::WriteAllText($axtFix, ([string](ReadUtf8 $IMPL_TPL)) + "`n| " + (Uni 0xB85C,0xCEEC) + ' `' + $axtFirst + '` |' + "`n" + '| CI `' + $MJ_JOB + '` |' + "`n", (New-Object System.Text.UTF8Encoding $false))
+    Chk "W47: control -- the verdict function catches a declared-name backticked-token fixture" ([string]((AxisNameTokenHits $axtFix) - (AxisNameTokenHits $IMPL_TPL))) '2'
+    Chk "W48: no forbidden separator in the measure-axis-names declaration tail" (BadSeps $CONV $MN_KEY) '0'
+    }
+
+    # `F1` RUNS ONLY IN A FULL RUN (M64-T03) -- in a partial run the cross-check is red by construction
+    # and the control would be vacuous. The partial run prints a DIFFERENT prefix below, which also
+    # closes the misreading that its total could be compared with the case-count declaration.
+    if (PartFull) {
     Chk "F1: README cases declaration == actual case count" (DeclaredCases) ([string]($script:pass + $script:fail + 1))
+    }
 
-    Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) (actual command skills N=$N) [runtime: PowerShell $($PSVersionTable.PSVersion) $($PSVersionTable.PSEdition)]"
+    if (PartFull) {
+        Write-Host "`n# result: PASS=$($script:pass) FAIL=$($script:fail) (actual command skills N=$N) [runtime: PowerShell $($PSVersionTable.PSVersion) $($PSVersionTable.PSEdition)]"
+    } else {
+        Write-Host ("`n{0} PASS={1} FAIL={2} [runtime: PowerShell {3} {4}]" -f (ResultPrefix $script:PART_SEL), $script:pass, $script:fail, $PSVersionTable.PSVersion, $PSVersionTable.PSEdition)
+    }
     $script:completed = $true
 }
 finally {
@@ -4538,6 +4916,8 @@ if (-not $script:completed) {
     exit 1
 }
 if ($script:fail -ne 0) { exit 1 }
+# The coverage banner claims the WHOLE set was checked, so a partial run must not print it.
+if (-not (PartFull)) { exit 0 }
 Write-Host "# discover detection threshold (>=2->hint / <2->none / single-repo->none / hidden-not-counted) + single-source freeze (B1 count / B2 site shell / B3 catalog completeness, canonical=docs/commands.md) + declaration consistency (C1 four statuses x three files + absence control / C2 baseline x three templates / C3 phase roster both lists (writer + non-writer) conventions<->published page set equality, sole enumerator, disjointness, negative control / D cross-branch coverage (committed-diff + uncommitted-scope tokens; conventions<->skill<->canonical catalog)+number-warn conventions<->skill + PR-CI-check fragment<->skill / E review verification discipline refutation+metrics+rework conventions<->skill<->template plus metrics-line skeleton format plus re-verify declaration plus cross and negative controls / F document self-description = role-anchor extraction, canonical-row presence, consumer propagation plus case-count self-consistency / G cross-reference integrity = citation extraction vs real anchors plus empty-extraction, name-uniqueness and wrapped-citation controls / H execution-environment axis declaration = axis-name extraction, convention table row, set equality, table job: tokens exist in the workflow and sit in declared axis rows (orphans 0), coverage (every real job registered or declared exempt), exemption freshness, no-token axis control, axis: notation bidirectional equality, data-row count, negative controls -- cells naming no CI job, and the rest of a job-naming cell's prose, are the human review's layer, not asked here) confirmed"
 exit 0
 
@@ -4559,3 +4939,4 @@ exit 0
 # mutates: docs/conventions.md :: declared-change-set :: D7: conventions declares :: caught
 # mutates: docs/conventions.md :: mutation-negative-control-sentinel :: D7: conventions declares :: missed
 # mutates-to: tests/discover/run.ps1 :: '**`' + $m + '`**' :: '`' + $m + '`' :: W24: adversarial control :: caught
+# mutates-to: tests/discover/run.ps1 :: '`axis-[a-z0-9-]*`' :: '`zzz-[a-z0-9-]*`' :: W35: restatement-site allocation token extraction :: caught

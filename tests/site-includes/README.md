@@ -160,9 +160,10 @@ powershell.exe -File tests\site-includes\run.ps1   # Windows PowerShell 5.1 (러
 pwsh          -File tests\site-includes\run.ps1    # PowerShell 7
 ```
 
-**네 가지를 다 돌린다.** 하나만 돌리고 "양 셸 통과"라고 적으면 안 된다 — 실행 환경 축의 단일
-원본은 `docs/conventions.md`의 "실행 환경 축" 절이고, 이 매트릭스를 강제하는 것은
-`.github/workflows/tests.yml`이다.
+**돌리지 않은 환경을 통과했다고 적지 않는다.** 하나만 돌리고 "양 셸 통과"라고 적으면 안 된다 — 실행
+환경 축의 단일 원본은 `docs/conventions.md`의 "실행 환경 축" 절이고, 이 매트릭스를 강제하는 것은
+`.github/workflows/tests.yml`이다. 어느 환경을 로컬에서 도는지는 측정 배당이 정한다 — 단일 원본은
+`docs/conventions.md`의 "완료 기준 대조 (impl)" 절이며, **릴리즈가 `pr` 모드가 아니면 네 가지를 다 돈다.**
 
 전부 통과 시 exit 0, 하나라도 실패 시 exit 1이다. `run.ps1`은 **ASCII 전용 소스**(비-ASCII 0바이트)로
 제외 용어를 소스에 남기지 않으며, 용어 탐색에 필요한 한글 구절은 **코드포인트로 조립**한다
