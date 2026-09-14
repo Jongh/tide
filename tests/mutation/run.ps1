@@ -22,7 +22,7 @@
 #     COPIES WERE ALREADY SPLIT (measured in M63); `LitReplace` + `X6` pin them together -- BUT ONLY
 #     FOR SINGLE-LINE, LF CONTENT. The .sh twin's `awk` strips CR and appends a missing final newline,
 #     so ON A CRLF FILE OR A FILE WITH NO FINAL NEWLINE THE TWO COPIES STILL DIVERGE (measured by the
-#     M63 review -- `docs/conventions.md`, which two of the three declarations target, is CRLF here).
+#     M63 review -- `docs/conventions.md`, which two of the declarations target, is CRLF here).
 #     Not a regression: the previous `sed` path stripped CR too. The single source for that boundary
 #     is the "two copies" section of `tests/mutation/README.md`.
 #   - Cost decides scope: one mutation = copy + one full target run. MEASURED ON THIS MACHINE (M63):

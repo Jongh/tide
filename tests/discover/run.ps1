@@ -4737,6 +4737,36 @@ try {
     # disagree over a tree neither copy calls broken -- measured. Forbidding the character makes that
     # split reach BOTH axes at once. `I12`/`I13` already prove the ban is not vacuous, so no new fixture.
     Chk "W26: no forbidden separator in the scope-decl declaration tail" (BadSeps $CONV $SCOPE_KEY) '0'
+    # (W49-W57 / M65) EVIDENCE FOR A STRUCTURAL-INFEASIBILITY CLAIM -- the co-term in the opposite
+    # direction of `scope-decl:`. Layer, restatement sites and mechanism match `W1`-`W6` / `W12` / `W26`,
+    # so this calls THE SAME HELPERS (`ScopeAll` / `ScopeDefn` / `ScopeTok` / `BadSeps`). Sharing rests
+    # on the FACT that the convention names the same restatement list for both co-terms -- if only one
+    # list grows, the sharing is wrong; split the helpers then and fix this comment and the convention
+    # sentence in the same edit. The fallback is pinned the same way as `W2` (an empty value would make
+    # a two-character backticked needle that matches anything).
+    $INF_KEY = 'infeasible-decl:'
+    $INF_ALIAS = ''
+    $infTail = DeclTail $CONV $INF_KEY
+    if ($null -ne $infTail) {
+        # split width pinned to the .sh twin's awk default FS (space and tab) -- same reason as `W26`.
+        $infA = @($infTail -split '[ \t]+' | Where-Object { $_ -ne '' })
+        if ($infA.Count -gt 0) { $INF_ALIAS = $infA[0] }
+    }
+    if ($INF_ALIAS -eq '') { $INF_ALIAS = 'zzz-infeasible-decl-unset' }
+    Chk "W49: infeasible-decl declaration line is exactly 1" (DeclCount $CONV $INF_KEY) '1'
+    Chk "W50: infeasibility co-term extraction positive-control" $(if ($INF_ALIAS -ne 'zzz-infeasible-decl-unset') { 'ok' } else { 'no' }) 'ok'
+    # (W51) MAIN CHECK -- the convention plus the three restatement sites, a four-file bind (same helper as `W3`).
+    Chk "W51: infeasibility co-term ($INF_ALIAS) in all four files" (ScopeAll $INF_ALIAS) 'yes'
+    # (W52-W55) EACH SEAT IS ALSO ASKED -- with only the bind, which seat died is hidden (same as `W4`-`W6` / `W30`).
+    Chk "W52: the convention has exactly one definition line for the infeasibility co-term" ([string](ScopeDefn $INF_ALIAS)) '1'
+    Chk "W53: review SKILL carries the infeasibility co-term as a backticked token" (ScopeTok $REV_SKILL $INF_ALIAS) 'yes'
+    Chk "W54: impl template carries the infeasibility co-term as a backticked token" (ScopeTok $IMPL_TPL $INF_ALIAS) 'yes'
+    Chk "W55: review template carries the infeasibility co-term as a backticked token" (ScopeTok $REV_TPL $INF_ALIAS) 'yes'
+    # (W56) WIRING -- same shape as `W12` (it reads only the token it is handed, which is in no file, so the
+    # baseline is CONSTANT BY CONSTRUCTION).
+    Chk "W56: wiring -- another infeasibility co-term does not satisfy the bind" (ScopeAll 'zzz-other-infeasible') 'no'
+    # (W57) tail separator -- same helper and reason as `W26`.
+    Chk "W57: no forbidden separator in the infeasible-decl declaration tail" (BadSeps $CONV $INF_KEY) '0'
     Chk "W27: no forbidden separator in the measure-cache declaration tail" (BadSeps $CONV $MC_KEY) '0'
     # (W28-W29) the two MARKER keys get the same ban, for a different failure: `MarkersOf` is width-pinned
     # to one ASCII space in both copies, so a forbidden character there does NOT split the axes -- it
@@ -4934,9 +4964,10 @@ exit 0
     #   counterpart in the conventions and the fixtures, so it dies.
     #   `# mutates-to:` CARRIES NO SUCH LIMIT (M63 review): the declaration names the replacement, so
     #   the substitution is ASYMMETRIC and a self-comparing filter (the enumeration-line filter, say)
-    #   CAN be declared. Not declaring it this cycle was a COST decision, not a structural one.
+    #   CAN be declared. M63 deferred it on COST; M65 declared it (the fifth declaration below), after M64 handed that axis's sh judgment to CI.
     #   The single source for that boundary is `tests/mutation/README.md`.
 # mutates: docs/conventions.md :: declared-change-set :: D7: conventions declares :: caught
 # mutates: docs/conventions.md :: mutation-negative-control-sentinel :: D7: conventions declares :: missed
 # mutates-to: tests/discover/run.ps1 :: '**`' + $m + '`**' :: '`' + $m + '`' :: W24: adversarial control :: caught
 # mutates-to: tests/discover/run.ps1 :: '`axis-[a-z0-9-]*`' :: '`zzz-[a-z0-9-]*`' :: W35: restatement-site allocation token extraction :: caught
+# mutates-to: tests/discover/run.ps1 :: if ($all) { continue } :: if ($false) { continue } :: W25: adversarial control -- a bold listing :: caught
