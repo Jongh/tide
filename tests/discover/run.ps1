@@ -4814,6 +4814,29 @@ try {
     # argument and `W70` would stay green (baseline constant by construction -- same shape as `W12`).
     Chk "W71: wiring -- another scan positive-control co-term is not in release SKILL" (ScopeTok $REL_SKILL 'zzz-other-scan') 'no'
     Chk "W72: no forbidden separator in the scan-control declaration tail" (BadSeps $CONV $SCAN_KEY) '0'
+    # (W73-W78 / M67) ABSENT JOB UNJUDGED -- the co-term in the convention's measurement-allocation block
+    # (`absent-job:`) and ONE restatement site (the pr-mode finalize bullet of `skills/release/SKILL.md`).
+    # Same layer and shape as `W67`-`W72`. With one site a bind would duplicate the per-site check, so only
+    # the definition line (`W75`) and the site token (`W76`) are asked. The release-skill token is found
+    # FILE-WIDE, so moving it out of the finalize bullet stays green; narrowing the window to that bullet was
+    # not done (reason: scope -- it needs a new step-boundary helper; the README records the boundary).
+    # Whether finalize actually walked that branch is procedure and is not asked.
+    $ABSENT_KEY = 'absent-job:'
+    $ABSENT_ALIAS = ''
+    $absentTail = DeclTail $CONV $ABSENT_KEY
+    if ($null -ne $absentTail) {
+        $absentA = @($absentTail -split '[ \t]+' | Where-Object { $_ -ne '' })
+        if ($absentA.Count -gt 0) { $ABSENT_ALIAS = $absentA[0] }
+    }
+    if ($ABSENT_ALIAS -eq '') { $ABSENT_ALIAS = 'zzz-absent-job-unset' }
+    Chk "W73: absent-job declaration line is exactly 1" (DeclCount $CONV $ABSENT_KEY) '1'
+    Chk "W74: absent-job co-term extraction positive-control" $(if ($ABSENT_ALIAS -ne 'zzz-absent-job-unset') { 'ok' } else { 'no' }) 'ok'
+    Chk "W75: the convention has exactly one definition line for the absent-job co-term" ([string](ScopeDefn $ABSENT_ALIAS)) '1'
+    Chk "W76: release SKILL carries the absent-job co-term as a backticked token" (ScopeTok $REL_SKILL $ABSENT_ALIAS) 'yes'
+    # (W77) WIRING -- a token found in no file must give `no`; without this case `ScopeTok` could ignore its
+    # argument and `W76` would stay green (baseline constant by construction -- same shape as `W71`).
+    Chk "W77: wiring -- another absent-job co-term is not in release SKILL" (ScopeTok $REL_SKILL 'zzz-other-absent') 'no'
+    Chk "W78: no forbidden separator in the absent-job declaration tail" (BadSeps $CONV $ABSENT_KEY) '0'
     Chk "W27: no forbidden separator in the measure-cache declaration tail" (BadSeps $CONV $MC_KEY) '0'
     # (W28-W29) the two MARKER keys get the same ban, for a different failure: `MarkersOf` is width-pinned
     # to one ASCII space in both copies, so a forbidden character there does NOT split the axes -- it
