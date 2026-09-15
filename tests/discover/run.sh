@@ -4371,6 +4371,23 @@ chk "W70: release SKILL이 스캔 양성 통제 병기어를 백틱 토큰으로
 # 무시해도 `W70`이 초록이다(기준선이 구조로 상수 — `W12`와 같은 형태).
 chk "W71: 배선 - 다른 스캔 양성 통제 병기어는 release SKILL에 없다" "$(scope_tok "$REL_SKILL" zzz-other-scan)" "no"
 chk "W72: scan-control 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$SCAN_KEY")" "0"
+# (W73~W78 · M67) **판정 없는 부재 잡** — 규약 측정 배당 블록의 병기어(`absent-job:`)와 재서술처 하나
+# (`skills/release/SKILL.md`의 `pr` 모드 마무리). `W67`~`W72`와 같은 층·같은 형태다. 재서술처가 하나라 결합이
+# 자리별 단언과 겹치므로 결합 케이스를 두지 않고 정의 줄(`W75`)과 재서술처 백틱 토큰(`W76`)만 문다.
+# release 스킬의 토큰은 **파일 전역**으로 찾는다 — 마무리 불릿 밖으로 옮겨도 초록이다. 창을 그 불릿으로
+# 좁히는 일은 하지 않았다(사유: 범위 — 단계 경계를 읽는 헬퍼가 새로 필요하다. 경계는 README에 적는다).
+# 마무리에서 그 갈래를 **실제로 밟았는가**는 절차라 묻지 않는다.
+ABSENT_KEY='absent-job:'
+ABSENT_ALIAS=$(decl_tail "$CONV" "$ABSENT_KEY" | LC_ALL=C awk '{ print $1 }')
+[ -n "$ABSENT_ALIAS" ] || ABSENT_ALIAS=zzz-absent-job-unset
+chk "W73: absent-job 선언 줄 정확히 1개" "$(decl_count "$CONV" "$ABSENT_KEY")" "1"
+chk "W74: 부재 잡 병기어 추출 positive-control" "$([ "$ABSENT_ALIAS" != zzz-absent-job-unset ] && echo ok || echo no)" "ok"
+chk "W75: 규약이 부재 잡 병기어의 정의 줄을 정확히 하나 갖는다" "$(scope_defn "$ABSENT_ALIAS")" "1"
+chk "W76: release SKILL이 부재 잡 병기어를 백틱 토큰으로 갖는다" "$(scope_tok "$REL_SKILL" "$ABSENT_ALIAS")" "yes"
+# (W77) **배선** — 인자로 준 토큰(어느 파일에도 없음)을 주면 `no`다. 이 케이스가 없으면 `scope_tok`이 인자를
+# 무시해도 `W76`이 초록이다(기준선이 구조로 상수 — `W71`과 같은 형태).
+chk "W77: 배선 - 다른 부재 잡 병기어는 release SKILL에 없다" "$(scope_tok "$REL_SKILL" zzz-other-absent)" "no"
+chk "W78: absent-job 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$ABSENT_KEY")" "0"
 chk "W27: measure-cache 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$MC_KEY")" "0"
 # (W28~W29) **표지 키 둘**에는 같은 금지를 다른 사유로 건다 — `markers_of`의 분리 폭은 두 사본 모두
 # ASCII 공백 하나로 못박혀 있어 금지 문자가 축을 **가르지 않는다**. 대신 **표지 둘을 한 토큰으로
