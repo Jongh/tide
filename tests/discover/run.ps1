@@ -4794,10 +4794,8 @@ try {
     Chk "W66: no forbidden separator in the lean-decl declaration tail" (BadSeps $CONV $LEAN_KEY) '0'
     # (W67-W72 / M66) SCAN POSITIVE CONTROL -- the co-term in the convention's release build-output section and
     # ONE restatement site (`skills/release/SKILL.md`). With one site a bind would duplicate the per-site check,
-    # so only the definition line (`W69`) and the site token (`W70`) are asked. The release-skill token is found
-    # FILE-WIDE, so moving it out of the scan step stays green; narrowing the window to that step was not done
-    # (reason: scope -- it needs a new helper that reads step boundaries from numbered list lines; the README
-    # records the boundary).
+    # so only the definition line (`W69`) and the site token (`W70`) are asked. Here the release-skill token is
+    # found FILE-WIDE; co-presence with the step anchor in one item window is asked separately by `W81`/`W82` (M68).
     $SCAN_KEY = 'scan-control:'
     $SCAN_ALIAS = ''
     $scanTail = DeclTail $CONV $SCAN_KEY
@@ -4817,9 +4815,8 @@ try {
     # (W73-W78 / M67) ABSENT JOB UNJUDGED -- the co-term in the convention's measurement-allocation block
     # (`absent-job:`) and ONE restatement site (the pr-mode finalize bullet of `skills/release/SKILL.md`).
     # Same layer and shape as `W67`-`W72`. With one site a bind would duplicate the per-site check, so only
-    # the definition line (`W75`) and the site token (`W76`) are asked. The release-skill token is found
-    # FILE-WIDE, so moving it out of the finalize bullet stays green; narrowing the window to that bullet was
-    # not done (reason: scope -- it needs a new step-boundary helper; the README records the boundary).
+    # the definition line (`W75`) and the site token (`W76`) are asked. Here the release-skill token is found
+    # FILE-WIDE; co-presence with the step anchor in one item window is asked separately by `W87`/`W88` (M68).
     # Whether finalize actually walked that branch is procedure and is not asked.
     $ABSENT_KEY = 'absent-job:'
     $ABSENT_ALIAS = ''
@@ -4837,6 +4834,103 @@ try {
     # argument and `W76` would stay green (baseline constant by construction -- same shape as `W71`).
     Chk "W77: wiring -- another absent-job co-term is not in release SKILL" (ScopeTok $REL_SKILL 'zzz-other-absent') 'no'
     Chk "W78: no forbidden separator in the absent-job declaration tail" (BadSeps $CONV $ABSENT_KEY) '0'
+    # (W79-W90 / M68) STEP WINDOW -- the two co-term tokens above must sit in the SAME ITEM WINDOW as an anchor
+    # naming their step, not merely somewhere in the file. The window is the SUBTREE OF THE INNERMOST LIST ITEM
+    # holding the token (from the item line through the following lines indented deeper; blank lines do not
+    # cut it). It does NOT share the Part N `FloorHitsIn` window (the subtree of the TOP-LEVEL item): with that
+    # definition the whole publish-branch item is one window and a token moved to the `open` sub-bullet stays
+    # green (M68-T01 measurement). `W70`/`W76` (file-wide co-presence) stay -- deleting a token must still go red
+    # even if the window verdict breaks. The anchor value may hold spaces, so the FIRST BACKTICK SEGMENT of the
+    # declaration tail is read (same shape as `FloorMarks`).
+    function AnchorOf([string]$key) {
+        $t = DeclTail $CONV $key
+        if ($null -eq $t) { return '' }
+        $p = $t.Split([char]96)
+        if ($p.Count -ge 3 -and $p[1] -ne '') { return $p[1] }
+        return ''
+    }
+    function WinIndent([string]$s) { $n = 0; while ($n -lt $s.Length -and $s[$n] -eq ' ') { $n++ }; return $n }
+    function WinIsItem([string]$s) {
+        $r = $s.Substring((WinIndent $s))
+        return ($r.StartsWith('- ', [System.StringComparison]::Ordinal) -or ($r -match '^[0-9]+\. '))
+    }
+    function ItemWinProbe([string]$path, [string]$tok, [string]$anc) {
+        # -> "<anchor in window yes|no> <anchor lines in file> <anchor lines in window>". Walk up from the token's
+        # FIRST line to the nearest item line such that every non-blank line down to the token is deeper; the
+        # window ends right before the next non-blank line indented the same or shallower. Spaces only count
+        # as indentation; ReadAllLines already drops the CR (the twin strips it explicitly).
+        $lines = @()
+        if (Test-Path -LiteralPath $path) { $lines = @([System.IO.File]::ReadAllLines($path)) }
+        $needle = [string][char]96 + $tok + [string][char]96
+        $tl = -1
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i].IndexOf($needle, [System.StringComparison]::Ordinal) -ge 0) { $tl = $i; break }
+        }
+        $ws = -1; $we = -1
+        if ($tl -ge 0) {
+            for ($k = $tl; $k -ge 0; $k--) {
+                if ($lines[$k] -eq '' -or -not (WinIsItem $lines[$k])) { continue }
+                $d = WinIndent $lines[$k]; $ok = $true
+                for ($j = $k + 1; $j -le $tl; $j++) {
+                    if ($lines[$j] -ne '' -and (WinIndent $lines[$j]) -le $d) { $ok = $false; break }
+                }
+                if ($ok) {
+                    $ws = $k; $we = $k
+                    for ($j = $k + 1; $j -lt $lines.Count; $j++) {
+                        if ($lines[$j] -eq '') { continue }
+                        if ((WinIndent $lines[$j]) -le $d) { break }
+                        $we = $j
+                    }
+                    break
+                }
+            }
+        }
+        $na = 0; $nin = 0
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i].IndexOf($anc, [System.StringComparison]::Ordinal) -ge 0) {
+                $na++
+                if ($ws -ge 0 -and $i -ge $ws -and $i -le $we) { $nin++ }
+            }
+        }
+        $yn = 'no'; if ($nin -gt 0) { $yn = 'yes' }
+        return ('{0} {1} {2}' -f $yn, $na, $nin)
+    }
+    function WinUnique([string]$probe) {
+        $f = $probe.Split(' ')
+        if ([int]$f[1] -gt 0 -and [int]$f[1] -eq [int]$f[2]) { return 'ok' }
+        return 'no'
+    }
+    $SCAN_ANCHOR = AnchorOf 'scan-control-anchor:'
+    if ($SCAN_ANCHOR -eq '') { $SCAN_ANCHOR = 'zzz-scan-anchor-unset' }
+    $ABSENT_ANCHOR = AnchorOf 'absent-job-anchor:'
+    if ($ABSENT_ANCHOR -eq '') { $ABSENT_ANCHOR = 'zzz-absent-anchor-unset' }
+    $scanWin = ItemWinProbe $REL_SKILL $SCAN_ALIAS $SCAN_ANCHOR
+    $absentWin = ItemWinProbe $REL_SKILL $ABSENT_ALIAS $ABSENT_ANCHOR
+    # (W83/W89) FIXTURE CONTROLS -- a fixture carrying the anchor BOTH above the token item (on its parent line)
+    # and below it (on the next sibling item) is fed to the SAME helper. It reads `no` only when the window is
+    # exactly the token item, so these two go red if the helper (1) stops cutting windows and treats the whole file
+    # as one, (2) widens the window to the TOP-LEVEL item subtree -- a regression to the Part N definition -- or
+    # (3) loses the window END boundary. The M68 review measured all three slipping through the earlier fixture.
+    # STILL UNCOVERED: the depth guard that picks the window head (the `ok` loop skipping items that do not hold
+    # the token) is walked by no fixture -- removing it kept the full run green. It needs a new fixture; deferred.
+    $u8w = New-Object System.Text.UTF8Encoding($false)
+    $bq = [string][char]96
+    $winFxScan = Join-Path $sbx 'winfx_scan.md'
+    [System.IO.File]::WriteAllText($winFxScan, ('1. step ' + $SCAN_ANCHOR + "`n   - a " + $bq + $SCAN_ALIAS + $bq + "`n   - b " + $SCAN_ANCHOR + "`n"), $u8w)
+    $winFxAbsent = Join-Path $sbx 'winfx_absent.md'
+    [System.IO.File]::WriteAllText($winFxAbsent, ('1. step ' + $ABSENT_ANCHOR + "`n   - a " + $bq + $ABSENT_ALIAS + $bq + "`n   - b " + $ABSENT_ANCHOR + "`n"), $u8w)
+    Chk "W79: scan-control-anchor declaration line is exactly 1" (DeclCount $CONV 'scan-control-anchor:') '1'
+    Chk "W80: scan step anchor extraction positive-control" $(if ($SCAN_ANCHOR -ne 'zzz-scan-anchor-unset') { 'ok' } else { 'no' }) 'ok'
+    Chk "W81: the scan positive-control token sits in the same item window as its anchor" ($scanWin.Split(' ')[0]) 'yes'
+    Chk "W82: the scan step anchor appears in the file only inside that window" (WinUnique $scanWin) 'ok'
+    Chk "W83: control -- a scan token in an item window without the anchor is caught" ((ItemWinProbe $winFxScan $SCAN_ALIAS $SCAN_ANCHOR).Split(' ')[0]) 'no'
+    Chk "W84: no forbidden separator in the scan-control-anchor declaration tail" (BadSeps $CONV 'scan-control-anchor:') '0'
+    Chk "W85: absent-job-anchor declaration line is exactly 1" (DeclCount $CONV 'absent-job-anchor:') '1'
+    Chk "W86: absent-job step anchor extraction positive-control" $(if ($ABSENT_ANCHOR -ne 'zzz-absent-anchor-unset') { 'ok' } else { 'no' }) 'ok'
+    Chk "W87: the absent-job token sits in the same item window as its anchor" ($absentWin.Split(' ')[0]) 'yes'
+    Chk "W88: the absent-job step anchor appears in the file only inside that window" (WinUnique $absentWin) 'ok'
+    Chk "W89: control -- an absent-job token in an item window without the anchor is caught" ((ItemWinProbe $winFxAbsent $ABSENT_ALIAS $ABSENT_ANCHOR).Split(' ')[0]) 'no'
+    Chk "W90: no forbidden separator in the absent-job-anchor declaration tail" (BadSeps $CONV 'absent-job-anchor:') '0'
     Chk "W27: no forbidden separator in the measure-cache declaration tail" (BadSeps $CONV $MC_KEY) '0'
     # (W28-W29) the two MARKER keys get the same ban, for a different failure: `MarkersOf` is width-pinned
     # to one ASCII space in both copies, so a forbidden character there does NOT split the axes -- it

@@ -4357,9 +4357,8 @@ chk "W65: 배선 - 다른 기대는 분기 병기어를 주면 결합이 성립�
 chk "W66: lean-decl 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$LEAN_KEY")" "0"
 # (W67~W72 · M66) **스캔 양성 통제** — 규약 "릴리즈 빌드 출력 검증" 절의 병기어와 재서술처 하나
 # (`skills/release/SKILL.md`). 재서술처가 하나라 결합이 자리별 단언과 겹치므로 결합 케이스를 두지 않고
-# 규약 정의 줄(`W69`)과 재서술처 백틱 토큰(`W70`)만 문다. release 스킬의 토큰은 **파일 전역**으로 찾는다 —
-# 스캔 단계 밖으로 옮겨도 초록이다. 창을 그 단계로 좁히는 일은 하지 않았다(사유: 범위 — 단계 경계를
-# 번호 목록 줄로 읽는 헬퍼가 새로 필요하다. 경계는 README에 적는다).
+# 규약 정의 줄(`W69`)과 재서술처 백틱 토큰(`W70`)만 문다. 여기서 release 스킬의 토큰은 **파일 전역**으로 찾고,
+# 단계 앵커와 같은 항목 창에 있는지는 아래 `W81`·`W82`(M68)가 따로 문다.
 SCAN_KEY='scan-control:'
 SCAN_ALIAS=$(decl_tail "$CONV" "$SCAN_KEY" | LC_ALL=C awk '{ print $1 }')
 [ -n "$SCAN_ALIAS" ] || SCAN_ALIAS=zzz-scan-control-unset
@@ -4374,8 +4373,8 @@ chk "W72: scan-control 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "
 # (W73~W78 · M67) **판정 없는 부재 잡** — 규약 측정 배당 블록의 병기어(`absent-job:`)와 재서술처 하나
 # (`skills/release/SKILL.md`의 `pr` 모드 마무리). `W67`~`W72`와 같은 층·같은 형태다. 재서술처가 하나라 결합이
 # 자리별 단언과 겹치므로 결합 케이스를 두지 않고 정의 줄(`W75`)과 재서술처 백틱 토큰(`W76`)만 문다.
-# release 스킬의 토큰은 **파일 전역**으로 찾는다 — 마무리 불릿 밖으로 옮겨도 초록이다. 창을 그 불릿으로
-# 좁히는 일은 하지 않았다(사유: 범위 — 단계 경계를 읽는 헬퍼가 새로 필요하다. 경계는 README에 적는다).
+# 여기서 release 스킬의 토큰은 **파일 전역**으로 찾고, 단계 앵커와 같은 항목 창에 있는지는 아래 `W87`·`W88`(M68)이
+# 따로 문다.
 # 마무리에서 그 갈래를 **실제로 밟았는가**는 절차라 묻지 않는다.
 ABSENT_KEY='absent-job:'
 ABSENT_ALIAS=$(decl_tail "$CONV" "$ABSENT_KEY" | LC_ALL=C awk '{ print $1 }')
@@ -4388,6 +4387,73 @@ chk "W76: release SKILL이 부재 잡 병기어를 백틱 토큰으로 갖는다
 # 무시해도 `W76`이 초록이다(기준선이 구조로 상수 — `W71`과 같은 형태).
 chk "W77: 배선 - 다른 부재 잡 병기어는 release SKILL에 없다" "$(scope_tok "$REL_SKILL" zzz-other-absent)" "no"
 chk "W78: absent-job 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$ABSENT_KEY")" "0"
+# (W79~W90 · M68) **단계 창** — 위 두 병기어의 토큰은 파일 전역이 아니라 자기 단계를 가리키는 **앵커와 같은 항목
+# 창**에 있어야 한다. 창은 토큰이 든 **가장 안쪽 목록 항목의 부분 트리**다(항목 줄부터 들여쓰기가 더 깊은 줄이
+# 이어지는 데까지 · 빈 줄은 끊지 않는다). Part N의 `floor_hits_in` 창(최상위 항목의 부분 트리)과 **함수를 공유하지
+# 않는다** — 그 정의로는 「게시 분기」 항목 전체가 한 창이라 `open → 대기`로 옮긴 토큰이 초록이다(M68-T01 실측).
+# `W70`·`W76`(파일 전역 공존)은 지우지 않는다 — 창 판정이 망가져도 토큰 **삭제**는 여전히 붉어야 한다.
+# 앵커 값은 공백을 품을 수 있어 선언 줄의 **첫 백틱 구획**을 읽는다(`floor_marks`와 같은 형태).
+anchor_of() { # <선언 키> → 선언 줄 꼬리의 첫 백틱 구획(없으면 빈 출력)
+    decl_tail "$CONV" "$1" | LC_ALL=C awk -v q="\`" '{ n = split($0, a, q); if (n >= 3 && a[2] != "") print a[2] }' | head -1
+}
+item_win_probe() { # <파일> <병기어> <앵커> → "<창 안 앵커 yes|no> <파일의 앵커 줄 수> <창 안 앵커 줄 수>"
+    # 토큰의 **첫 등장 줄**에서 위로 올라가며, 그 줄까지의 비어 있지 않은 줄이 모두 자기보다 깊은 **가장 가까운
+    # 항목 줄**을 창의 머리로 삼는다. 창의 끝은 그 머리보다 얕거나 같은 들여쓰기의 비어 있지 않은 줄 직전이다.
+    # 들여쓰기는 **공백만** 세고 줄 끝 CR은 먼저 벗긴다(ps1 사본의 `ReadAllLines`와 같은 줄을 보게 한다).
+    LC_ALL=C awk -v tok="\`$2\`" -v anc="$3" '
+        function ind(s,   n) { n = 0; while (substr(s, n + 1, 1) == " ") n++; return n }
+        function isitem(s,   t) { t = substr(s, ind(s) + 1); return (substr(t, 1, 2) == "- " || t ~ /^[0-9]+\. /) }
+        { sub(/\r$/, ""); L[NR] = $0 }
+        END {
+            tl = 0
+            for (i = 1; i <= NR; i++) if (index(L[i], tok) > 0) { tl = i; break }
+            ws = 0; we = 0
+            if (tl > 0) {
+                for (k = tl; k >= 1; k--) {
+                    if (L[k] == "" || !isitem(L[k])) continue
+                    d = ind(L[k]); ok = 1
+                    for (j = k + 1; j <= tl; j++) if (L[j] != "" && ind(L[j]) <= d) { ok = 0; break }
+                    if (ok) {
+                        ws = k; we = k
+                        for (j = k + 1; j <= NR; j++) { if (L[j] == "") continue; if (ind(L[j]) <= d) break; we = j }
+                        break
+                    }
+                }
+            }
+            na = 0; nin = 0
+            for (i = 1; i <= NR; i++) if (index(L[i], anc) > 0) { na++; if (ws > 0 && i >= ws && i <= we) nin++ }
+            printf "%s %d %d\n", (nin > 0 ? "yes" : "no"), na, nin
+        }' "$1"
+}
+win_unique() { # <probe 출력> → 앵커가 파일에 있고 전부 창 안이면 ok
+    printf '%s\n' "$1" | LC_ALL=C awk '{ print (($2 + 0) > 0 && ($2 + 0) == ($3 + 0)) ? "ok" : "no" }'
+}
+SCAN_ANCHOR=$(anchor_of 'scan-control-anchor:')
+[ -n "$SCAN_ANCHOR" ] || SCAN_ANCHOR=zzz-scan-anchor-unset
+ABSENT_ANCHOR=$(anchor_of 'absent-job-anchor:')
+[ -n "$ABSENT_ANCHOR" ] || ABSENT_ANCHOR=zzz-absent-anchor-unset
+SCAN_WIN=$(item_win_probe "$REL_SKILL" "$SCAN_ALIAS" "$SCAN_ANCHOR")
+ABSENT_WIN=$(item_win_probe "$REL_SKILL" "$ABSENT_ALIAS" "$ABSENT_ANCHOR")
+# (W83·W89) **픽스처 통제** — 앵커를 토큰 항목의 **위(부모 항목 줄)와 아래(다음 형제 항목)** 양쪽에 둔 픽스처를
+# **같은 헬퍼**에 먹인다. 창이 정확히 토큰 항목 하나일 때만 `no`이므로, 헬퍼가 ⑴ 창을 끊지 않고 파일 전체를 한
+# 창으로 보거나 ⑵ 창을 **최상위 항목**의 부분 트리로 넓히거나(= Part N 정의로의 회귀) ⑶ 창의 **끝 경계**를 잃으면
+# 셋 다 `yes`로 붉는다(판정의 반응을 묻는 통제). 셋 다 M68 리뷰가 앞 판본의 픽스처를 초록으로 빠져나가는 것을
+# 실측해 넓힌 자리다. **아직 통제 밖** — 창 머리를 고르는 깊이 가드(토큰을 담지 않는 항목을 건너뛰는 `ok` 루프)는
+# 어느 픽스처도 밟지 않는다(제거해도 전수 초록을 M68 리뷰가 실측했다). 새 픽스처가 필요해 다음 사이클로 넘겼다.
+printf '1. step %s\n   - a `%s`\n   - b %s\n' "$SCAN_ANCHOR" "$SCAN_ALIAS" "$SCAN_ANCHOR" > "$SBX/winfx_scan.md"
+printf '1. step %s\n   - a `%s`\n   - b %s\n' "$ABSENT_ANCHOR" "$ABSENT_ALIAS" "$ABSENT_ANCHOR" > "$SBX/winfx_absent.md"
+chk "W79: scan-control-anchor 선언 줄 정확히 1개" "$(decl_count "$CONV" 'scan-control-anchor:')" "1"
+chk "W80: 스캔 단계 앵커 추출 positive-control" "$([ "$SCAN_ANCHOR" != zzz-scan-anchor-unset ] && echo ok || echo no)" "ok"
+chk "W81: 스캔 양성 통제 토큰이 앵커와 같은 항목 창에 있다" "${SCAN_WIN%% *}" "yes"
+chk "W82: 스캔 단계 앵커가 파일에서 그 창 안에만 있다" "$(win_unique "$SCAN_WIN")" "ok"
+chk "W83: 통제 - 앵커 밖 항목 창의 스캔 토큰을 잡는다" "$(item_win_probe "$SBX/winfx_scan.md" "$SCAN_ALIAS" "$SCAN_ANCHOR" | LC_ALL=C awk '{ print $1 }')" "no"
+chk "W84: scan-control-anchor 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" 'scan-control-anchor:')" "0"
+chk "W85: absent-job-anchor 선언 줄 정확히 1개" "$(decl_count "$CONV" 'absent-job-anchor:')" "1"
+chk "W86: 부재 잡 단계 앵커 추출 positive-control" "$([ "$ABSENT_ANCHOR" != zzz-absent-anchor-unset ] && echo ok || echo no)" "ok"
+chk "W87: 부재 잡 토큰이 앵커와 같은 항목 창에 있다" "${ABSENT_WIN%% *}" "yes"
+chk "W88: 부재 잡 단계 앵커가 파일에서 그 창 안에만 있다" "$(win_unique "$ABSENT_WIN")" "ok"
+chk "W89: 통제 - 앵커 밖 항목 창의 부재 잡 토큰을 잡는다" "$(item_win_probe "$SBX/winfx_absent.md" "$ABSENT_ALIAS" "$ABSENT_ANCHOR" | LC_ALL=C awk '{ print $1 }')" "no"
+chk "W90: absent-job-anchor 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" 'absent-job-anchor:')" "0"
 chk "W27: measure-cache 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$MC_KEY")" "0"
 # (W28~W29) **표지 키 둘**에는 같은 금지를 다른 사유로 건다 — `markers_of`의 분리 폭은 두 사본 모두
 # ASCII 공백 하나로 못박혀 있어 금지 문자가 축을 **가르지 않는다**. 대신 **표지 둘을 한 토큰으로
