@@ -3232,6 +3232,10 @@ try {
     # Asks whether what the retro wrote reaches the next cycle. What is bitten is the declaration's
     # uniqueness, the status values' set membership and the consumer's wiring -- whether a disposition
     # is *sound* is the review's layer (the convention writes the same boundary).
+    # `ScopeTok` is called by BOTH Part O (M69) and Part W (M66-M68), so its definition is hoisted
+    # here to keep ONE verdict per copy (two copies of it would let one part drift from the other).
+    function ScopeTok($file, [string]$alias) { return (HasToken $file ('`' + $alias + '`')) }
+
     if (PartOn 'O') {
     $RETRO = Join-Path $ROOT 'docs/reports/retro.md'
     # NORMALIZE THE TAIL -- leaving the leading space in place makes " " + "" + " " match the
@@ -3242,6 +3246,263 @@ try {
     $rBlk = @(((DeclTail $CONV 'retro-block:') -split '\s+') | Where-Object { $_ -ne '' })[0]
     if ($null -eq $rBlk) { $rBlk = '' }
     $rFirst = if ($rStatSet.Count -gt 0) { $rStatSet[0] } else { '' }
+    # (O15-O40 / M69) RETRO CADENCE AND THE "CLAIMED ROW" DECLARATION -- where O1-O14 ask about the
+    # table's STATUS SET and the uniqueness of the WINDOW, these ask whether that window is STALE and
+    # whether a milestone's claim is still TRACKED. The backstop value is the top release-note version
+    # in `CHANGELOG.md`: the version file differs per project so its path cannot be pinned here (the
+    # same grounds that made `bk-version-file` an abstract token), while CHANGELOG is `bk-changelog`.
+    $RCAD = @(((DeclTail $CONV 'retro-cadence:') -split '\s+') | Where-Object { $_ -ne '' })[0]
+    if ($null -eq $RCAD -or $RCAD -eq '') { $RCAD = 'zzz-retro-cadence-unset' }
+    $RPICK = @(((DeclTail $CONV 'retro-pick:') -split '\s+') | Where-Object { $_ -ne '' })[0]
+    if ($null -eq $RPICK -or $RPICK -eq '') { $RPICK = 'zzz-retro-pick-unset' }
+    $CHLOG = Join-Path $ROOT 'CHANGELOG.md'
+    # THE STATUS VALUE IS PICKED BY POSITION, not spelled out -- this copy cannot carry non-ASCII, so
+    # the value itself is unwritable here. The SECOND declared token is "nobody has taken it yet"; the
+    # single source for that order is the convention's `retro-status:` line (same shape as `$rFirst`).
+    $rUndone = if ($rStatSet.Count -gt 1) { $rStatSet[1] } else { '' }
+    }
+    $MDIR = Join-Path $ROOT 'docs/milestones'
+    function NthVer([string]$path, [string]$pfx, [int]$nth) {
+        # -> the digits-and-dots token after `(v` or `[v` on the NTH line starting with $pfx.
+        # No Korean word is matched (the .sh twin cannot differ): the shape alone carries the verdict.
+        if (-not (Test-Path -LiteralPath $path)) { return '' }
+        $c = 0
+        foreach ($l in [System.IO.File]::ReadAllLines($path)) {
+            if (-not $l.StartsWith($pfx, [System.StringComparison]::Ordinal)) { continue }
+            $c++
+            if ($c -ne $nth) { continue }
+            $i = $l.IndexOf('(v', [System.StringComparison]::Ordinal)
+            if ($i -lt 0) { $i = $l.IndexOf('[v', [System.StringComparison]::Ordinal) }
+            if ($i -lt 0) { return '' }
+            $t = $l.Substring($i + 2); $v = ''
+            foreach ($c in $t.ToCharArray()) {
+                if (($c -ge '0' -and $c -le '9') -or $c -eq '.') { $v += $c } else { break }
+            }
+            return $v
+        }
+        return ''
+    }
+    function FirstVer([string]$path, [string]$pfx) { return (NthVer $path $pfx 1) }
+    function BackstopVerdict([string]$rv, [string]$c1, [string]$c2, [string]$base) {
+        # THE RELEASE COMMIT IS NORMAL (M69 review round 1 blocking 1, round 2 blocking 1): release bumps
+        # CHANGELOG and commits, the auto retro runs only AFTER the tag, so a release commit always carries
+        # "retro == CHANGELOG second". Equality with the SECOND is accepted UNLESS the highest-numbered
+        # milestone stands ON the CHANGELOG first -- then a milestone was set up after that release while
+        # the retro never saw it, i.e. THE RETRO WAS SKIPPED. Round 2 asked "does the highest number have a
+        # review" and went red on release commits made without one (debug release after a drafted
+        # milestone, a forced release); the base version does not depend on reviews. An empty base does
+        # not block.
+        if ($rv -ne '' -and [string]::Equals($rv, $c1, [System.StringComparison]::Ordinal)) { return 'ok' }
+        if ($rv -ne '' -and [string]::Equals($rv, $c2, [System.StringComparison]::Ordinal) -and -not [string]::Equals($base, $c1, [System.StringComparison]::Ordinal)) { return 'ok' }
+        return 'no'
+    }
+    # The metadata key of `skills/milestone/template.md` ("- " + base-version in Korean + ":"), built
+    # from code points because this copy carries no non-ASCII (tests/discover F5).
+    $BASE_KEY = '- ' + (Uni 0xAE30, 0xBC18, 0x20, 0xBC84, 0xC804) + ':'
+    function BaseVer([string]$mdir = $MDIR) {
+        # -> the digits-and-dots token after `v` in the highest-numbered milestone's base-version line.
+        $bm = MstMax $mdir
+        if ($bm -eq '') { return '' }
+        $f = Join-Path $mdir ('M' + $bm + '.md')
+        if (-not (Test-Path -LiteralPath $f)) { return '' }
+        foreach ($l in [System.IO.File]::ReadAllLines($f)) {
+            if (-not $l.StartsWith($BASE_KEY, [System.StringComparison]::Ordinal)) { continue }
+            $t = $l.Substring($BASE_KEY.Length).TrimStart([char[]]@(32, 9))
+            if (-not $t.StartsWith('v', [System.StringComparison]::Ordinal)) { return '' }
+            $v = ''
+            foreach ($c in $t.Substring(1).ToCharArray()) {
+                if (($c -ge '0' -and $c -le '9') -or $c -eq '.') { $v += $c } else { break }
+            }
+            return $v
+        }
+        return ''
+    }
+    function ChlogFixture {
+        # A SYNTHETIC CHANGELOG with three release headers (v3.0.0, v2.0.0, v1.0.0). It does not lean on
+        # the real CHANGELOG, so the controls answer the same even on a release-commit tree.
+        $f = Join-Path $sbx 'chlog-fixture.md'
+        $lines = @('# Changelog', '<!-- [start:notes] ### [v9.9.9] distractor -->', '', '### [v3.0.0]', '', '- c', '', '### [v2.0.0]', '', '- b', '', '### [v1.0.0]', '', '- a')
+        [System.IO.File]::WriteAllLines($f, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    function BaseFixture {
+        # -> a dir with two milestones (M9 base v1.0.0, M10 base v2.0.0). Numbers 9/10: a string sort
+        # would pick M9 as the highest and yield v1.0.0 (bites a numeric-order regression).
+        $d = Join-Path $sbx 'base-milestones'
+        New-Item -ItemType Directory -Force -Path $d | Out-Null
+        $enc = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllLines((Join-Path $d 'M9.md'), [string[]]@('# M9', ($BASE_KEY + ' v1.0.0')), $enc)
+        [System.IO.File]::WriteAllLines((Join-Path $d 'M10.md'), [string[]]@('# M10', ($BASE_KEY + ' v2.0.0 (note)')), $enc)
+        return $d
+    }
+    function RetroPairs([string]$path) {
+        # -> "<row key> <status>" per data row inside the marker window. The row key is the FIRST
+        # BACKTICK SEGMENT at the head of the item cell (same shape as the `absent-job-anchor:`
+        # extraction); the title text is not a key because the retro rewrites titles.
+        $out = New-Object System.Collections.ArrayList
+        if ($rBlk -eq '' -or -not (Test-Path -LiteralPath $path)) { return $out.ToArray() }
+        $inb = $false; $sep = $false
+        foreach ($l in [System.IO.File]::ReadAllLines($path)) {
+            if ($l.Contains('<!-- ' + $rBlk + ':start -->')) { $inb = $true; $sep = $false; continue }
+            if ($l.Contains('<!-- ' + $rBlk + ':end -->')) { $inb = $false; continue }
+            if ($inb -and (-not $sep)) { if ($l.Contains('---')) { $sep = $true }; continue }
+            if ($inb -and $l.StartsWith('|', [System.StringComparison]::Ordinal)) {
+                $f = $l -split '\|'
+                if ($f.Count -lt 5) { continue }
+                $a = $f[1].Split([char]96)
+                if ($a.Count -lt 3 -or $a[1] -eq '') { continue }
+                $v = $f[3].Replace([string][char]13, '').Replace('*', '').Replace(' ', '')
+                $pp = $v.IndexOf('(', [System.StringComparison]::Ordinal)
+                if ($pp -ge 0) { $v = $v.Substring(0, $pp) }
+                [void]$out.Add($a[1] + ' ' + $v)
+            }
+        }
+        return $out.ToArray()
+    }
+    function RetroKeys([string]$path) { return @(RetroPairs $path | ForEach-Object { $_.Split(' ')[0] }) }
+    function MstMax([string]$mdir = $MDIR) {
+        # -> the highest number AS WRITTEN in the file name ('' when none) -- BaseVer builds the doc
+        # path from that string, the same shape as the .sh twin.
+        $n = -1; $s = ''
+        foreach ($f in Get-ChildItem -LiteralPath $mdir -Filter 'M*.md' -ErrorAction SilentlyContinue) {
+            if ($f.Name -match '^M([0-9]+)\.md$') { $v = [int]$Matches[1]; if ($v -gt $n) { $n = $v; $s = $Matches[1] } }
+        }
+        return $s
+    }
+    function MstClaims([bool]$excludeMax, [string]$mdir = $MDIR) {
+        $mm = MstMax $mdir
+        $mmi = if ($mm -eq '') { 0 } else { [int]$mm }
+        $out = New-Object System.Collections.ArrayList
+        foreach ($f in Get-ChildItem -LiteralPath $mdir -Filter 'M*.md' -ErrorAction SilentlyContinue) {
+            if (-not ($f.Name -match '^M([0-9]+)\.md$')) { continue }
+            if ($excludeMax -and [int]$Matches[1] -eq $mmi) { continue }
+            foreach ($l in [System.IO.File]::ReadAllLines($f.FullName)) {
+                if (-not $l.StartsWith('- retro-rows:', [System.StringComparison]::Ordinal)) { continue }
+                $tail = $l.Substring('- retro-rows:'.Length).Replace([string][char]13, '')
+                foreach ($k in ($tail -split '[ \t]')) { if ($k -ne '') { [void]$out.Add($k) } }
+                break
+            }
+        }
+        return $out.ToArray()
+    }
+    function MstClaimDocs([string]$mdir = $MDIR) {
+        # -> how many milestone docs CARRY a `- retro-rows:` line. This is the positive-control for the
+        # claim-side extraction. An unconditional "extraction > 0" would COLLIDE WITH THE SILENCE-ZERO
+        # CONTRACT (a repo that writes no claims would go red on a clean tree), so the question is
+        # CONDITIONAL: if any doc carries the line, the extraction must not be 0 (M69 review rec. 6).
+        $n = 0
+        foreach ($f in Get-ChildItem -LiteralPath $mdir -Filter 'M*.md' -ErrorAction SilentlyContinue) {
+            foreach ($l in [System.IO.File]::ReadAllLines($f.FullName)) {
+                if ($l.StartsWith('- retro-rows:', [System.StringComparison]::Ordinal)) { $n++; break }
+            }
+        }
+        return $n
+    }
+    function ClaimExtractOk([string]$mdir) {
+        # O31's verdict as a function -- O35 feeds a declaration-free copy to this SAME function.
+        if ((MstClaimDocs $mdir) -eq 0 -or (@(MstClaims $false $mdir)).Count -gt 0) { return 'ok' }
+        return 'no'
+    }
+    function SilenceFixture {
+        # -> a dir holding two real milestone docs (M1 and the highest) with `- retro-rows:` lines removed.
+        $d = Join-Path $sbx 'silence-milestones'
+        New-Item -ItemType Directory -Force -Path $d | Out-Null
+        foreach ($n in @('1', (MstMax))) {
+            $src = Join-Path $MDIR ('M' + $n + '.md')
+            if (-not (Test-Path -LiteralPath $src)) { continue }
+            $keep = @([System.IO.File]::ReadAllLines($src) | Where-Object { -not $_.StartsWith('- retro-rows:', [System.StringComparison]::Ordinal) })
+            [System.IO.File]::WriteAllLines((Join-Path $d ('M' + $n + '.md')), [string[]]$keep, (New-Object System.Text.UTF8Encoding($false)))
+        }
+        return $d
+    }
+    function MstClaimDup {
+        # -> how many milestone docs carry MORE THAN ONE `- retro-rows:` line. Both copies read only the
+        # first and drop the rest, so a second line is a silent loss.
+        $n = 0
+        foreach ($f in Get-ChildItem -LiteralPath (Join-Path $ROOT 'docs/milestones') -Filter 'M*.md' -ErrorAction SilentlyContinue) {
+            $c = 0
+            foreach ($l in [System.IO.File]::ReadAllLines($f.FullName)) {
+                if ($l.StartsWith('- retro-rows:', [System.StringComparison]::Ordinal)) { $c++ }
+            }
+            if ($c -gt 1) { $n++ }
+        }
+        return $n
+    }
+    function MstClaimEmpty {
+        # -> how many docs carry the line with an EMPTY value. The convention, the milestone skill and its
+        # template all forbid it in three places; nothing bit it until now.
+        $n = 0
+        foreach ($f in Get-ChildItem -LiteralPath (Join-Path $ROOT 'docs/milestones') -Filter 'M*.md' -ErrorAction SilentlyContinue) {
+            foreach ($l in [System.IO.File]::ReadAllLines($f.FullName)) {
+                if (-not $l.StartsWith('- retro-rows:', [System.StringComparison]::Ordinal)) { continue }
+                $t = $l.Substring('- retro-rows:'.Length).Trim([char[]]@(32, 9, 13))
+                if ($t -eq '') { $n++ }
+                break
+            }
+        }
+        return $n
+    }
+    function RetroKeyDup([string]$path) {
+        # -> how many row keys occur more than once. ClaimStale reads the FIRST match only.
+        $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+        $dup = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+        foreach ($k in @(RetroKeys $path)) { if (-not $seen.Add($k)) { [void]$dup.Add($k) } }
+        return $dup.Count
+    }
+    function ClaimMissing([string]$path, $keys) {
+        # The key list is an ARGUMENT for the sake of the CONTROL: when the only milestone that declares
+        # is the highest-numbered one the target set is empty, the verdict is always 0 and the control
+        # asks nothing. The fixture feeds keys to the SAME function.
+        # ORDINAL, NOT -notcontains/-eq -- PowerShell's default comparison IGNORES CASE while the
+        # .sh twin greps case-sensitively, so `RF-02` would be green here and red there. Part G closed
+        # the same trap with an ordinal HashSet; this is that shape (M69 review blocking 2).
+        $have = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+        foreach ($h in @(RetroKeys $path)) { [void]$have.Add($h) }
+        $n = 0
+        foreach ($k in @($keys)) { if (-not [string]::IsNullOrEmpty($k) -and (-not $have.Contains($k))) { $n++ } }
+        return $n
+    }
+    function ClaimStale([string]$path, $keys) {
+        $pairs = @(RetroPairs $path)
+        $n = 0
+        foreach ($k in @($keys)) {
+            if ([string]::IsNullOrEmpty($k)) { continue }
+            foreach ($p in $pairs) {
+                $q = $p.Split(' ')
+                if ([string]::Equals($q[0], $k, [System.StringComparison]::Ordinal)) { if ([string]::Equals($q[1], $rUndone, [System.StringComparison]::Ordinal)) { $n++ }; break }
+            }
+        }
+        return $n
+    }
+    function KeyWithStat([string]$path, [string]$stat) {
+        foreach ($p in (RetroPairs $path)) { $q = $p.Split(' '); if ([string]::Equals($q[1], $stat, [System.StringComparison]::Ordinal)) { return $q[0] } }
+        return ''
+    }
+    function RetroOutFixture {
+        # A copy with ONE keyed row appended OUTSIDE the marker window. This is what bites a helper
+        # that widens the window past the topmost section: the older section tables carry NO row keys,
+        # so widening alone leaves the key set unchanged (measured green during implementation).
+        $f = Join-Path $sbx 'retro-outside.md'
+        $out = New-Object System.Collections.ArrayList
+        foreach ($l in [System.IO.File]::ReadAllLines($RETRO)) { [void]$out.Add($l) }
+        [void]$out.Add('| ' + [char]96 + 'zzz-outside' + [char]96 + ' **zzz** | zzz | **' + $rUndone + '** | zzz |')
+        [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    function RetroVerFixture([string]$mode) {
+        # badver: changes ONLY the base version in the TOPMOST section heading.
+        $f = Join-Path $sbx ('retro-' + $mode + '.md')
+        $out = New-Object System.Collections.ArrayList
+        $done = $false
+        foreach ($l in [System.IO.File]::ReadAllLines($RETRO)) {
+            if ((-not $done) -and $l.StartsWith('## ', [System.StringComparison]::Ordinal)) {
+                $done = $true
+                if ($mode -eq 'badver') { [void]$out.Add([regex]::Replace($l, '\(v[0-9.]*', '(v0.0.0')); continue }
+            }
+            [void]$out.Add($l)
+        }
+        [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
     }
     function RetroVals([string]$path) {
         # THE WINDOW IS AN ASCII MARKER BLOCK -- matching a (Korean) section heading would silently
@@ -3370,6 +3631,48 @@ try {
     Chk "O13: control -- two windows are caught" ([string](RetroBlocks (RetroFixture 'dup'))) '2'
     # False-positive direction -- an untouched copy still has exactly one.
     Chk "O14: false-positive direction -- untouched copy has one window" ([string](RetroBlocks (RetroFixture 'clean'))) '1'
+    # (O15-O40 / M69) The three main checks are (1) did the retro run after the release (the backstop),
+    # (2) is each declared row key still tracked, (3) does a released milestone claim a row that is
+    # still untaken. Controls feed keys and copies to the SAME functions (the M46/M47 precedent).
+    Chk "O15: retro-cadence declaration line is exactly 1" (DeclCount $CONV 'retro-cadence:') '1'
+    Chk "O16: retro-pick declaration line is exactly 1" (DeclCount $CONV 'retro-pick:') '1'
+    Chk "O17: retro base-version extraction positive-control" $(if ((FirstVer $RETRO '## ') -ne '') { 'ok' } else { 'no' }) 'ok'
+    $RBASE = BaseVer $MDIR
+    Chk "O18: main check -- the topmost retro base version matches CHANGELOG (the second header too on a release commit)" (BackstopVerdict (FirstVer $RETRO '## ') (NthVer $CHLOG '### [' 1) (NthVer $CHLOG '### [' 2) $RBASE) 'ok'
+    Chk "O19: control -- a copy whose base version lags is caught" (BackstopVerdict (FirstVer (RetroVerFixture 'badver') '## ') (NthVer $CHLOG '### [' 1) (NthVer $CHLOG '### [' 2) $RBASE) 'no'
+    Chk "O20: row-key extraction positive-control (>0)" $(if ((@(RetroKeys $RETRO)).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "O21: main check -- every declared row key exists in the topmost table" ([string](ClaimMissing $RETRO (MstClaims $false))) '0'
+    Chk "O22: control -- a key absent from the table is caught" ([string](ClaimMissing $RETRO @('zzz-key-gone'))) '1'
+    Chk "O23: main check -- no claim outside the highest number is still untaken" ([string](ClaimStale $RETRO (MstClaims $true))) '0'
+    Chk "O24: control -- the key of an untaken row is caught" ([string](ClaimStale $RETRO @((KeyWithStat $RETRO $rUndone)))) '1'
+    Chk "O25: negative control -- the key of a taken row is not counted" ([string](ClaimStale $RETRO @((KeyWithStat $RETRO $rFirst)))) '0'
+    Chk "O26: no forbidden separator in the retro-cadence declaration tail" (BadSeps $CONV 'retro-cadence:') '0'
+    Chk "O27: no forbidden separator in the retro-pick declaration tail" (BadSeps $CONV 'retro-pick:') '0'
+    Chk "O28: the cadence co-term is present at both restatement sites" ((ScopeTok (Join-Path $ROOT 'skills/release/SKILL.md') $RCAD) + (ScopeTok (Join-Path $ROOT 'docs/commands.md') $RCAD)) 'yesyes'
+    Chk "O29: the claimed-row co-term is present at both restatement sites" ((ScopeTok (Join-Path $ROOT 'skills/milestone/SKILL.md') $RPICK) + (ScopeTok (Join-Path $ROOT 'skills/milestone/template.md') $RPICK)) 'yesyes'
+    Chk "O30: window control -- a keyed row outside the marker window is not seen" ([string](ClaimStale (RetroOutFixture) @('zzz-outside'))) '0'
+    # (O31-O35 / M69 review round 1) Closing the four blanks the review opened: the claim-side
+    # extraction gets a CONDITIONAL positive-control (`O31`), the three declaration-shape rules get cases
+    # (`O32`-`O34`), and the silence-zero negative control finally exists (`O35`).
+    Chk "O31: claim extraction conditional positive-control" (ClaimExtractOk $MDIR) 'ok'
+    Chk "O32: no milestone doc carries two retro-rows lines" ([string](MstClaimDup)) '0'
+    Chk "O33: no milestone doc carries an empty retro-rows value" ([string](MstClaimEmpty)) '0'
+    Chk "O34: no duplicate row key in the retro table" ([string](RetroKeyDup $RETRO)) '0'
+    # (O35) SILENCE-ZERO NEGATIVE CONTROL -- with no declaration in play the verdict must stay 0. A repo
+    # that does not write claims IS this state, and its clean tree going red would break the contract.
+    # A LITERAL EMPTY KEY LIST IS NOT FED -- the loops would run zero times and the answer would be 0 by
+    # construction (round 1, recommendation 3). A declaration-free COPY goes through extraction, the
+    # conditional control and both main checks -- the SAME functions.
+    $SILM = SilenceFixture
+    Chk "O35: negative control -- a declaration-free doc set keeps the extraction control and verdicts quiet" ((ClaimExtractOk $SILM) + [string](ClaimMissing $RETRO (MstClaims $false $SILM)) + [string](ClaimStale $RETRO (MstClaims $true $SILM))) 'ok00'
+    # (O36-O40 / M69 review rounds 2-3) THE BACKSTOP'S RELEASE-COMMIT BRANCH -- closing the blocker where O18
+    # went red on release commits, with a control per direction. Verdict values come from SYNTHETIC fixtures.
+    $CHFX = ChlogFixture
+    Chk "O36: control -- a base older than the first header accepts the second header (release commit)" (BackstopVerdict '2.0.0' (NthVer $CHFX '### [' 1) (NthVer $CHFX '### [' 2) '2.0.0') 'ok'
+    Chk "O37: control -- a base equal to the first header refuses the second header (retro skipped)" (BackstopVerdict '2.0.0' (NthVer $CHFX '### [' 1) (NthVer $CHFX '### [' 2) '3.0.0') 'no'
+    Chk "O38: control -- two releases behind is caught" (BackstopVerdict '1.0.0' (NthVer $CHFX '### [' 1) (NthVer $CHFX '### [' 2) '1.0.0') 'no'
+    Chk "O39: base-version extraction positive-control (real highest-numbered doc)" $(if ($RBASE -ne '') { 'ok' } else { 'no' }) 'ok'
+    Chk "O40: base-version extraction control -- reads the numerically highest doc and drops the trailing note" (BaseVer (BaseFixture)) '2.0.0'
     }
 
     # --- Part P: completion-criteria cross-check (M55) ----------------------
@@ -4512,7 +4815,6 @@ try {
         }
         return 'yes'
     }
-    function ScopeTok($file, [string]$alias) { return (HasToken $file ('`' + $alias + '`')) }
     function ScopeDefn([string]$alias) {
         # -> how many lines in the convention DEFINE that co-term (same shape as `V31`). Counted per
         # LINE, exactly as the .sh twin's `grep -cF` does.

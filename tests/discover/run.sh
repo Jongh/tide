@@ -2962,9 +2962,210 @@ chk "N28: 음성 통제 - 손대지 않은 사본은 붉지 않는다" "$(axis_m
 chk "N29: 적대 통제 - 서술을 절 밖으로 옮기면 잡는다" "$(axis_missing "$(axis_fixture moved)")" "1"
 fi
 
+# `scope_tok`은 Part O(M69)와 Part W(M66~M68) **둘이 부른다** — 정의를 앞으로 올려 판정을 사본당
+# 하나로 둔다(두 벌로 두면 한쪽만 고쳐 두 파트가 다른 답을 낼 수 있다).
+scope_tok() { # <파일> <병기어> → 그 파일이 병기어를 **백틱 토큰**으로 가지면 yes
+    has_token "$1" "$(printf '`%s`' "$2")"
+}
+
 # --- Part O: 회고 후속 항목의 소비 (M54) -------------------------------------
 # 회고가 적은 후속 항목이 다음 사이클에 닿는지를 문다. 무는 것은 **선언의 유일성 · 상태 값의 집합
 # 소속 · 소비자의 배선**까지이고, 처분이 타당한가는 리뷰의 영역이다(규약이 같은 경계를 적는다).
+# (O15~O40 · M69) **회고의 갱신 주기와 「집었다」 선언** — 위 O1~O14가 표의 **상태 값 집합**과 **창의
+# 유일성**을 문다면, 아래는 그 창이 **낡았는지**와 마일스톤의 **선언이 추적되는지**를 묻는다.
+# 백스톱은 `CHANGELOG.md`의 최상단 릴리즈 노트 버전이다 — 버전 파일은 프로젝트마다 달라 경로를 박을 수
+# 없고(`bk-version-file`이 추상 토큰인 사유), CHANGELOG는 `bk-changelog`로 선언돼 있다.
+nth_ver() { # <파일> <줄 접두> <n> → 그 접두로 시작하는 **n번째 줄**의 `(v` 또는 `[v` 뒤 숫자·점 토큰
+    # 한글 낱말(「시점」 등)을 매칭하지 않는다 — `.ps1` 사본이 같은 판정을 쓸 수 없기 때문이다.
+    [ -f "$1" ] || return 0
+    LC_ALL=C awk -v pfx="$2" -v n="$3" '
+        substr($0, 1, length(pfx)) == pfx && ++c == n {
+            i = index($0, "(v"); if (i == 0) i = index($0, "[v")
+            if (i == 0) exit
+            t = substr($0, i + 2); v = ""
+            for (k = 1; k <= length(t); k++) { c = substr(t, k, 1); if (c ~ /[0-9.]/) v = v c; else break }
+            print v; exit
+        }' "$1"
+}
+first_ver() { nth_ver "$1" "$2" 1; }
+backstop_verdict() { # <회고 버전> <CHANGELOG 첫 버전> <CHANGELOG 둘째 버전> <최대 번호 마일스톤의 기반 버전> → ok|no
+    # **릴리즈 커밋을 정상으로 받는다(M69 리뷰 라운드 1 차단 1 · 라운드 2 차단 1)** — release는 CHANGELOG를
+    # 올려 커밋하고 자동 회고는 태그 **뒤**에 돌므로, 릴리즈 커밋의 트리는 언제나 「회고 = CHANGELOG 둘째」다.
+    # 둘째와의 같음은 **최대 번호 마일스톤이 CHANGELOG 첫째 위에 서지 않았을 때만** 받는다 — 첫째 위에 섰다면
+    # 그 릴리즈 뒤 새 마일스톤이 세워졌는데 회고는 그 릴리즈를 모르는 것, 곧 **회고를 건너뛴 것**이다.
+    # 라운드 2는 이 자리를 「최대 번호의 review 보고서 존재」로 물었고, 리뷰 없이 생기는 릴리즈 커밋(마일스톤
+    # 초안 뒤 debug 릴리즈 · 강행)에서 붉었다. 기반 버전은 리뷰 유무와 무관하다. 기반 버전이 비면 막지 않는다.
+    if [ -n "$1" ] && [ "$1" = "$2" ]; then echo ok; return; fi
+    if [ -n "$1" ] && [ "$1" = "$3" ] && [ "$4" != "$2" ]; then echo ok; return; fi
+    echo no
+}
+BASE_KEY='- 기반 버전:'
+base_ver() { # [마일스톤 디렉터리] → 최대 번호 마일스톤 문서의 `- 기반 버전:` 값에서 `v` 뒤 숫자·점 토큰
+    # 키는 `skills/milestone/template.md` 메타데이터의 그 줄이다. ps1 사본은 같은 키를 코드포인트로 만든다.
+    _bd=${1:-$MDIR}
+    _bm=$(mst_max "$_bd")
+    [ -n "$_bm" ] && [ -f "$_bd/M$_bm.md" ] || return 0
+    LC_ALL=C awk -v pfx="$BASE_KEY" '
+        substr($0, 1, length(pfx)) == pfx {
+            t = substr($0, length(pfx) + 1); sub(/^[ \t]+/, "", t)
+            if (substr(t, 1, 1) != "v") exit
+            t = substr(t, 2); v = ""
+            for (k = 1; k <= length(t); k++) { c = substr(t, k, 1); if (c ~ /[0-9.]/) v = v c; else break }
+            print v; exit
+        }' "$_bd/M$_bm.md"
+}
+chlog_fixture() { # → 릴리즈 노트 머리 셋(v3.0.0 · v2.0.0 · v1.0.0)을 가진 **합성** CHANGELOG
+    # 실제 CHANGELOG 값에 기대지 않는다 — 릴리즈 커밋 트리에서도 통제가 같은 답을 내야 한다.
+    _cf="$SBX/chlog-fixture.md"
+    printf '%s\n' '# Changelog' '<!-- [start:notes] ### [v9.9.9] distractor -->' '' \
+        '### [v3.0.0]' '' '- c' '' '### [v2.0.0]' '' '- b' '' '### [v1.0.0]' '' '- a' > "$_cf"
+    printf '%s' "$_cf"
+}
+base_fixture() { # → 마일스톤 두 개(M9 기반 v1.0.0 · M10 기반 v2.0.0)를 가진 디렉터리
+    # 번호를 9·10으로 두는 이유: 문자열 정렬이면 M9가 최대로 뽑혀 v1.0.0이 나온다(수 정렬 회귀를 문다).
+    _bf="$SBX/base-milestones"
+    mkdir -p "$_bf"
+    printf '%s\n' '# M9' "$BASE_KEY v1.0.0" > "$_bf/M9.md"
+    printf '%s\n' '# M10' "$BASE_KEY v2.0.0 (note)" > "$_bf/M10.md"
+    printf '%s' "$_bf"
+}
+retro_pairs() { # <retro 경로> → 마커 창 안 데이터 행의 "<행 키> <상태 값>" 한 줄씩
+    # 행 키는 `항목` 셀 머리의 **첫 백틱 구획**이다(`absent-job-anchor:` 추출과 같은 형태) — 제목
+    # 텍스트를 키로 쓰지 않는 사유는 규약이 적는다(회고가 제목을 다듬는다).
+    [ -f "$1" ] || return 0
+    LC_ALL=C awk -v mk="$RBLK" -v q='`' '
+        mk == "" { exit }
+        index($0, "<!-- " mk ":start -->") > 0 { inb = 1; sep = 0; next }
+        index($0, "<!-- " mk ":end -->") > 0 { inb = 0; next }
+        inb && sep == 0 { if (index($0, "---") > 0) sep = 1; next }
+        inb && substr($0, 1, 1) == "|" {
+            n = split($0, f, "|")
+            if (n < 5) next
+            m = split(f[2], a, q)
+            if (m < 3 || a[2] == "") next
+            v = f[4]
+            gsub(/\r/, "", v); gsub(/\*/, "", v); gsub(/ /, "", v)
+            pp = index(v, "(")
+            if (pp > 0) v = substr(v, 1, pp - 1)
+            print a[2] " " v
+        }
+    ' "$1"
+}
+retro_keys() { retro_pairs "$1" | LC_ALL=C awk '{ print $1 }'; }
+MDIR="$ROOT/docs/milestones"
+mst_max() { # [마일스톤 디렉터리] → 마일스톤 문서의 최대 번호(없으면 빈 출력)
+    # 번호는 **문자열 그대로** 낸다(`base_ver`가 그 문자열로 문서 경로를 만든다 — ps1 사본과 같은 형태).
+    LC_ALL=C ls "${1:-$MDIR}" 2>/dev/null |
+        LC_ALL=C sed -n 's/^M\([0-9][0-9]*\)\.md$/\1/p' | LC_ALL=C sort -n | tail -1
+}
+mst_claims() { # <최대 번호를 뺄까 yes|no> [마일스톤 디렉터리] → 선언된 행 키 한 줄씩
+    # 파일 이름은 `M{숫자}.md`만 받는다 — ps1 사본의 거름과 같은 형태다(M69 리뷰 라운드 1 사소 6).
+    _md=${2:-$MDIR}
+    _mm=$(mst_max "$_md"); [ -n "$_mm" ] || _mm=0
+    for _mf in "$_md"/M*.md; do
+        [ -f "$_mf" ] || continue
+        _mn=$(basename "$_mf" .md); _mn=${_mn#M}
+        case "$_mn" in ''|*[!0-9]*) continue ;; esac
+        if [ "$1" = yes ] && [ "$_mn" -eq "$_mm" ]; then continue; fi
+        LC_ALL=C awk '/^- retro-rows:/ { sub(/^- retro-rows:[ ]*/, ""); sub(/\r$/, ""); print; exit }' "$_mf"
+    done | LC_ALL=C tr ' \t' '\n\n' | grep .
+}
+mst_claim_docs() { # [마일스톤 디렉터리] → `- retro-rows:` 선언 줄을 **가진** 마일스톤 문서의 수
+    # `mst_claims` 추출의 positive-control용이다. 무조건 「추출 > 0」을 요구하면 **소음 0 계약과 충돌**한다
+    # (선언을 쓰지 않는 저장소의 정상 트리가 붉는다) — 그래서 **조건부**로 묻는다: 선언 줄을 가진 문서가
+    # 하나라도 있으면 추출이 0이어서는 안 된다(M69 리뷰 권장 6).
+    LC_ALL=C grep -l '^- retro-rows:' "${1:-$MDIR}"/M*.md 2>/dev/null | grep -c .
+}
+claim_extract_ok() { # <마일스톤 디렉터리> → ok|no (`O31`의 판정 — `O35`가 선언 없는 사본에 **같은 함수**를 먹인다)
+    if [ "$(mst_claim_docs "$1")" -eq 0 ] || [ "$(mst_claims no "$1" | grep -c .)" -gt 0 ]; then echo ok; else echo no; fi
+}
+silence_fixture() { # → 실제 마일스톤 문서 둘(M1 · 최대 번호)에서 `- retro-rows:` 줄을 지운 사본 디렉터리
+    _sf="$SBX/silence-milestones"
+    mkdir -p "$_sf"
+    for _sn in 1 "$(mst_max)"; do
+        [ -f "$MDIR/M$_sn.md" ] || continue
+        LC_ALL=C grep -v '^- retro-rows:' "$MDIR/M$_sn.md" > "$_sf/M$_sn.md"
+    done
+    printf '%s' "$_sf"
+}
+mst_claim_lines() { # <마일스톤 문서> → 그 문서의 `- retro-rows:` 줄 수 (선언 유일성용)
+    # `grep -c`는 매치가 0이어도 `0`을 **출력하고** exit 1이다 — `|| echo 0`을 붙이면 `0`이 두 줄이 되어
+    # 호출부의 `-gt`가 오류로 거짓이 된다(M69 리뷰 라운드 1 권장 2의 실측: stderr 68쌍).
+    _cl=$(LC_ALL=C grep -c '^- retro-rows:' "$1" 2>/dev/null)
+    echo "${_cl:-0}"
+}
+mst_claim_dup() { # → `- retro-rows:` 줄이 **둘 이상**인 마일스톤 문서의 수
+    _md=0
+    for _mf in "$ROOT"/docs/milestones/M*.md; do
+        [ -f "$_mf" ] || continue
+        [ "$(mst_claim_lines "$_mf")" -gt 1 ] && _md=$((_md + 1))
+    done
+    echo "$_md"
+}
+mst_claim_empty() { # → `- retro-rows:` 줄이 있는데 **값이 빈** 문서의 수(규약이 빈 값을 금지한다)
+    _me=0
+    for _mf in "$ROOT"/docs/milestones/M*.md; do
+        [ -f "$_mf" ] || continue
+        # 공백·탭·CR을 양끝에서 벗긴다 — ps1 사본의 `Trim(' ', TAB, CR)`과 같은 집합이다(라운드 1 사소 5).
+        _mv=$(LC_ALL=C awk '/^- retro-rows:/ { sub(/^- retro-rows:/, ""); gsub(/^[ \t\r]+|[ \t\r]+$/, ""); print; exit }' "$_mf")
+        LC_ALL=C grep -q '^- retro-rows:' "$_mf" 2>/dev/null || continue
+        [ -z "$_mv" ] && _me=$((_me + 1))
+    done
+    echo "$_me"
+}
+retro_key_dup() { # <retro 경로> → 같은 행 키가 두 번 이상 나오는 키의 수
+    retro_keys "$1" | LC_ALL=C sort | LC_ALL=C uniq -d | grep -c .
+}
+claim_missing() { # <retro 경로> <행 키 목록> → 그 표에 **없는** 키의 수
+    # 키 목록을 인자로 받는 이유는 **통제 때문**이다 — 선언한 마일스톤이 최대 번호 하나뿐이면 대상이
+    # 비어 판정이 늘 0이 되고 통제가 아무것도 묻지 못한다. 픽스처는 **같은 함수**에 키를 먹인다.
+    # **고정 문자열로 비교한다** — `grep -qx`만 쓰면 BRE라 `rf.02`의 `.`이 임의 문자가 되어
+    # `rf-02`에 매치되고, ps1 사본은 ordinal이라 붉는다(M69 리뷰 차단 2의 실측). `-F`가 그 갈림을 닫는다.
+    # 루프의 `$2`는 **인용한다** — 인용하지 않으면 키가 경로 확장까지 받는다.
+    _cm=0
+    _ck=$(retro_keys "$1")
+    set -f
+    for _c in $2; do
+        printf '%s\n' "$_ck" | LC_ALL=C grep -qxF -- "$_c" || _cm=$((_cm + 1))
+    done
+    set +f
+    echo "$_cm"
+}
+claim_stale() { # <retro 경로> <행 키 목록> → 그 표에서 상태가 「아직 아무도 집지 않은 것」인 키의 수
+    # 비교는 `awk`의 `==`라 바이트 일치다(ps1 사본은 `StringComparison::Ordinal`로 맞췄다).
+    # `set -f`는 키가 글로브 문자를 담아도 경로 확장을 받지 않게 한다(위 `claim_missing`과 같은 사유).
+    _cs=0
+    _cp=$(retro_pairs "$1")
+    set -f
+    for _c in $2; do
+        _st=$(printf '%s\n' "$_cp" | LC_ALL=C awk -v k="$_c" '$1 == k { print $2; exit }')
+        [ "$_st" = "$RUNDONE" ] && _cs=$((_cs + 1))
+    done
+    set +f
+    echo "$_cs"
+}
+key_with_stat() { # <retro 경로> <상태 값> → 그 상태인 **첫 행의 키**(없으면 빈 출력)
+    retro_pairs "$1" | LC_ALL=C awk -v s="$2" '$2 == s { print $1; exit }'
+}
+retro_out_fixture() { # 마커 창 **밖**에 행 키를 가진 행을 하나 덧붙인 사본
+    # 창을 최상단 섹션 밖으로 넓히는 회귀를 무는 자리다. 과거 섹션 표에는 행 키가 없어 창을 넓혀도
+    # 키 집합이 변하지 않으므로(구현 중 실측: 넓힌 변이가 초록이었다) **키 있는 행을 밖에 둬야** 갈린다.
+    _ro="$SBX/retro-outside.md"
+    cat "$RETRO" > "$_ro"
+    printf '| `%s` **zzz** | zzz | **%s** | zzz |\n' zzz-outside "$RUNDONE" >> "$_ro"
+    printf '%s' "$_ro"
+}
+retro_ver_fixture() { # <모드> → 사본 경로 (badver: **최상단 섹션의 기준 버전만** 바꾼다)
+    _rv="$SBX/retro-$1.md"
+    LC_ALL=C awk -v mode="$1" '
+        done == 0 && substr($0, 1, 3) == "## " {
+            done = 1
+            if (mode == "badver") { sub(/\(v[0-9.]*/, "(v0.0.0") }
+        }
+        { print }
+    ' "$RETRO" > "$_rv"
+    printf '%s' "$_rv"
+}
 if part_on O; then
 RETRO="$ROOT/docs/reports/retro.md"
 # **꼬리를 정규화한다** — 앞뒤·중복 공백을 남기면 빈 값 검사에서 ` ` + `` + ` ` 가 선언 줄의
@@ -2972,6 +3173,15 @@ RETRO="$ROOT/docs/reports/retro.md"
 RSTAT=$(decl_tail "$CONV" 'retro-status:' | LC_ALL=C awk '{ $1 = $1; print }')
 RBLK=$(decl_tail "$CONV" 'retro-block:' | LC_ALL=C awk '{ print $1 }')
 RFIRST=$(printf '%s' "$RSTAT" | LC_ALL=C awk '{ print $1 }')
+RCAD=$(decl_tail "$CONV" 'retro-cadence:' | LC_ALL=C awk '{ print $1 }')
+[ -n "$RCAD" ] || RCAD=zzz-retro-cadence-unset
+RPICK=$(decl_tail "$CONV" 'retro-pick:' | LC_ALL=C awk '{ print $1 }')
+[ -n "$RPICK" ] || RPICK=zzz-retro-pick-unset
+CHLOG="$ROOT/CHANGELOG.md"
+# **상태 값은 선언에서 자리로 집는다** — `.ps1` 사본이 비-ASCII를 담을 수 없어 값을 글자로 쓸 수 없다.
+# 두 번째 토큰이 「아직 아무도 집지 않은 것」이며, 선언 순서의 단일 원본은 규약의 `retro-status:` 줄이다
+# (`RFIRST`가 첫 토큰을 같은 방식으로 집는 것과 같은 형태).
+RUNDONE=$(printf '%s' "$RSTAT" | LC_ALL=C awk '{ print $2 }')
 fi
 retro_vals() { # <retro 경로> → 마커 창 안 데이터 행의 상태 값(정규화)을 `[값]`으로 한 줄씩
     # **창은 ASCII 마커 블록이다** — 절 제목(한글)을 매칭하면 제목이 바뀔 때 조용히 창을 잃고
@@ -3089,6 +3299,46 @@ chk "O12: 본 검사 - 마커 창이 정확히 1개" "$(retro_blocks "$RETRO")" 
 chk "O13: 픽스처 통제 - 창이 둘이면 잡는다" "$(retro_blocks "$(retro_fixture dup)")" "2"
 # 오탐 방향 — 손대지 않은 사본은 그대로 1이다. 여기서 갈리면 픽스처 생성이 창을 건드린 것이다.
 chk "O14: 오탐 방향 - 손대지 않은 사본은 창이 1개" "$(retro_blocks "$(retro_fixture clean)")" "1"
+# (O15~O40 · M69) 케이스. 본 검사 셋은 ⑴ 회고가 릴리즈 뒤에 돌았는가(백스톱) ⑵ 선언된 행 키가
+# 추적되는가 ⑶ 릴리즈된 마일스톤이 집었다는 행이 아직 미반영인가다. 통제는 **같은 함수**에 키·사본을
+# 먹여 판정의 반응을 묻는다(M46·M47 판례).
+chk "O15: retro-cadence 선언 줄 정확히 1개" "$(decl_count "$CONV" 'retro-cadence:')" "1"
+chk "O16: retro-pick 선언 줄 정확히 1개" "$(decl_count "$CONV" 'retro-pick:')" "1"
+chk "O17: 회고 기준 버전 추출 positive-control" "$([ -n "$(first_ver "$RETRO" '## ')" ] && echo ok || echo no)" "ok"
+RBASE=$(base_ver "$MDIR")
+chk "O18: 본 검사 - 최상단 회고 기준 버전이 CHANGELOG와 맞는다(릴리즈 커밋이면 둘째 머리도 받는다)" "$(backstop_verdict "$(first_ver "$RETRO" '## ')" "$(nth_ver "$CHLOG" '### [' 1)" "$(nth_ver "$CHLOG" '### [' 2)" "$RBASE")" "ok"
+chk "O19: 픽스처 통제 - 기준 버전이 뒤처진 사본을 잡는다" "$(backstop_verdict "$(first_ver "$(retro_ver_fixture badver)" '## ')" "$(nth_ver "$CHLOG" '### [' 1)" "$(nth_ver "$CHLOG" '### [' 2)" "$RBASE")" "no"
+chk "O20: 행 키 추출 positive-control(>0)" "$([ "$(retro_keys "$RETRO" | grep -c .)" -gt 0 ] && echo ok || echo no)" "ok"
+chk "O21: 본 검사 - 선언된 행 키가 전부 최상단 표에 실재한다" "$(claim_missing "$RETRO" "$(mst_claims no)")" "0"
+chk "O22: 픽스처 통제 - 표에 없는 키를 주면 잡는다" "$(claim_missing "$RETRO" zzz-key-gone)" "1"
+chk "O23: 본 검사 - 최대 번호를 뺀 선언 중 미반영 0개" "$(claim_stale "$RETRO" "$(mst_claims yes)")" "0"
+chk "O24: 픽스처 통제 - 미반영 행의 키를 주면 잡는다" "$(claim_stale "$RETRO" "$(key_with_stat "$RETRO" "$RUNDONE")")" "1"
+chk "O25: 음성 통제 - 반영된 행의 키는 세지 않는다" "$(claim_stale "$RETRO" "$(key_with_stat "$RETRO" "$RFIRST")")" "0"
+chk "O26: retro-cadence 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" 'retro-cadence:')" "0"
+chk "O27: retro-pick 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" 'retro-pick:')" "0"
+chk "O28: 갱신 주기 병기어가 재서술처 둘에 공존" "$(scope_tok "$ROOT/skills/release/SKILL.md" "$RCAD")$(scope_tok "$ROOT/docs/commands.md" "$RCAD")" "yesyes"
+chk "O29: 집은 행 병기어가 재서술처 둘에 공존" "$(scope_tok "$ROOT/skills/milestone/SKILL.md" "$RPICK")$(scope_tok "$ROOT/skills/milestone/template.md" "$RPICK")" "yesyes"
+chk "O30: 창 통제 - 마커 창 밖의 키 있는 행은 보지 않는다" "$(claim_stale "$(retro_out_fixture)" zzz-outside)" "0"
+# (O31~O35 · M69 리뷰 라운드 1) 리뷰가 연 빈자리 넷을 닫는다 — ⑴ 선언 쪽 추출의 조건부
+# positive-control(`O31`) ⑵ 선언 형태 규율 셋(`O32`~`O34`) ⑶ 소음 0 음성 통제(`O35`).
+chk "O31: 선언 추출 조건부 positive-control" "$(claim_extract_ok "$MDIR")" "ok"
+chk "O32: retro-rows 선언 줄이 둘 이상인 문서 0개" "$(mst_claim_dup)" "0"
+chk "O33: retro-rows 값이 빈 문서 0개" "$(mst_claim_empty)" "0"
+chk "O34: 회고 표의 행 키 중복 0개" "$(retro_key_dup "$RETRO")" "0"
+# (O35) **소음 0 음성 통제** — 선언 줄이 **없는** 마일스톤 문서만으로도 판정이 붉지 않아야 한다.
+# 선언을 쓰지 않는 저장소가 곧 이 상태이고, 그 저장소의 정상 트리가 붉으면 소음 0 계약이 깨진다.
+# **빈 키 목록을 리터럴로 먹이지 않는다** — 그러면 루프가 0회라 구성상 0이다(라운드 1 권장 3). 선언을 지운
+# 사본 디렉터리를 추출·조건부 통제·본 검사 **같은 함수**에 먹인다.
+SILM=$(silence_fixture)
+chk "O35: 음성 통제 - 선언 없는 문서 집합에서 추출 통제·판정이 붉지 않는다" "$(claim_extract_ok "$SILM")$(claim_missing "$RETRO" "$(mst_claims no "$SILM")")$(claim_stale "$RETRO" "$(mst_claims yes "$SILM")")" "ok00"
+# (O36~O40 · M69 리뷰 라운드 2·3) **백스톱의 릴리즈 커밋 갈래** — `O18`이 릴리즈 커밋에서 붉던 차단을 닫으며
+# 판정의 방향마다 통제를 둔다. 판정 값은 **합성 픽스처**에서 온다(실제 CHANGELOG가 릴리즈 커밋 상태여도 같은 답).
+CHFX=$(chlog_fixture)
+chk "O36: 통제 - 기반 버전이 첫째 머리보다 앞서면 둘째 머리를 받는다(릴리즈 커밋)" "$(backstop_verdict 2.0.0 "$(nth_ver "$CHFX" '### [' 1)" "$(nth_ver "$CHFX" '### [' 2)" 2.0.0)" "ok"
+chk "O37: 통제 - 기반 버전이 첫째 머리와 같으면 둘째 머리를 받지 않는다(회고 건너뜀)" "$(backstop_verdict 2.0.0 "$(nth_ver "$CHFX" '### [' 1)" "$(nth_ver "$CHFX" '### [' 2)" 3.0.0)" "no"
+chk "O38: 통제 - 두 릴리즈 뒤처지면 잡는다" "$(backstop_verdict 1.0.0 "$(nth_ver "$CHFX" '### [' 1)" "$(nth_ver "$CHFX" '### [' 2)" 1.0.0)" "no"
+chk "O39: 기반 버전 추출 positive-control(실제 최대 번호 문서)" "$([ -n "$RBASE" ] && echo ok || echo no)" "ok"
+chk "O40: 기반 버전 추출 통제 - 수로 최대인 문서를 읽고 꼬리 메모를 떼어 낸다" "$(base_ver "$(base_fixture)")" "2.0.0"
 fi
 
 # --- Part P: 완료 기준 대조 (M55) --------------------------------------------
@@ -4108,9 +4358,6 @@ scope_all() { # <병기어> → 규약·review 스킬·review 템플릿·impl �
         [ "$(has_token "$_sa4" "$1")" = yes ] || { echo no; return; }
     done
     echo yes
-}
-scope_tok() { # <파일> <병기어> → 그 파일이 병기어를 **백틱 토큰**으로 가지면 yes
-    has_token "$1" "$(printf '`%s`' "$2")"
 }
 scope_defn() { # <병기어> → 규약에서 그 병기어를 **정의하는 줄**의 수(`V31`과 같은 형태)
     grep -cF "$(printf '**`%s`**' "$1")" "$CONV" 2>/dev/null | LC_ALL=C awk 'NR == 1 { print $1 + 0 }'
