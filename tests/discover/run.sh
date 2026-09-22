@@ -2971,7 +2971,7 @@ scope_tok() { # <파일> <병기어> → 그 파일이 병기어를 **백틱 토
 # --- Part O: 회고 후속 항목의 소비 (M54) -------------------------------------
 # 회고가 적은 후속 항목이 다음 사이클에 닿는지를 문다. 무는 것은 **선언의 유일성 · 상태 값의 집합
 # 소속 · 소비자의 배선**까지이고, 처분이 타당한가는 리뷰의 영역이다(규약이 같은 경계를 적는다).
-# (O15~O40 · M69) **회고의 갱신 주기와 「집었다」 선언** — 위 O1~O14가 표의 **상태 값 집합**과 **창의
+# (O15~O59 · M69·M70) **회고의 갱신 주기와 「집었다」 선언** — 위 O1~O14가 표의 **상태 값 집합**과 **창의
 # 유일성**을 문다면, 아래는 그 창이 **낡았는지**와 마일스톤의 **선언이 추적되는지**를 묻는다.
 # 백스톱은 `CHANGELOG.md`의 최상단 릴리즈 노트 버전이다 — 버전 파일은 프로젝트마다 달라 경로를 박을 수
 # 없고(`bk-version-file`이 추상 토큰인 사유), CHANGELOG는 `bk-changelog`로 선언돼 있다.
@@ -3000,11 +3000,9 @@ backstop_verdict() { # <회고 버전> <CHANGELOG 첫 버전> <CHANGELOG 둘째 
     echo no
 }
 BASE_KEY='- 기반 버전:'
-base_ver() { # [마일스톤 디렉터리] → 최대 번호 마일스톤 문서의 `- 기반 버전:` 값에서 `v` 뒤 숫자·점 토큰
+doc_base() { # <마일스톤 문서> → 그 문서의 `- 기반 버전:` 값에서 `v` 뒤 숫자·점 토큰(없으면 빈 출력)
     # 키는 `skills/milestone/template.md` 메타데이터의 그 줄이다. ps1 사본은 같은 키를 코드포인트로 만든다.
-    _bd=${1:-$MDIR}
-    _bm=$(mst_max "$_bd")
-    [ -n "$_bm" ] && [ -f "$_bd/M$_bm.md" ] || return 0
+    [ -f "$1" ] || return 0
     LC_ALL=C awk -v pfx="$BASE_KEY" '
         substr($0, 1, length(pfx)) == pfx {
             t = substr($0, length(pfx) + 1); sub(/^[ \t]+/, "", t)
@@ -3012,7 +3010,180 @@ base_ver() { # [마일스톤 디렉터리] → 최대 번호 마일스톤 문서
             t = substr(t, 2); v = ""
             for (k = 1; k <= length(t); k++) { c = substr(t, k, 1); if (c ~ /[0-9.]/) v = v c; else break }
             print v; exit
-        }' "$_bd/M$_bm.md"
+        }' "$1"
+}
+base_ver() { # [마일스톤 디렉터리] → 최대 번호 마일스톤 문서의 기반 버전
+    _bd=${1:-$MDIR}
+    _bm=$(mst_max "$_bd")
+    [ -n "$_bm" ] || return 0
+    doc_base "$_bd/M$_bm.md"
+}
+ver_rank() { # <CHANGELOG> <버전> → 그 버전을 가진 `### [` 머리의 자리(1이 최신 · 없으면 빈 출력)
+    # **자리로 비교한다** — 버전 수의 대소를 재지 않는다(백스톱과 같은 사유 · 규약 "회고 후속 항목의 소비" 절).
+    [ -f "$1" ] && [ -n "$2" ] || return 0
+    LC_ALL=C awk -v want="$2" '
+        substr($0, 1, 5) == "### [" {
+            n++
+            i = index($0, "[v"); if (i == 0) next
+            t = substr($0, i + 2); v = ""
+            for (k = 1; k <= length(t); k++) { c = substr(t, k, 1); if (c ~ /[0-9.]/) v = v c; else break }
+            if (v == want) { print n; exit }
+        }' "$1"
+}
+doc_claims() { # <마일스톤 문서> → 그 문서의 첫 `- retro-rows:` 줄의 키 한 줄씩
+    LC_ALL=C awk '/^- retro-rows:/ { sub(/^- retro-rows:[ \t]*/, ""); sub(/\r$/, ""); print; exit }' "$1" |
+        LC_ALL=C tr ' \t' '\n\n' | grep .
+}
+doc_released() { # <마일스톤 문서> → 첫 `- released:` 줄(릴리즈 표지)의 `v` 뒤 숫자·점 토큰(없으면 빈 출력)
+    [ -f "$1" ] || return 0
+    LC_ALL=C awk '
+        substr($0, 1, 11) == "- released:" {
+            t = substr($0, 12); sub(/^[ \t]+/, "", t)
+            if (substr(t, 1, 1) != "v") exit
+            t = substr(t, 2); v = ""
+            for (k = 1; k <= length(t); k++) { c = substr(t, k, 1); if (c ~ /[0-9.]/) v = v c; else break }
+            print v; exit
+        }' "$1"
+}
+mst_num() { # <마일스톤 문서> → `M{숫자}.md`면 그 숫자, 아니면 빈 출력(대소문자 구분 — ps1 사본은 `-cmatch`)
+    _nn=$(basename "$1" .md)
+    case "$_nn" in M*) ;; *) return 0 ;; esac
+    _nn=${_nn#M}
+    case "$_nn" in ''|*[!0-9]*) return 0 ;; esac
+    echo "$_nn"
+}
+target_claims() { # <마일스톤 디렉터리> <회고 버전> <CHANGELOG> <표지 도입 번호> → stale 대상의 선언 키(정렬)
+    # **번호가 도입 번호 이상이면 릴리즈 표지로 가린다** — 표지 머리가 회고 머리와 같거나 아래(자리 수가 크거나
+    # 같음)면 대상이다. 표지가 없으면 대상이 아니다(진행 중 · debug만 나간 사이클 — M70 리뷰 라운드 0 차단).
+    # **그 미만은 기반 버전으로 가린다** — 기반 머리가 회고 머리보다 아래면 대상이다(표지가 없던 시절의 릴리즈된
+    # 마일스톤). 최대 번호는 신호가 아니다. 두 자리 중 하나라도 비면 대상이 아니다(`O41`이 따로 문다).
+    _tr=$(ver_rank "$3" "$2")
+    [ -n "$_tr" ] || return 0
+    for _tf in "$1"/M*.md; do
+        [ -f "$_tf" ] || continue
+        _tn=$(mst_num "$_tf")
+        [ -n "$_tn" ] || continue
+        if [ "$_tn" -ge "$4" ]; then
+            _tb=$(ver_rank "$3" "$(doc_released "$_tf")")
+            [ -n "$_tb" ] || continue
+            [ "$_tr" -le "$_tb" ] && doc_claims "$_tf"
+        else
+            _tb=$(ver_rank "$3" "$(doc_base "$_tf")")
+            [ -n "$_tb" ] || continue
+            [ "$_tr" -lt "$_tb" ] && doc_claims "$_tf"
+        fi
+    done | LC_ALL=C sort
+}
+claim_base_missing() { # <마일스톤 디렉터리> <CHANGELOG> <표지 도입 번호> → 선언 문서 중 판정 값이 머리에 없는 수
+    # 판정 값 = 도입 번호 이상이면 **표지가 있을 때** 표지, 그 미만이면 기반 버전. 파일 이름 거름은 `target_claims`와
+    # 같다(M70 리뷰 라운드 0 사소 2).
+    _cb=0
+    for _cf in "$1"/M*.md; do
+        [ -f "$_cf" ] || continue
+        _cn=$(mst_num "$_cf")
+        [ -n "$_cn" ] || continue
+        LC_ALL=C grep -q '^- retro-rows:' "$_cf" 2>/dev/null || continue
+        if [ "$_cn" -ge "$3" ]; then
+            _cv=$(doc_released "$_cf")
+            LC_ALL=C grep -q '^- released:' "$_cf" 2>/dev/null || continue
+        else
+            _cv=$(doc_base "$_cf")
+        fi
+        [ -n "$(ver_rank "$2" "$_cv")" ] || _cb=$((_cb + 1))
+    done
+    echo "$_cb"
+}
+mark_dup() { # <마일스톤 디렉터리> → `- released:` 줄이 둘 이상인 문서 수
+    _kd=0
+    for _kf in "$1"/M*.md; do
+        [ -f "$_kf" ] || continue
+        [ -n "$(mst_num "$_kf")" ] || continue
+        _kc=$(LC_ALL=C grep -c '^- released:' "$_kf" 2>/dev/null)
+        [ "${_kc:-0}" -gt 1 ] && _kd=$((_kd + 1))
+    done
+    echo "$_kd"
+}
+target_fixture() { # → 합성 마일스톤 일곱(표지 도입 번호 5로 읽는다)
+    # M1~M4 기반 버전 규칙: M1 v1.0.0 k1 · M2 v2.0.0 k2 · M3 v3.0.0 k3 · M4 v9.9.9 k4(머리 없음).
+    # M5~M7 표지 규칙(기반은 전부 v2.0.0): M5 표지 없음 k5(진행 중 · debug만 나감) · M6 표지 v3.0.0 k6 ·
+    # M7 표지 v8.8.8 k7(머리 없음). **도입 번호 자리(M5)에 표지 없는 문서**를 두어 `>=`와 `>`를 가른다 — `>`면 M5가
+    # 기반 규칙으로 떨어져 회고 v3.0.0에서 대상이 된다(M70 리뷰 라운드 3 권장 3).
+    _gf="$SBX/target-milestones"
+    mkdir -p "$_gf"
+    for _gi in 1:1.0.0 2:2.0.0 3:3.0.0 4:9.9.9 5:2.0.0 6:2.0.0 7:2.0.0; do
+        _gn=${_gi%%:*}; _gv=${_gi#*:}
+        printf '%s\n' "# M$_gn" "$BASE_KEY v$_gv" "- retro-rows: k$_gn" > "$_gf/M$_gn.md"
+    done
+    printf '%s\n' '- released: v3.0.0' >> "$_gf/M6.md"
+    printf '%s\n' '- released: v8.8.8' >> "$_gf/M7.md"
+    printf '%s' "$_gf"
+}
+markdup_fixture() { # → 표지 줄이 둘인 문서 하나를 가진 디렉터리
+    _mf2="$SBX/markdup-milestones"
+    mkdir -p "$_mf2"
+    printf '%s\n' '# M1' '- released: v1.0.0' '- released: v2.0.0' > "$_mf2/M1.md"
+    printf '%s' "$_mf2"
+}
+mark_gap() { # <마일스톤 디렉터리> <보고서 디렉터리> <표지 도입 번호> → 표지 누락 수
+    # **표지가 있는 마일스톤 아래의 누락**(M70 리뷰 라운드 1 차단 갈래 ⓐ) — 표지 대상은 「이번 태그에 실리는
+    # 마일스톤 전부」(번호 >= 도입 번호 · impl 보고서 있음 · 표지 없음)라, 표지가 선 마일스톤보다 번호가 작은데
+    # 그 조건을 갖춘 문서는 그 릴리즈가 함께 표지했어야 한다 — **한 릴리즈가 일부만 표지하고 아래를 건너뛴** 경우다.
+    # 가장 큰 표지 번호 **위**는 묻지 않는다. 릴리즈가 표지를 **통째로** 빠뜨리면 다음 표지 릴리즈가 자기 버전으로
+    # 메워 여기 닿지 않는다(규약의 경계 — M70 리뷰 라운드 2 차단). 표지 유무는 `mark_dup`과 같은 줄 접두로 본다.
+    _gt=0
+    for _gf in "$1"/M*.md; do
+        [ -f "$_gf" ] || continue
+        _gn=$(mst_num "$_gf")
+        [ -n "$_gn" ] || continue
+        LC_ALL=C grep -q '^- released:' "$_gf" 2>/dev/null || continue
+        [ "$_gn" -gt "$_gt" ] && _gt=$_gn
+    done
+    _gc=0
+    for _gf in "$1"/M*.md; do
+        [ -f "$_gf" ] || continue
+        _gn=$(mst_num "$_gf")
+        [ -n "$_gn" ] || continue
+        [ "$_gn" -ge "$3" ] || continue
+        [ "$_gn" -lt "$_gt" ] || continue
+        [ -f "$2/M$_gn-impl.md" ] || continue
+        LC_ALL=C grep -q '^- released:' "$_gf" 2>/dev/null && continue
+        _gc=$((_gc + 1))
+    done
+    echo "$_gc"
+}
+gap_fixture() { # <gap|clean> → 마일스톤 일곱과 impl 보고서를 가진 디렉터리(표지 도입 번호 5로 읽는다)
+    # M4 impl · 표지 없음(도입 번호 미만) · M5 impl · 표지 없음(gap)/v1.0.0(clean) · M6 impl · 표지 v1.0.0 ·
+    # M7 impl · 표지 없음(gap)/v2.0.0(clean) · M8 초안(impl 없음 · 표지 없음) · M9 impl · 표지 v2.0.0 ·
+    # M10 impl · 표지 없음(가장 큰 표지 위 — 진행 중). gap이면 누락은 M5 · M7 둘이다.
+    # - 표지를 둘 이상(M6 · M9) 두어 「가장 큰 표지」와 「가장 작은 표지」를 가른다(M70 리뷰 라운드 2 권장 3 — 가장 작은
+    #   표지 M6을 쓰면 M7이 그 위라 1이 나온다).
+    # - **도입 번호 자리(M5)에 impl 있는 무표지**를 두어 `>=`와 `>`를 가른다(M70 리뷰 라운드 3 권장 3 — `>`면 M5가 빠져 1).
+    _pf="$SBX/gap-$1"
+    mkdir -p "$_pf/m" "$_pf/r"
+    for _pn in 4 5 6 7 8 9 10; do
+        printf '%s\n' "# M$_pn" > "$_pf/m/M$_pn.md"
+        [ "$_pn" = 8 ] || printf '%s\n' "# M$_pn impl" > "$_pf/r/M$_pn-impl.md"
+    done
+    printf '%s\n' '- released: v1.0.0' >> "$_pf/m/M6.md"
+    printf '%s\n' '- released: v2.0.0' >> "$_pf/m/M9.md"
+    if [ "$1" = clean ]; then
+        printf '%s\n' '- released: v1.0.0' >> "$_pf/m/M5.md"
+        printf '%s\n' '- released: v2.0.0' >> "$_pf/m/M7.md"
+    fi
+    printf '%s' "$_pf"
+}
+mark_since() { # <마일스톤 디렉터리> → 표지가 있는 마일스톤 중 가장 작은 번호(없으면 빈 출력)
+    # **대상 레포의 도입 번호 파생**(`mark-since-derived` · M70 리뷰 라운드 3 차단) — 선언이 없는 레포는 이 값을 쓴다.
+    # 이 저장소에서는 선언과 같아야 한다(도입 번호 미만의 소급 표지가 여기서 붉다). 표지 유무는 `mark_dup`과 같은 줄 접두다.
+    _sm=""
+    for _sf in "$1"/M*.md; do
+        [ -f "$_sf" ] || continue
+        _sn=$(mst_num "$_sf")
+        [ -n "$_sn" ] || continue
+        LC_ALL=C grep -q '^- released:' "$_sf" 2>/dev/null || continue
+        if [ -z "$_sm" ] || [ "$_sn" -lt "$_sm" ]; then _sm=$_sn; fi
+    done
+    printf '%s' "$_sm"
 }
 chlog_fixture() { # → 릴리즈 노트 머리 셋(v3.0.0 · v2.0.0 · v1.0.0)을 가진 **합성** CHANGELOG
     # 실제 CHANGELOG 값에 기대지 않는다 — 릴리즈 커밋 트리에서도 통제가 같은 답을 내야 한다.
@@ -3058,17 +3229,16 @@ mst_max() { # [마일스톤 디렉터리] → 마일스톤 문서의 최대 번�
     LC_ALL=C ls "${1:-$MDIR}" 2>/dev/null |
         LC_ALL=C sed -n 's/^M\([0-9][0-9]*\)\.md$/\1/p' | LC_ALL=C sort -n | tail -1
 }
-mst_claims() { # <최대 번호를 뺄까 yes|no> [마일스톤 디렉터리] → 선언된 행 키 한 줄씩
+mst_claims() { # [마일스톤 디렉터리] → 선언된 행 키 한 줄씩(전 문서)
     # 파일 이름은 `M{숫자}.md`만 받는다 — ps1 사본의 거름과 같은 형태다(M69 리뷰 라운드 1 사소 6).
-    _md=${2:-$MDIR}
-    _mm=$(mst_max "$_md"); [ -n "$_mm" ] || _mm=0
+    # stale 대상 선택은 여기서 하지 않는다 — `target_claims`가 기반 버전 자리로 가린다(M70).
+    _md=${1:-$MDIR}
     for _mf in "$_md"/M*.md; do
         [ -f "$_mf" ] || continue
         _mn=$(basename "$_mf" .md); _mn=${_mn#M}
         case "$_mn" in ''|*[!0-9]*) continue ;; esac
-        if [ "$1" = yes ] && [ "$_mn" -eq "$_mm" ]; then continue; fi
-        LC_ALL=C awk '/^- retro-rows:/ { sub(/^- retro-rows:[ ]*/, ""); sub(/\r$/, ""); print; exit }' "$_mf"
-    done | LC_ALL=C tr ' \t' '\n\n' | grep .
+        doc_claims "$_mf"
+    done
 }
 mst_claim_docs() { # [마일스톤 디렉터리] → `- retro-rows:` 선언 줄을 **가진** 마일스톤 문서의 수
     # `mst_claims` 추출의 positive-control용이다. 무조건 「추출 > 0」을 요구하면 **소음 0 계약과 충돌**한다
@@ -3077,7 +3247,7 @@ mst_claim_docs() { # [마일스톤 디렉터리] → `- retro-rows:` 선언 줄�
     LC_ALL=C grep -l '^- retro-rows:' "${1:-$MDIR}"/M*.md 2>/dev/null | grep -c .
 }
 claim_extract_ok() { # <마일스톤 디렉터리> → ok|no (`O31`의 판정 — `O35`가 선언 없는 사본에 **같은 함수**를 먹인다)
-    if [ "$(mst_claim_docs "$1")" -eq 0 ] || [ "$(mst_claims no "$1" | grep -c .)" -gt 0 ]; then echo ok; else echo no; fi
+    if [ "$(mst_claim_docs "$1")" -eq 0 ] || [ "$(mst_claims "$1" | grep -c .)" -gt 0 ]; then echo ok; else echo no; fi
 }
 silence_fixture() { # → 실제 마일스톤 문서 둘(M1 · 최대 번호)에서 `- retro-rows:` 줄을 지운 사본 디렉터리
     _sf="$SBX/silence-milestones"
@@ -3299,19 +3469,25 @@ chk "O12: 본 검사 - 마커 창이 정확히 1개" "$(retro_blocks "$RETRO")" 
 chk "O13: 픽스처 통제 - 창이 둘이면 잡는다" "$(retro_blocks "$(retro_fixture dup)")" "2"
 # 오탐 방향 — 손대지 않은 사본은 그대로 1이다. 여기서 갈리면 픽스처 생성이 창을 건드린 것이다.
 chk "O14: 오탐 방향 - 손대지 않은 사본은 창이 1개" "$(retro_blocks "$(retro_fixture clean)")" "1"
-# (O15~O40 · M69) 케이스. 본 검사 셋은 ⑴ 회고가 릴리즈 뒤에 돌았는가(백스톱) ⑵ 선언된 행 키가
+# (O15~O59 · M69·M70) 케이스. 본 검사 셋은 ⑴ 회고가 릴리즈 뒤에 돌았는가(백스톱) ⑵ 선언된 행 키가
 # 추적되는가 ⑶ 릴리즈된 마일스톤이 집었다는 행이 아직 미반영인가다. 통제는 **같은 함수**에 키·사본을
 # 먹여 판정의 반응을 묻는다(M46·M47 판례).
 chk "O15: retro-cadence 선언 줄 정확히 1개" "$(decl_count "$CONV" 'retro-cadence:')" "1"
 chk "O16: retro-pick 선언 줄 정확히 1개" "$(decl_count "$CONV" 'retro-pick:')" "1"
 chk "O17: 회고 기준 버전 추출 positive-control" "$([ -n "$(first_ver "$RETRO" '## ')" ] && echo ok || echo no)" "ok"
 RBASE=$(base_ver "$MDIR")
+RVER=$(first_ver "$RETRO" '## ')
+RMARK=$(decl_tail "$CONV" 'retro-release-mark:' | LC_ALL=C awk '{ print $1 }')
+[ -n "$RMARK" ] || RMARK=zzz-retro-release-mark-unset
+RDERIVE=$(decl_tail "$CONV" 'retro-mark-derive:' | LC_ALL=C awk '{ print $1 }')
+[ -n "$RDERIVE" ] || RDERIVE=zzz-retro-mark-derive-unset
+RSINCE=$(decl_tail "$CONV" 'retro-mark-since:' | LC_ALL=C awk '{ print $1 }' | LC_ALL=C sed -n 's/^M\([0-9][0-9]*\)$/\1/p')
 chk "O18: 본 검사 - 최상단 회고 기준 버전이 CHANGELOG와 맞는다(릴리즈 커밋이면 둘째 머리도 받는다)" "$(backstop_verdict "$(first_ver "$RETRO" '## ')" "$(nth_ver "$CHLOG" '### [' 1)" "$(nth_ver "$CHLOG" '### [' 2)" "$RBASE")" "ok"
 chk "O19: 픽스처 통제 - 기준 버전이 뒤처진 사본을 잡는다" "$(backstop_verdict "$(first_ver "$(retro_ver_fixture badver)" '## ')" "$(nth_ver "$CHLOG" '### [' 1)" "$(nth_ver "$CHLOG" '### [' 2)" "$RBASE")" "no"
 chk "O20: 행 키 추출 positive-control(>0)" "$([ "$(retro_keys "$RETRO" | grep -c .)" -gt 0 ] && echo ok || echo no)" "ok"
-chk "O21: 본 검사 - 선언된 행 키가 전부 최상단 표에 실재한다" "$(claim_missing "$RETRO" "$(mst_claims no)")" "0"
+chk "O21: 본 검사 - 선언된 행 키가 전부 최상단 표에 실재한다" "$(claim_missing "$RETRO" "$(mst_claims)")" "0"
 chk "O22: 픽스처 통제 - 표에 없는 키를 주면 잡는다" "$(claim_missing "$RETRO" zzz-key-gone)" "1"
-chk "O23: 본 검사 - 최대 번호를 뺀 선언 중 미반영 0개" "$(claim_stale "$RETRO" "$(mst_claims yes)")" "0"
+chk "O23: 본 검사 - 회고가 본 릴리즈 위에 선 마일스톤의 선언 중 미반영 0개" "$(claim_stale "$RETRO" "$(target_claims "$MDIR" "$RVER" "$CHLOG" "${RSINCE:-0}")")" "0"
 chk "O24: 픽스처 통제 - 미반영 행의 키를 주면 잡는다" "$(claim_stale "$RETRO" "$(key_with_stat "$RETRO" "$RUNDONE")")" "1"
 chk "O25: 음성 통제 - 반영된 행의 키는 세지 않는다" "$(claim_stale "$RETRO" "$(key_with_stat "$RETRO" "$RFIRST")")" "0"
 chk "O26: retro-cadence 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" 'retro-cadence:')" "0"
@@ -3330,7 +3506,7 @@ chk "O34: 회고 표의 행 키 중복 0개" "$(retro_key_dup "$RETRO")" "0"
 # **빈 키 목록을 리터럴로 먹이지 않는다** — 그러면 루프가 0회라 구성상 0이다(라운드 1 권장 3). 선언을 지운
 # 사본 디렉터리를 추출·조건부 통제·본 검사 **같은 함수**에 먹인다.
 SILM=$(silence_fixture)
-chk "O35: 음성 통제 - 선언 없는 문서 집합에서 추출 통제·판정이 붉지 않는다" "$(claim_extract_ok "$SILM")$(claim_missing "$RETRO" "$(mst_claims no "$SILM")")$(claim_stale "$RETRO" "$(mst_claims yes "$SILM")")" "ok00"
+chk "O35: 음성 통제 - 선언 없는 문서 집합에서 추출 통제·판정이 붉지 않는다" "$(claim_extract_ok "$SILM")$(claim_missing "$RETRO" "$(mst_claims "$SILM")")$(claim_stale "$RETRO" "$(target_claims "$SILM" "$RVER" "$CHLOG" "${RSINCE:-0}")")" "ok00"
 # (O36~O40 · M69 리뷰 라운드 2·3) **백스톱의 릴리즈 커밋 갈래** — `O18`이 릴리즈 커밋에서 붉던 차단을 닫으며
 # 판정의 방향마다 통제를 둔다. 판정 값은 **합성 픽스처**에서 온다(실제 CHANGELOG가 릴리즈 커밋 상태여도 같은 답).
 CHFX=$(chlog_fixture)
@@ -3339,6 +3515,45 @@ chk "O37: 통제 - 기반 버전이 첫째 머리와 같으면 둘째 머리를 
 chk "O38: 통제 - 두 릴리즈 뒤처지면 잡는다" "$(backstop_verdict 1.0.0 "$(nth_ver "$CHFX" '### [' 1)" "$(nth_ver "$CHFX" '### [' 2)" 1.0.0)" "no"
 chk "O39: 기반 버전 추출 positive-control(실제 최대 번호 문서)" "$([ -n "$RBASE" ] && echo ok || echo no)" "ok"
 chk "O40: 기반 버전 추출 통제 - 수로 최대인 문서를 읽고 꼬리 메모를 떼어 낸다" "$(base_ver "$(base_fixture)")" "2.0.0"
+# (O41~O45 · M70) **stale 대상을 기반 버전 자리로 가린다** — 「최대 번호만 뺀다」를 대체한다. 통제는 합성
+# 마일스톤 넷과 합성 CHANGELOG에 **같은 함수**를 먹여 방향마다 묻는다(전부 포함 · 전부 제외 · 옛 최대 번호 ·
+# 경계의 같음/아래 · 자리 없는 기반 버전).
+chk "O41: 선언한 마일스톤의 기반 버전이 전부 CHANGELOG 머리에 있다" "$(claim_base_missing "$MDIR" "$CHLOG" "${RSINCE:-0}")" "0"
+TGFX=$(target_fixture)
+chk "O42: 대상 통제 - 회고 v2.0.0이면 기반 규칙의 M1만 대상이다(표지 v3.0.0은 아직 회고 위)" "$(target_claims "$TGFX" 2.0.0 "$CHFX" 5 | tr '\n' ' ' | sed 's/ $//')" "k1"
+chk "O43: 대상 통제 - 회고 v3.0.0이면 M1·M2와 표지가 같은 M6이 대상이다(도입 번호 자리의 무표지 M5는 아니다)" "$(target_claims "$TGFX" 3.0.0 "$CHFX" 5 | tr '\n' ' ' | sed 's/ $//')" "k1 k2 k6"
+chk "O44: 통제 - 머리에 없는 판정 값(기반 M4 · 표지 M7)의 선언을 따로 센다" "$(claim_base_missing "$TGFX" "$CHFX" 5)" "2"
+chk "O45: 순서 규칙 병기어가 milestone 스킬에 있다" "$(scope_tok "$ROOT/skills/milestone/SKILL.md" "$RCAD")" "yes"
+# (O46~O52 · M70 리뷰 라운드 0 차단) **릴리즈 표지** — debug 릴리즈가 기반 버전 규칙을 거짓으로 만들어, 도입 번호
+# 이상의 마일스톤은 릴리즈가 남긴 `- released:` 표지로 가린다. 릴리즈가 표지를 **통째로** 빠뜨렸는가는 묻지 않는다
+# (규약의 경계 — 다음 표지 릴리즈가 늦은 버전으로 메운다). 한 릴리즈가 일부만 표지하고 건너뛴 것은 아래 `O53`이 문다.
+chk "O46: retro-release-mark 선언 줄 정확히 1개" "$(decl_count "$CONV" 'retro-release-mark:')" "1"
+chk "O47: retro-mark-since 선언 줄 정확히 1개" "$(decl_count "$CONV" 'retro-mark-since:')" "1"
+chk "O48: 표지 도입 번호 추출 positive-control(M{숫자})" "$([ -n "$RSINCE" ] && echo ok || echo no)" "ok"
+chk "O49: 릴리즈 표지 병기어가 재서술처 둘에 공존" "$(scope_tok "$ROOT/skills/release/SKILL.md" "$RMARK")$(scope_tok "$ROOT/docs/commands.md" "$RMARK")" "yesyes"
+chk "O50: 본 검사 - 표지 줄이 둘 이상인 마일스톤 문서 0개" "$(mark_dup "$MDIR")" "0"
+chk "O51: 통제 - 표지 줄이 둘인 문서를 센다" "$(mark_dup "$(markdup_fixture)")" "1"
+chk "O52: 세 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" 'retro-release-mark:')$(bad_seps "$CONV" 'retro-mark-since:')$(bad_seps "$CONV" 'retro-mark-derive:')" "000"
+# (O53~O55 · M70 리뷰 라운드 1 차단) **표지 누락** — 표지 대상이 「이번 태그에 실리는 마일스톤 전부」라, 표지가 선
+# 마일스톤 아래에서 impl 보고서가 있는데 표지가 없는 문서는 누락이다(갈래 ⓐ의 공허 통과를 붉힌다). 통제는 합성
+# 픽스처 두 벌(누락 있음 · 없음)에 **같은 함수**를 먹인다 — 도입 번호 미만 · 초안 · 가장 큰 표지 위와 표지 둘을
+# 함께 둔다. 붉히는 것은 한 릴리즈의 **부분** 누락이고, 통째 누락은 다음 릴리즈가 늦은 버전으로 메워 닿지 않는다.
+chk "O53: 본 검사 - 표지가 있는 마일스톤 아래의 표지 누락 0개" "$(mark_gap "$MDIR" "$ROOT/docs/reports" "${RSINCE:-0}")" "0"
+GPFX=$(gap_fixture gap)
+chk "O54: 통제 - 가장 큰 표지 M9 아래의 impl 있는 무표지 M5(도입 번호 자리)·M7을 센다(M4 도입 전 · M8 초안 · M10 가장 큰 표지 위는 아니다)" "$(mark_gap "$GPFX/m" "$GPFX/r" 5)" "2"
+GPCL=$(gap_fixture clean)
+chk "O55: 음성 통제 - M5·M7에도 표지가 있으면 0이다" "$(mark_gap "$GPCL/m" "$GPCL/r" 5)" "0"
+# (O56~O59 · M70 리뷰 라운드 3 차단) **도입 번호는 대상 레포로 폴백하지 않는다**(`mark-since-derived`) — 선언이 없는 레포는
+# 가장 작은 표지 번호를 도입 번호로 쓴다. 이 저장소에서는 그 파생 값이 선언과 같아야 한다(표지가 없으면 선언 그대로).
+# 통제는 clean(표지 M5·M6·M7·M9) · gap(표지 M6·M9) · 표지 없는 디렉터리에 **같은 함수**를 먹인다 — 가장 큰 표지를
+# 쓰면 9·9, 추출을 죽이면 빈 값이 나온다. 대상 레포에서 파생이 실제로 도는가는 묻지 않는다(하니스가 거기서 돌지 않는다).
+RSMIN=$(mark_since "$MDIR")
+chk "O56: 본 검사 - 표지가 있으면 가장 작은 표지 번호가 선언된 도입 번호와 같다" "$([ -n "$RSINCE" ] && [ "${RSMIN:-$RSINCE}" = "$RSINCE" ] && echo ok || echo no)" "ok"
+mkdir -p "$SBX/nomark-milestones"
+printf '%s\n' '# M1' > "$SBX/nomark-milestones/M1.md"
+chk "O57: 통제 - 가장 작은 표지 번호(clean 5 · gap 6 · 표지 없음 빈 값)" "$(mark_since "$GPCL/m")|$(mark_since "$GPFX/m")|$(mark_since "$SBX/nomark-milestones")" "5|6|"
+chk "O58: retro-mark-derive 선언 줄 정확히 1개" "$(decl_count "$CONV" 'retro-mark-derive:')" "1"
+chk "O59: 도입 번호 파생 병기어가 재서술처 셋에 공존" "$(scope_tok "$ROOT/skills/release/SKILL.md" "$RDERIVE")$(scope_tok "$ROOT/skills/retro/SKILL.md" "$RDERIVE")$(scope_tok "$ROOT/docs/commands.md" "$RDERIVE")" "yesyesyes"
 fi
 
 # --- Part P: 완료 기준 대조 (M55) --------------------------------------------
@@ -4701,6 +4916,21 @@ chk "W87: 부재 잡 토큰이 앵커와 같은 항목 창에 있다" "${ABSENT_
 chk "W88: 부재 잡 단계 앵커가 파일에서 그 창 안에만 있다" "$(win_unique "$ABSENT_WIN")" "ok"
 chk "W89: 통제 - 앵커 밖 항목 창의 부재 잡 토큰을 잡는다" "$(item_win_probe "$SBX/winfx_absent.md" "$ABSENT_ALIAS" "$ABSENT_ANCHOR" | LC_ALL=C awk '{ print $1 }')" "no"
 chk "W90: absent-job-anchor 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" 'absent-job-anchor:')" "0"
+# (W91~W98 · M70) **새 판정의 생명주기 상태표** — 규약 "새 판정의 생명주기 상태표" 소절의 병기어와 재서술처
+# 둘(impl SKILL · impl 템플릿). `lean-decl:`(W58~W66)과 같은 형태이되 재서술처 집합이 달라 세 파일 결합을
+# `in_all_three`로 묻는다. 표가 상태 목록을 빠짐없이 덮는가·실측이 정말 돌았는가는 묻지 않는다(규약이 리뷰의 층에 둔다).
+LIFE_KEY='lifecycle-decl:'
+LIFE_ALIAS=$(decl_tail "$CONV" "$LIFE_KEY" | LC_ALL=C awk '{ print $1 }')
+[ -n "$LIFE_ALIAS" ] || LIFE_ALIAS=zzz-lifecycle-decl-unset
+chk "W91: lifecycle-decl 선언 줄 정확히 1개" "$(decl_count "$CONV" "$LIFE_KEY")" "1"
+chk "W92: 생명주기 병기어 추출 positive-control" "$([ "$LIFE_ALIAS" != zzz-lifecycle-decl-unset ] && echo ok || echo no)" "ok"
+chk "W93: 생명주기 병기어($LIFE_ALIAS) 세 파일 전부에 등장" "$(in_all_three "$LIFE_ALIAS" "$CONV" "$IMPL_SKILL" "$IMPL_TPL")" "yes"
+chk "W94: 규약이 생명주기 병기어의 정의 줄을 정확히 하나 갖는다" "$(scope_defn "$LIFE_ALIAS")" "1"
+chk "W95: impl SKILL이 생명주기 병기어를 백틱 토큰으로 갖는다" "$(scope_tok "$IMPL_SKILL" "$LIFE_ALIAS")" "yes"
+chk "W96: impl 템플릿이 생명주기 병기어를 백틱 토큰으로 갖는다" "$(scope_tok "$IMPL_TPL" "$LIFE_ALIAS")" "yes"
+# (W97) **배선** — `W65`와 같은 형태(인자로 준 토큰은 어느 파일에도 없어 기준선이 구조로 상수다).
+chk "W97: 배선 - 다른 생명주기 병기어를 주면 결합이 성립하지 않는다" "$(in_all_three zzz-other-lifecycle "$CONV" "$IMPL_SKILL" "$IMPL_TPL")" "no"
+chk "W98: lifecycle-decl 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$LIFE_KEY")" "0"
 chk "W27: measure-cache 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$MC_KEY")" "0"
 # (W28~W29) **표지 키 둘**에는 같은 금지를 다른 사유로 건다 — `markers_of`의 분리 폭은 두 사본 모두
 # ASCII 공백 하나로 못박혀 있어 금지 문자가 축을 **가르지 않는다**. 대신 **표지 둘을 한 토큰으로
