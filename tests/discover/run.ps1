@@ -3246,7 +3246,7 @@ try {
     $rBlk = @(((DeclTail $CONV 'retro-block:') -split '\s+') | Where-Object { $_ -ne '' })[0]
     if ($null -eq $rBlk) { $rBlk = '' }
     $rFirst = if ($rStatSet.Count -gt 0) { $rStatSet[0] } else { '' }
-    # (O15-O40 / M69) RETRO CADENCE AND THE "CLAIMED ROW" DECLARATION -- where O1-O14 ask about the
+    # (O15-O59 / M69-M70) RETRO CADENCE AND THE "CLAIMED ROW" DECLARATION -- where O1-O14 ask about the
     # table's STATUS SET and the uniqueness of the WINDOW, these ask whether that window is STALE and
     # whether a milestone's claim is still TRACKED. The backstop value is the top release-note version
     # in `CHANGELOG.md`: the version file differs per project so its path cannot be pinned here (the
@@ -3299,11 +3299,8 @@ try {
     # The metadata key of `skills/milestone/template.md` ("- " + base-version in Korean + ":"), built
     # from code points because this copy carries no non-ASCII (tests/discover F5).
     $BASE_KEY = '- ' + (Uni 0xAE30, 0xBC18, 0x20, 0xBC84, 0xC804) + ':'
-    function BaseVer([string]$mdir = $MDIR) {
-        # -> the digits-and-dots token after `v` in the highest-numbered milestone's base-version line.
-        $bm = MstMax $mdir
-        if ($bm -eq '') { return '' }
-        $f = Join-Path $mdir ('M' + $bm + '.md')
+    function DocBase([string]$f) {
+        # -> the digits-and-dots token after `v` in that doc's base-version line ('' when absent).
         if (-not (Test-Path -LiteralPath $f)) { return '' }
         foreach ($l in [System.IO.File]::ReadAllLines($f)) {
             if (-not $l.StartsWith($BASE_KEY, [System.StringComparison]::Ordinal)) { continue }
@@ -3316,6 +3313,41 @@ try {
             return $v
         }
         return ''
+    }
+    function BaseVer([string]$mdir = $MDIR) {
+        # -> the base version of the highest-numbered milestone doc.
+        $bm = MstMax $mdir
+        if ($bm -eq '') { return '' }
+        return (DocBase (Join-Path $mdir ('M' + $bm + '.md')))
+    }
+    function VerRank([string]$chlog, [string]$ver) {
+        # -> the 1-based position of the `### [` header carrying $ver (1 = newest; '' when absent).
+        # POSITIONS ARE COMPARED, NOT VERSION NUMBERS (same grounds as the backstop).
+        if ($ver -eq '' -or -not (Test-Path -LiteralPath $chlog)) { return '' }
+        $n = 0
+        foreach ($l in [System.IO.File]::ReadAllLines($chlog)) {
+            if (-not $l.StartsWith('### [', [System.StringComparison]::Ordinal)) { continue }
+            $n++
+            $i = $l.IndexOf('[v', [System.StringComparison]::Ordinal)
+            if ($i -lt 0) { continue }
+            $v = ''
+            foreach ($c in $l.Substring($i + 2).ToCharArray()) {
+                if (($c -ge '0' -and $c -le '9') -or $c -eq '.') { $v += $c } else { break }
+            }
+            if ([string]::Equals($v, $ver, [System.StringComparison]::Ordinal)) { return [string]$n }
+        }
+        return ''
+    }
+    function DocClaims([string]$f) {
+        # -> the keys on that doc's first `- retro-rows:` line.
+        $out = New-Object System.Collections.ArrayList
+        foreach ($l in [System.IO.File]::ReadAllLines($f)) {
+            if (-not $l.StartsWith('- retro-rows:', [System.StringComparison]::Ordinal)) { continue }
+            $tail = $l.Substring('- retro-rows:'.Length).Replace([string][char]13, '')
+            foreach ($k in ($tail -split '[ \t]')) { if ($k -ne '') { [void]$out.Add($k) } }
+            break
+        }
+        return $out.ToArray()
     }
     function ChlogFixture {
         # A SYNTHETIC CHANGELOG with three release headers (v3.0.0, v2.0.0, v1.0.0). It does not lean on
@@ -3360,28 +3392,202 @@ try {
         return $out.ToArray()
     }
     function RetroKeys([string]$path) { return @(RetroPairs $path | ForEach-Object { $_.Split(' ')[0] }) }
+    function DocReleased([string]$f) {
+        # -> the digits-and-dots token after `v` on the doc's first `- released:` line (the release mark).
+        if (-not (Test-Path -LiteralPath $f)) { return '' }
+        foreach ($l in [System.IO.File]::ReadAllLines($f)) {
+            if (-not $l.StartsWith('- released:', [System.StringComparison]::Ordinal)) { continue }
+            $t = $l.Substring('- released:'.Length).TrimStart([char[]]@(32, 9))
+            if (-not $t.StartsWith('v', [System.StringComparison]::Ordinal)) { return '' }
+            $v = ''
+            foreach ($c in $t.Substring(1).ToCharArray()) {
+                if (($c -ge '0' -and $c -le '9') -or $c -eq '.') { $v += $c } else { break }
+            }
+            return $v
+        }
+        return ''
+    }
+    function MstNum([string]$name) {
+        # -> the number when the name is exactly `M{digits}.md` (CASE-SENSITIVE, like the .sh glob/case), else ''.
+        if ($name -cmatch '^M([0-9]+)\.md$') { return $Matches[1] }
+        return ''
+    }
+    function TargetClaims([string]$mdir, [string]$rver, [string]$chlog, [int]$since) {
+        # -> claimed keys of STALE TARGETS, ordinal-sorted. Number >= $since: picked by the RELEASE MARK -- a
+        # target when the mark's header is at or below the retro's header. No mark -> not a target (in progress,
+        # or only a debug release shipped: M70 review round 0 blocker). Number < $since: picked by the BASE
+        # VERSION -- a target when its header is below the retro's header (milestones released before the mark
+        # existed). The highest number is not a signal. Either position missing -> not a target (O41).
+        $out = New-Object 'System.Collections.Generic.List[string]'
+        $rr = VerRank $chlog $rver
+        if ($rr -eq '') { return @() }
+        foreach ($f in Get-ChildItem -LiteralPath $mdir -Filter 'M*.md' -ErrorAction SilentlyContinue) {
+            $num = MstNum $f.Name
+            if ($num -eq '') { continue }
+            if ([int]$num -ge $since) {
+                $rb = VerRank $chlog (DocReleased $f.FullName)
+                if ($rb -eq '') { continue }
+                if ([int]$rr -le [int]$rb) { foreach ($k in @(DocClaims $f.FullName)) { $out.Add($k) } }
+            } else {
+                $rb = VerRank $chlog (DocBase $f.FullName)
+                if ($rb -eq '') { continue }
+                if ([int]$rr -lt [int]$rb) { foreach ($k in @(DocClaims $f.FullName)) { $out.Add($k) } }
+            }
+        }
+        $arr = $out.ToArray()
+        [Array]::Sort($arr, [System.StringComparer]::Ordinal)
+        return $arr
+    }
+    function ClaimBaseMissing([string]$mdir, [string]$chlog, [int]$since) {
+        # -> declaring docs whose judged value has no CHANGELOG header. Judged value: the mark (only when a
+        # mark line exists) for numbers >= $since, the base version below. Same name filter as TargetClaims
+        # (M70 review round 0, minor 2).
+        $n = 0
+        foreach ($f in Get-ChildItem -LiteralPath $mdir -Filter 'M*.md' -ErrorAction SilentlyContinue) {
+            $num = MstNum $f.Name
+            if ($num -eq '') { continue }
+            $lines = [System.IO.File]::ReadAllLines($f.FullName)
+            $hasRows = $false; $hasMark = $false
+            foreach ($l in $lines) {
+                if ($l.StartsWith('- retro-rows:', [System.StringComparison]::Ordinal)) { $hasRows = $true }
+                if ($l.StartsWith('- released:', [System.StringComparison]::Ordinal)) { $hasMark = $true }
+            }
+            if (-not $hasRows) { continue }
+            if ([int]$num -ge $since) {
+                if (-not $hasMark) { continue }
+                $v = DocReleased $f.FullName
+            } else {
+                $v = DocBase $f.FullName
+            }
+            if ((VerRank $chlog $v) -eq '') { $n++ }
+        }
+        return $n
+    }
+    function MarkDup([string]$mdir) {
+        # -> docs carrying more than one `- released:` line.
+        $n = 0
+        foreach ($f in Get-ChildItem -LiteralPath $mdir -Filter 'M*.md' -ErrorAction SilentlyContinue) {
+            if ((MstNum $f.Name) -eq '') { continue }
+            $c = 0
+            foreach ($l in [System.IO.File]::ReadAllLines($f.FullName)) {
+                if ($l.StartsWith('- released:', [System.StringComparison]::Ordinal)) { $c++ }
+            }
+            if ($c -gt 1) { $n++ }
+        }
+        return $n
+    }
+    function TargetFixture {
+        # -> seven synthetic milestones, read with mark-since 5. M1-M4 by base version: M1 v1.0.0 k1, M2 v2.0.0 k2,
+        # M3 v3.0.0 k3, M4 v9.9.9 k4 (no header). M5-M7 by mark (base v2.0.0 for all): M5 no mark k5 (in
+        # progress, only a debug release shipped), M6 mark v3.0.0 k6, M7 mark v8.8.8 k7 (no header). An UNMARKED
+        # doc AT the since-number (M5) tells `-ge` from `-gt` -- with `-gt` M5 falls to the base rule and becomes a
+        # target at retro v3.0.0 (M70 review round 3, recommendation 3).
+        $d = Join-Path $sbx 'target-milestones'
+        New-Item -ItemType Directory -Force -Path $d | Out-Null
+        $enc = New-Object System.Text.UTF8Encoding($false)
+        foreach ($pair in @(@('1', '1.0.0'), @('2', '2.0.0'), @('3', '3.0.0'), @('4', '9.9.9'), @('5', '2.0.0'), @('6', '2.0.0'), @('7', '2.0.0'))) {
+            $lines = New-Object System.Collections.ArrayList
+            [void]$lines.Add('# M' + $pair[0]); [void]$lines.Add($BASE_KEY + ' v' + $pair[1]); [void]$lines.Add('- retro-rows: k' + $pair[0])
+            if ($pair[0] -eq '6') { [void]$lines.Add('- released: v3.0.0') }
+            if ($pair[0] -eq '7') { [void]$lines.Add('- released: v8.8.8') }
+            [System.IO.File]::WriteAllLines((Join-Path $d ('M' + $pair[0] + '.md')), [string[]]$lines.ToArray(), $enc)
+        }
+        return $d
+    }
+    function MarkdupFixture {
+        # -> a dir holding one doc with two mark lines.
+        $d = Join-Path $sbx 'markdup-milestones'
+        New-Item -ItemType Directory -Force -Path $d | Out-Null
+        [System.IO.File]::WriteAllLines((Join-Path $d 'M1.md'), [string[]]@('# M1', '- released: v1.0.0', '- released: v2.0.0'), (New-Object System.Text.UTF8Encoding($false)))
+        return $d
+    }
+    function HasMark([string]$f) {
+        # -> $true when the doc has a `- released:` line (the same line prefix MarkDup counts).
+        foreach ($l in [System.IO.File]::ReadAllLines($f)) {
+            if ($l.StartsWith('- released:', [System.StringComparison]::Ordinal)) { return $true }
+        }
+        return $false
+    }
+    function MarkGap([string]$mdir, [string]$rdir, [int]$since) {
+        # -> MISSING MARKS BELOW A MARKED MILESTONE (M70 review round 1 blocker, path a). The mark goes on EVERY
+        # milestone shipped by the tag (number >= since, impl report present, no mark yet), so a doc numbered below
+        # a marked milestone that meets those conditions should have been marked by that release -- ONE release
+        # marked some and skipped a lower one. Nothing ABOVE the highest marked number is asked. A release that
+        # omits the mark ENTIRELY never reaches here: the next marking release fills it with its own version (the
+        # convention's boundary -- M70 review round 2 blocker).
+        $top = 0
+        foreach ($f in Get-ChildItem -LiteralPath $mdir -Filter 'M*.md' -ErrorAction SilentlyContinue) {
+            $n = MstNum $f.Name
+            if ($n -eq '') { continue }
+            if (-not (HasMark $f.FullName)) { continue }
+            if ([int]$n -gt $top) { $top = [int]$n }
+        }
+        $c = 0
+        foreach ($f in Get-ChildItem -LiteralPath $mdir -Filter 'M*.md' -ErrorAction SilentlyContinue) {
+            $n = MstNum $f.Name
+            if ($n -eq '') { continue }
+            if ([int]$n -lt $since) { continue }
+            if ([int]$n -ge $top) { continue }
+            if (-not (Test-Path -LiteralPath (Join-Path $rdir ('M' + $n + '-impl.md')))) { continue }
+            if (HasMark $f.FullName) { continue }
+            $c++
+        }
+        return $c
+    }
+    function GapFixture([string]$kind) {
+        # -> seven milestones plus impl reports, read with mark-since 5. M4 impl, no mark (below since); M5 impl,
+        # no mark (gap) / v1.0.0 (clean); M6 impl, mark v1.0.0; M7 impl, no mark (gap) / v2.0.0 (clean); M8 draft
+        # (no impl, no mark); M9 impl, mark v2.0.0; M10 impl, no mark (above the highest mark -- in progress).
+        # With gap the misses are M5 and M7.
+        # - Two or more marks (M6, M9) tell the HIGHEST mark from the LOWEST one (M70 review round 2,
+        #   recommendation 3 -- with the lowest mark M6, M7 sits above it and the count is 1).
+        # - An impl-reported UNMARKED doc AT the since-number (M5) tells `-lt` from `-le` (M70 review round 3,
+        #   recommendation 3 -- with `-le` M5 drops out and the count is 1).
+        $d = Join-Path $sbx ('gap-' + $kind)
+        $md = Join-Path $d 'm'; $rd = Join-Path $d 'r'
+        New-Item -ItemType Directory -Force -Path $md | Out-Null
+        New-Item -ItemType Directory -Force -Path $rd | Out-Null
+        $enc = New-Object System.Text.UTF8Encoding($false)
+        foreach ($n in @('4', '5', '6', '7', '8', '9', '10')) {
+            $lines = New-Object System.Collections.ArrayList
+            [void]$lines.Add('# M' + $n)
+            if ($n -eq '6' -or ($n -eq '5' -and $kind -eq 'clean')) { [void]$lines.Add('- released: v1.0.0') }
+            if ($n -eq '9' -or ($n -eq '7' -and $kind -eq 'clean')) { [void]$lines.Add('- released: v2.0.0') }
+            [System.IO.File]::WriteAllLines((Join-Path $md ('M' + $n + '.md')), [string[]]$lines.ToArray(), $enc)
+            if ($n -ne '8') { [System.IO.File]::WriteAllLines((Join-Path $rd ('M' + $n + '-impl.md')), [string[]]@('# M' + $n + ' impl'), $enc) }
+        }
+        return $d
+    }
+    function MarkSince([string]$mdir) {
+        # -> the LOWEST number among marked milestones ('' when none). THE TARGET REPO'S DERIVED SINCE-NUMBER
+        # (`mark-since-derived` -- M70 review round 3 blocker): a repo without the declaration uses this value. In
+        # this repo it must equal the declaration (a retroactive mark below the since-number turns red here). The
+        # mark test is the same line prefix MarkDup counts.
+        $m = -1
+        foreach ($f in Get-ChildItem -LiteralPath $mdir -Filter 'M*.md' -ErrorAction SilentlyContinue) {
+            $n = MstNum $f.Name
+            if ($n -eq '') { continue }
+            if (-not (HasMark $f.FullName)) { continue }
+            if ($m -lt 0 -or [int]$n -lt $m) { $m = [int]$n }
+        }
+        if ($m -lt 0) { return '' }
+        return [string]$m
+    }
     function MstMax([string]$mdir = $MDIR) {
         # -> the highest number AS WRITTEN in the file name ('' when none) -- BaseVer builds the doc
         # path from that string, the same shape as the .sh twin.
         $n = -1; $s = ''
         foreach ($f in Get-ChildItem -LiteralPath $mdir -Filter 'M*.md' -ErrorAction SilentlyContinue) {
-            if ($f.Name -match '^M([0-9]+)\.md$') { $v = [int]$Matches[1]; if ($v -gt $n) { $n = $v; $s = $Matches[1] } }
+            if ($f.Name -cmatch '^M([0-9]+)\.md$') { $v = [int]$Matches[1]; if ($v -gt $n) { $n = $v; $s = $Matches[1] } }
         }
         return $s
     }
-    function MstClaims([bool]$excludeMax, [string]$mdir = $MDIR) {
-        $mm = MstMax $mdir
-        $mmi = if ($mm -eq '') { 0 } else { [int]$mm }
+    function MstClaims([string]$mdir = $MDIR) {
+        # -> every declared key across all `M{number}.md` docs. Target selection lives in TargetClaims (M70).
         $out = New-Object System.Collections.ArrayList
         foreach ($f in Get-ChildItem -LiteralPath $mdir -Filter 'M*.md' -ErrorAction SilentlyContinue) {
-            if (-not ($f.Name -match '^M([0-9]+)\.md$')) { continue }
-            if ($excludeMax -and [int]$Matches[1] -eq $mmi) { continue }
-            foreach ($l in [System.IO.File]::ReadAllLines($f.FullName)) {
-                if (-not $l.StartsWith('- retro-rows:', [System.StringComparison]::Ordinal)) { continue }
-                $tail = $l.Substring('- retro-rows:'.Length).Replace([string][char]13, '')
-                foreach ($k in ($tail -split '[ \t]')) { if ($k -ne '') { [void]$out.Add($k) } }
-                break
-            }
+            if (-not ($f.Name -cmatch '^M([0-9]+)\.md$')) { continue }
+            foreach ($k in @(DocClaims $f.FullName)) { [void]$out.Add($k) }
         }
         return $out.ToArray()
     }
@@ -3400,7 +3606,7 @@ try {
     }
     function ClaimExtractOk([string]$mdir) {
         # O31's verdict as a function -- O35 feeds a declaration-free copy to this SAME function.
-        if ((MstClaimDocs $mdir) -eq 0 -or (@(MstClaims $false $mdir)).Count -gt 0) { return 'ok' }
+        if ((MstClaimDocs $mdir) -eq 0 -or (@(MstClaims $mdir)).Count -gt 0) { return 'ok' }
         return 'no'
     }
     function SilenceFixture {
@@ -3631,19 +3837,28 @@ try {
     Chk "O13: control -- two windows are caught" ([string](RetroBlocks (RetroFixture 'dup'))) '2'
     # False-positive direction -- an untouched copy still has exactly one.
     Chk "O14: false-positive direction -- untouched copy has one window" ([string](RetroBlocks (RetroFixture 'clean'))) '1'
-    # (O15-O40 / M69) The three main checks are (1) did the retro run after the release (the backstop),
+    # (O15-O59 / M69-M70) The three main checks are (1) did the retro run after the release (the backstop),
     # (2) is each declared row key still tracked, (3) does a released milestone claim a row that is
     # still untaken. Controls feed keys and copies to the SAME functions (the M46/M47 precedent).
     Chk "O15: retro-cadence declaration line is exactly 1" (DeclCount $CONV 'retro-cadence:') '1'
     Chk "O16: retro-pick declaration line is exactly 1" (DeclCount $CONV 'retro-pick:') '1'
     Chk "O17: retro base-version extraction positive-control" $(if ((FirstVer $RETRO '## ') -ne '') { 'ok' } else { 'no' }) 'ok'
     $RBASE = BaseVer $MDIR
+    $RVER = FirstVer $RETRO '## '
+    $RMARK = @(((DeclTail $CONV 'retro-release-mark:') -split '\s+') | Where-Object { $_ -ne '' })[0]
+    if ($null -eq $RMARK -or $RMARK -eq '') { $RMARK = 'zzz-retro-release-mark-unset' }
+    $RDERIVE = @(((DeclTail $CONV 'retro-mark-derive:') -split '\s+') | Where-Object { $_ -ne '' })[0]
+    if ($null -eq $RDERIVE -or $RDERIVE -eq '') { $RDERIVE = 'zzz-retro-mark-derive-unset' }
+    $rSinceTok = @(((DeclTail $CONV 'retro-mark-since:') -split '\s+') | Where-Object { $_ -ne '' })[0]
+    $RSINCE = ''
+    if ($null -ne $rSinceTok -and $rSinceTok -cmatch '^M([0-9]+)$') { $RSINCE = $Matches[1] }
+    $RSINCE_N = if ($RSINCE -eq '') { 0 } else { [int]$RSINCE }
     Chk "O18: main check -- the topmost retro base version matches CHANGELOG (the second header too on a release commit)" (BackstopVerdict (FirstVer $RETRO '## ') (NthVer $CHLOG '### [' 1) (NthVer $CHLOG '### [' 2) $RBASE) 'ok'
     Chk "O19: control -- a copy whose base version lags is caught" (BackstopVerdict (FirstVer (RetroVerFixture 'badver') '## ') (NthVer $CHLOG '### [' 1) (NthVer $CHLOG '### [' 2) $RBASE) 'no'
     Chk "O20: row-key extraction positive-control (>0)" $(if ((@(RetroKeys $RETRO)).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
-    Chk "O21: main check -- every declared row key exists in the topmost table" ([string](ClaimMissing $RETRO (MstClaims $false))) '0'
+    Chk "O21: main check -- every declared row key exists in the topmost table" ([string](ClaimMissing $RETRO (MstClaims))) '0'
     Chk "O22: control -- a key absent from the table is caught" ([string](ClaimMissing $RETRO @('zzz-key-gone'))) '1'
-    Chk "O23: main check -- no claim outside the highest number is still untaken" ([string](ClaimStale $RETRO (MstClaims $true))) '0'
+    Chk "O23: main check -- no claim of a milestone above a release the retro saw is still untaken" ([string](ClaimStale $RETRO (TargetClaims $MDIR $RVER $CHLOG $RSINCE_N))) '0'
     Chk "O24: control -- the key of an untaken row is caught" ([string](ClaimStale $RETRO @((KeyWithStat $RETRO $rUndone)))) '1'
     Chk "O25: negative control -- the key of a taken row is not counted" ([string](ClaimStale $RETRO @((KeyWithStat $RETRO $rFirst)))) '0'
     Chk "O26: no forbidden separator in the retro-cadence declaration tail" (BadSeps $CONV 'retro-cadence:') '0'
@@ -3664,7 +3879,7 @@ try {
     # construction (round 1, recommendation 3). A declaration-free COPY goes through extraction, the
     # conditional control and both main checks -- the SAME functions.
     $SILM = SilenceFixture
-    Chk "O35: negative control -- a declaration-free doc set keeps the extraction control and verdicts quiet" ((ClaimExtractOk $SILM) + [string](ClaimMissing $RETRO (MstClaims $false $SILM)) + [string](ClaimStale $RETRO (MstClaims $true $SILM))) 'ok00'
+    Chk "O35: negative control -- a declaration-free doc set keeps the extraction control and verdicts quiet" ((ClaimExtractOk $SILM) + [string](ClaimMissing $RETRO (MstClaims $SILM)) + [string](ClaimStale $RETRO (TargetClaims $SILM $RVER $CHLOG $RSINCE_N))) 'ok00'
     # (O36-O40 / M69 review rounds 2-3) THE BACKSTOP'S RELEASE-COMMIT BRANCH -- closing the blocker where O18
     # went red on release commits, with a control per direction. Verdict values come from SYNTHETIC fixtures.
     $CHFX = ChlogFixture
@@ -3673,6 +3888,51 @@ try {
     Chk "O38: control -- two releases behind is caught" (BackstopVerdict '1.0.0' (NthVer $CHFX '### [' 1) (NthVer $CHFX '### [' 2) '1.0.0') 'no'
     Chk "O39: base-version extraction positive-control (real highest-numbered doc)" $(if ($RBASE -ne '') { 'ok' } else { 'no' }) 'ok'
     Chk "O40: base-version extraction control -- reads the numerically highest doc and drops the trailing note" (BaseVer (BaseFixture)) '2.0.0'
+    # (O41-O45 / M70) STALE TARGETS ARE PICKED BY BASE-VERSION POSITION -- replacing "skip the highest number".
+    # Controls feed synthetic milestones and the synthetic CHANGELOG to the SAME functions, one per direction
+    # (all-in, all-out, old highest-number rule, equal/below boundary, base with no header).
+    Chk "O41: every declaring milestone's base version has a CHANGELOG header" ([string](ClaimBaseMissing $MDIR $CHLOG $RSINCE_N)) '0'
+    $TGFX = TargetFixture
+    Chk "O42: target control -- with retro v2.0.0 only M1 (base rule) is a target (mark v3.0.0 is still above the retro)" ((@(TargetClaims $TGFX '2.0.0' $CHFX 5)) -join ' ') 'k1'
+    Chk "O43: target control -- with retro v3.0.0 M1, M2 and the equal-mark M6 are targets (unmarked M5 at the since-number is not)" ((@(TargetClaims $TGFX '3.0.0' $CHFX 5)) -join ' ') 'k1 k2 k6'
+    Chk "O44: control -- claims whose judged value has no header (base M4, mark M7) are counted separately" ([string](ClaimBaseMissing $TGFX $CHFX 5)) '2'
+    Chk "O45: the ordering-rule alias is present in the milestone skill" (ScopeTok (Join-Path $ROOT 'skills/milestone/SKILL.md') $RCAD) 'yes'
+    # (O46-O52 / M70 review round 0 blocker) THE RELEASE MARK -- a debug release made the base-version rule
+    # false, so milestones at or above the since-number are picked by the `- released:` mark the release leaves.
+    # Whether a release omitted the mark ENTIRELY is not asked (the convention's boundary -- the next marking
+    # release fills it with a later version). A release that marked some and skipped a lower one is bitten by O53.
+    Chk "O46: retro-release-mark declaration line is exactly 1" (DeclCount $CONV 'retro-release-mark:') '1'
+    Chk "O47: retro-mark-since declaration line is exactly 1" (DeclCount $CONV 'retro-mark-since:') '1'
+    Chk "O48: mark since-number extraction positive-control (M{digits})" $(if ($RSINCE -ne '') { 'ok' } else { 'no' }) 'ok'
+    Chk "O49: the release-mark co-term is present at both restatement sites" ((ScopeTok (Join-Path $ROOT 'skills/release/SKILL.md') $RMARK) + (ScopeTok (Join-Path $ROOT 'docs/commands.md') $RMARK)) 'yesyes'
+    Chk "O50: main check -- milestone docs carrying more than one mark line: 0" ([string](MarkDup $MDIR)) '0'
+    Chk "O51: control -- a doc with two mark lines is counted" ([string](MarkDup (MarkdupFixture))) '1'
+    Chk "O52: no forbidden separator in the three declaration tails" ((BadSeps $CONV 'retro-release-mark:') + (BadSeps $CONV 'retro-mark-since:') + (BadSeps $CONV 'retro-mark-derive:')) '000'
+    # (O53-O55 / M70 review round 1 blocker) MISSING MARKS -- the mark goes on every milestone the tag ships, so
+    # below a marked milestone an impl-reported doc without a mark is a miss (it turns path a's vacuous pass red).
+    # The controls feed two synthetic fixtures (miss / no miss) to the SAME function, with a below-since doc, a
+    # draft, a doc above the highest mark and TWO marks present in both. What turns red is a PARTIAL omission by one
+    # release; an entire omission is filled by the next release with a later version and never reaches here.
+    Chk "O53: main check -- missing marks below a marked milestone: 0" ([string](MarkGap $MDIR (Join-Path $ROOT 'docs/reports') $RSINCE_N)) '0'
+    $GPFX = GapFixture 'gap'
+    Chk "O54: control -- below the highest mark M9 the impl-reported unmarked M5 (at the since-number) and M7 count (M4 below since, M8 draft, M10 above the highest mark do not)" ([string](MarkGap (Join-Path $GPFX 'm') (Join-Path $GPFX 'r') 5)) '2'
+    $GPCL = GapFixture 'clean'
+    Chk "O55: negative control -- with M5 and M7 marked too the count is 0" ([string](MarkGap (Join-Path $GPCL 'm') (Join-Path $GPCL 'r') 5)) '0'
+    # (O56-O59 / M70 review round 3 blocker) THE SINCE-NUMBER DOES NOT FALL BACK TO TARGET REPOS (`mark-since-derived`)
+    # -- a repo without the declaration uses the lowest marked number. In this repo that derived value must equal
+    # the declaration (with no mark it is the declaration itself). The control feeds clean (marks M5, M6, M7, M9),
+    # gap (marks M6, M9) and a mark-free dir to the SAME function -- the highest mark gives 9 and 9, a dead
+    # extraction gives empty values. Whether the derivation really runs in a target repo is not asked (the
+    # harness never runs there).
+    $RSMIN = MarkSince $MDIR
+    $rsEff = if ($RSMIN -eq '') { $RSINCE } else { $RSMIN }
+    Chk "O56: main check -- when a mark exists the lowest marked number equals the declared since-number" $(if ($RSINCE -ne '' -and $rsEff -eq $RSINCE) { 'ok' } else { 'no' }) 'ok'
+    $nomk = Join-Path $sbx 'nomark-milestones'
+    New-Item -ItemType Directory -Force -Path $nomk | Out-Null
+    [System.IO.File]::WriteAllLines((Join-Path $nomk 'M1.md'), [string[]]@('# M1'), (New-Object System.Text.UTF8Encoding($false)))
+    Chk "O57: control -- lowest marked number (clean 5, gap 6, no mark empty)" ((MarkSince (Join-Path $GPCL 'm')) + '|' + (MarkSince (Join-Path $GPFX 'm')) + '|' + (MarkSince $nomk)) '5|6|'
+    Chk "O58: retro-mark-derive declaration line is exactly 1" (DeclCount $CONV 'retro-mark-derive:') '1'
+    Chk "O59: the since-derivation co-term is present at all three restatement sites" ((ScopeTok (Join-Path $ROOT 'skills/release/SKILL.md') $RDERIVE) + (ScopeTok (Join-Path $ROOT 'skills/retro/SKILL.md') $RDERIVE) + (ScopeTok (Join-Path $ROOT 'docs/commands.md') $RDERIVE)) 'yesyesyes'
     }
 
     # --- Part P: completion-criteria cross-check (M55) ----------------------
@@ -5233,6 +5493,27 @@ try {
     Chk "W88: the absent-job step anchor appears in the file only inside that window" (WinUnique $absentWin) 'ok'
     Chk "W89: control -- an absent-job token in an item window without the anchor is caught" ((ItemWinProbe $winFxAbsent $ABSENT_ALIAS $ABSENT_ANCHOR).Split(' ')[0]) 'no'
     Chk "W90: no forbidden separator in the absent-job-anchor declaration tail" (BadSeps $CONV 'absent-job-anchor:') '0'
+    # (W91-W98 / M70) LIFECYCLE STATE TABLE FOR NEW JUDGEMENTS -- the co-term of the convention's subsection and
+    # its two restatement sites (impl SKILL, impl template). Same shape as `lean-decl:` (W58-W66) but a different
+    # site set, so the three-file join uses InAllThree. Whether the table covers every state and whether the
+    # measurement really ran are not asked (the convention puts them in the review's layer).
+    $LIFE_KEY = 'lifecycle-decl:'
+    $LIFE_ALIAS = ''
+    $lifeTail = DeclTail $CONV $LIFE_KEY
+    if ($null -ne $lifeTail) {
+        $lifeA = @($lifeTail -split '[ \t]+' | Where-Object { $_ -ne '' })
+        if ($lifeA.Count -gt 0) { $LIFE_ALIAS = $lifeA[0] }
+    }
+    if ($LIFE_ALIAS -eq '') { $LIFE_ALIAS = 'zzz-lifecycle-decl-unset' }
+    Chk "W91: lifecycle-decl declaration line is exactly 1" (DeclCount $CONV $LIFE_KEY) '1'
+    Chk "W92: lifecycle co-term extraction positive-control" $(if ($LIFE_ALIAS -ne 'zzz-lifecycle-decl-unset') { 'ok' } else { 'no' }) 'ok'
+    Chk "W93: lifecycle co-term ($LIFE_ALIAS) in all three files" (InAllThree $LIFE_ALIAS $CONV $IMPL_SKILL $IMPL_TPL) 'yes'
+    Chk "W94: the convention has exactly one definition line for the lifecycle co-term" (ScopeDefn $LIFE_ALIAS) '1'
+    Chk "W95: impl SKILL carries the lifecycle co-term as a backtick token" (ScopeTok $IMPL_SKILL $LIFE_ALIAS) 'yes'
+    Chk "W96: impl template carries the lifecycle co-term as a backtick token" (ScopeTok $IMPL_TPL $LIFE_ALIAS) 'yes'
+    # (W97) WIRING -- same shape as W65 (the given token is in no file, so the baseline is structurally constant).
+    Chk "W97: wiring -- another lifecycle co-term breaks the join" (InAllThree 'zzz-other-lifecycle' $CONV $IMPL_SKILL $IMPL_TPL) 'no'
+    Chk "W98: no forbidden separator in the lifecycle-decl declaration tail" (BadSeps $CONV $LIFE_KEY) '0'
     Chk "W27: no forbidden separator in the measure-cache declaration tail" (BadSeps $CONV $MC_KEY) '0'
     # (W28-W29) the two MARKER keys get the same ban, for a different failure: `MarkersOf` is width-pinned
     # to one ASCII space in both copies, so a forbidden character there does NOT split the axes -- it
