@@ -5514,6 +5514,120 @@ try {
     # (W97) WIRING -- same shape as W65 (the given token is in no file, so the baseline is structurally constant).
     Chk "W97: wiring -- another lifecycle co-term breaks the join" (InAllThree 'zzz-other-lifecycle' $CONV $IMPL_SKILL $IMPL_TPL) 'no'
     Chk "W98: no forbidden separator in the lifecycle-decl declaration tail" (BadSeps $CONV $LIFE_KEY) '0'
+    # (W99-W110 / M71) TRANSITION TABLE -- the same subsection now derives the state list from the TRANSITIONS of the
+    # skill flow instead of a hand-grown enumeration. Each transition has one declaration line (`tr-...:`) whose tail
+    # carries the source file in its first backtick segment and an anchor inside that file in its second. The state
+    # list cites transitions inside an ASCII marker block. Four things are bitten: uniqueness of each transition's
+    # declaration, the anchor sitting on EXACTLY ONE line, COVERAGE (every transition is cited) and ORPHAN citations (not in the
+    # table). NOT asked: whether the table covers every skill branch, whether an anchor sits inside its branch sentence,
+    # whether the per-judgement GRID was walked, and whether an impl report's table covers the list and the grid -- the
+    # convention puts all four in the review's layer.
+    # The helpers take the convention file and root as arguments so the fixture controls below feed the SAME helpers.
+    $LTR_KEY = 'lifecycle-transitions:'
+    function LtrIds($conv) {
+        $tail = DeclTail $conv $LTR_KEY
+        if ($null -eq $tail) { return @() }
+        return @(($tail -replace '[`*]', '') -split ' ' | Where-Object { $_ -ne '' })
+    }
+    function LtrSeg($conv, [string]$id, [int]$n) {
+        # n-th backtick segment of the transition's declaration tail (awk a[2n] in the .sh twin), '' when absent.
+        $tail = DeclTail $conv ($id + ':')
+        if ($null -eq $tail) { return '' }
+        $a = $tail.Split([char]96)
+        if ($a.Count -ge (2 * $n + 1) -and $a[2 * $n - 1] -ne '') { return $a[2 * $n - 1] }
+        return ''
+    }
+    function LtrDup($conv) {
+        $n = 0
+        foreach ($t in @(LtrIds $conv)) { if ((DeclCount $conv ($t + ':')) -ne '1') { $n++ } }
+        return [string]$n
+    }
+    function LtrAnchorMissing($conv, $root) {
+        # A transition with no declaration line is not counted here -- LtrDup bites that (one defect, one case).
+        # EXACTLY ONE LINE, not "present" (M71 review round 0 blocker 1): with presence only, an anchor that occurs on
+        # several lines stayed green after its branch was deleted (the `pr` create branch went, the operations note kept
+        # the same token). Lines are counted the way the .sh twin's `grep -cF` counts them.
+        $n = 0
+        foreach ($t in @(LtrIds $conv)) {
+            if ([int](DeclCount $conv ($t + ':')) -lt 1) { continue }
+            $p = LtrSeg $conv $t 1; $a = LtrSeg $conv $t 2
+            $ok = $false
+            if ($p -ne '' -and $a -ne '') {
+                $f = Join-Path $root $p
+                if (Test-Path -LiteralPath $f -PathType Leaf) {
+                    $raw = ReadUtf8 $f
+                    if ($null -ne $raw) {
+                        $hits = @($raw -split "`r?`n" | Where-Object { $_.IndexOf($a, [System.StringComparison]::Ordinal) -ge 0 }).Count
+                        if ($hits -eq 1) { $ok = $true }
+                    }
+                }
+            }
+            if (-not $ok) { $n++ }
+        }
+        return [string]$n
+    }
+    function LtrCited($conv) {
+        # A citation is a run of [a-z0-9-] starting with `tr-` -- the .sh twin gets the same tokens with `tr -c`.
+        $raw = ReadUtf8 $conv
+        if ($null -eq $raw) { return @() }
+        $on = $false
+        $sb = New-Object System.Text.StringBuilder
+        foreach ($l in ($raw -split "`r?`n")) {
+            if ($l.Contains('<!-- lifecycle-states:start -->')) { $on = $true; continue }
+            if ($l.Contains('<!-- lifecycle-states:end -->')) { $on = $false; continue }
+            if ($on) { [void]$sb.Append($l).Append("`n") }
+        }
+        $set = New-Object 'System.Collections.Generic.SortedSet[string]' ([System.StringComparer]::Ordinal)
+        foreach ($m in [regex]::Matches($sb.ToString(), '[a-z0-9-]+')) {
+            if ($m.Value.StartsWith('tr-', [System.StringComparison]::Ordinal)) { [void]$set.Add($m.Value) }
+        }
+        return @($set)
+    }
+    function LtrUncovered($conv) {
+        $c = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+        foreach ($x in @(LtrCited $conv)) { [void]$c.Add($x) }
+        $n = 0
+        foreach ($t in @(LtrIds $conv)) { if (-not $c.Contains($t)) { $n++ } }
+        return [string]$n
+    }
+    function LtrOrphans($conv) {
+        $d = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+        foreach ($x in @(LtrIds $conv)) { [void]$d.Add($x) }
+        $n = 0
+        foreach ($t in @(LtrCited $conv)) { if (-not $d.Contains($t)) { $n++ } }
+        return [string]$n
+    }
+    function LtrMarkLines($conv, [string]$mark) {
+        $raw = ReadUtf8 $conv
+        if ($null -eq $raw) { return 0 }
+        return @($raw -split "`r?`n" | Where-Object { $_.Contains($mark) }).Count
+    }
+    $nLtr = @(LtrIds $CONV).Count
+    $nLci = @(LtrCited $CONV).Count
+    $ltrMarks = '{0} {1}' -f (LtrMarkLines $CONV '<!-- lifecycle-states:start -->'), (LtrMarkLines $CONV '<!-- lifecycle-states:end -->')
+    # (W108-W110) FIXTURE CONTROLS -- three transitions (`tr-fa`, `tr-fb`, `tr-fc`) are declared; the source file holds
+    # `tr-fa`'s anchor on one line, `tr-fc`'s anchor on TWO lines and no `tr-fb` anchor. The state block cites `tr-fa`,
+    # `tr-fc` and `tr-fzz`, which is not in the table. Anchors read 2 (one missing, one on two lines), coverage and
+    # orphans read 1 -- turning a verdict into "always 0", reverting the anchor verdict to "present" (reads 1), or reading
+    # the citations from the TABLE ITSELF (self-comparison -- always covered) goes red here. Only the fixture is read,
+    # so the baseline is structurally constant.
+    $ltrFx = Join-Path $sbx 'ltrfx'
+    New-Item -ItemType Directory -Force -Path $ltrFx | Out-Null
+    $ltrFxConv = Join-Path $ltrFx 'conv.md'
+    [System.IO.File]::WriteAllText($ltrFxConv, ('  - ' + $bq + 'lifecycle-transitions:' + $bq + " tr-fa tr-fb tr-fc`n  - " + $bq + 'tr-fa:' + $bq + ' ' + $bq + 'sk.md' + $bq + ' ' + $bq + 'anc-a' + $bq + "`n  - " + $bq + 'tr-fb:' + $bq + ' ' + $bq + 'sk.md' + $bq + ' ' + $bq + 'anc-b' + $bq + "`n  - " + $bq + 'tr-fc:' + $bq + ' ' + $bq + 'sk.md' + $bq + ' ' + $bq + 'anc-c' + $bq + "`n<!-- lifecycle-states:start -->`n  - s1 " + $bq + 'tr-fa' + $bq + ' ' + $bq + 'tr-fc' + $bq + ' ' + $bq + 'tr-fzz' + $bq + "`n<!-- lifecycle-states:end -->`n"), $u8w)
+    [System.IO.File]::WriteAllText((Join-Path $ltrFx 'sk.md'), "anc-a`nanc-c one`nanc-c two`n", $u8w)
+    Chk "W99: lifecycle-transitions declaration line is exactly 1" (DeclCount $CONV $LTR_KEY) '1'
+    Chk "W100: transition extraction positive-control (>0)" $(if ($nLtr -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "W101: no forbidden separator in the lifecycle-transitions declaration tail" (BadSeps $CONV $LTR_KEY) '0'
+    Chk "W102: transitions whose declaration line is not exactly one: 0" (LtrDup $CONV) '0'
+    Chk "W103: transitions whose anchor is not on exactly one line of the source file: 0" (LtrAnchorMissing $CONV $ROOT) '0'
+    Chk "W104: the state block markers each appear exactly once" $ltrMarks '1 1'
+    Chk "W105: transition citation extraction positive-control (>0)" $(if ($nLci -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "W106: transitions the state list does not cite: 0" (LtrUncovered $CONV) '0'
+    Chk "W107: citations of transitions outside the table: 0" (LtrOrphans $CONV) '0'
+    Chk "W108: control -- counts the fixture transitions whose anchor is missing or on two lines" (LtrAnchorMissing $ltrFxConv $ltrFx) '2'
+    Chk "W109: control -- counts the fixture transition that is not cited" (LtrUncovered $ltrFxConv) '1'
+    Chk "W110: control -- counts the fixture citation outside the table" (LtrOrphans $ltrFxConv) '1'
     Chk "W27: no forbidden separator in the measure-cache declaration tail" (BadSeps $CONV $MC_KEY) '0'
     # (W28-W29) the two MARKER keys get the same ban, for a different failure: `MarkersOf` is width-pinned
     # to one ASCII space in both copies, so a forbidden character there does NOT split the axes -- it

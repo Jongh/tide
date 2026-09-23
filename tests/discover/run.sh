@@ -4931,6 +4931,76 @@ chk "W96: impl 템플릿이 생명주기 병기어를 백틱 토큰으로 갖는
 # (W97) **배선** — `W65`와 같은 형태(인자로 준 토큰은 어느 파일에도 없어 기준선이 구조로 상수다).
 chk "W97: 배선 - 다른 생명주기 병기어를 주면 결합이 성립하지 않는다" "$(in_all_three zzz-other-lifecycle "$CONV" "$IMPL_SKILL" "$IMPL_TPL")" "no"
 chk "W98: lifecycle-decl 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$LIFE_KEY")" "0"
+# (W99~W110 · M71) **전이 표** — 같은 소절이 상태 목록을 손으로 늘리는 열거 대신 **스킬 흐름의 전이**에서 끌어내게 했다.
+# 전이마다 선언 줄 하나(`tr-…:`)가 있고 꼬리의 첫 백틱 구획이 출처 파일, 둘째가 그 파일 안의 앵커다. 상태 목록은 ASCII
+# 마커 블록 안에서 전이를 인용한다. 무는 것은 넷 — 전이 선언의 유일성 · 앵커가 출처 파일에서 정확히 한 줄 · 덮음(모든 전이가 인용된다) · 고아
+# 인용(표에 없는 전이) — 이다. **묻지 않는 것**: 전이 표가 스킬의 분기를 빠짐없이 덮는가 · 앵커가 분기 문장 안에 있는가 · 판정별 격자(조합을
+# 밟았는가) · impl 보고서의 표가 목록과 격자를 덮는가. 규약이 넷 다 리뷰의 층에 둔다.
+# 헬퍼는 규약 파일과 루트를 인자로 받는다 — 아래 픽스처 통제가 **같은 헬퍼**를 먹여 판정의 반응을 묻기 위해서다.
+LTR_KEY='lifecycle-transitions:'
+ltr_ids() { # <규약 파일> → 선언된 전이 식별자(한 줄에 하나)
+    decl_tail "$1" "$LTR_KEY" | tr -d '`*' | tr ' ' '\n' | grep -v '^$'
+}
+ltr_seg() { # <규약 파일> <전이> <n> → 그 전이 선언 줄 꼬리의 n번째 백틱 구획(없으면 빈 출력)
+    decl_tail "$1" "$2:" | LC_ALL=C awk -v q="\`" -v n="$3" '{ k = split($0, a, q); if (k >= 2 * n + 1 && a[2 * n] != "") print a[2 * n] }' | head -1
+}
+ltr_dup() { # <규약 파일> → 선언 줄이 정확히 하나가 아닌 전이의 수
+    _ln=0
+    for _lt in $(ltr_ids "$1"); do [ "$(decl_count "$1" "$_lt:")" = 1 ] || _ln=$((_ln + 1)); done
+    echo "$_ln"
+}
+ltr_anchor_missing() { # <규약 파일> <루트> → 선언 줄이 있는 전이 중 출처 파일에서 앵커가 정확히 한 줄이 아닌 것의 수
+    # 선언 줄이 없는 전이는 세지 않는다 — 그 결함은 `ltr_dup`가 따로 문다(한 결함이 두 케이스를 함께 붉히지 않게).
+    # **「있다」가 아니라 「정확히 한 줄」이다**(M71 리뷰 라운드 0 차단 1) — 있기만 보면 여러 줄에 나오는 앵커는 그 분기를
+    # 지워도 다른 자리의 같은 토큰으로 초록이었다(`pr` 생성 분기를 지워도 「운영 주의」의 `gh pr create`가 남았다).
+    _ln=0
+    for _lt in $(ltr_ids "$1"); do
+        [ "$(decl_count "$1" "$_lt:")" -ge 1 ] || continue
+        _lp=$(ltr_seg "$1" "$_lt" 1); _la=$(ltr_seg "$1" "$_lt" 2)
+        if [ -z "$_lp" ] || [ -z "$_la" ] || [ ! -f "$2/$_lp" ] || [ "$(LC_ALL=C grep -cF -- "$_la" "$2/$_lp")" != 1 ]; then _ln=$((_ln + 1)); fi
+    done
+    echo "$_ln"
+}
+ltr_cited() { # <규약 파일> → 상태 블록 안의 전이 인용(중복 제거, 한 줄에 하나)
+    # 인용은 `tr-`로 시작하는 [a-z0-9-] 연속이다 — ps1 사본은 같은 문자 집합의 정규식 매치로 같은 토큰을 얻는다.
+    LC_ALL=C awk '/<!-- lifecycle-states:start -->/ { on = 1; next } /<!-- lifecycle-states:end -->/ { on = 0 } on' "$1" |
+        LC_ALL=C tr -c 'a-z0-9-' '\n' | LC_ALL=C grep '^tr-' | LC_ALL=C sort -u
+}
+ltr_uncovered() { # <규약 파일> → 선언된 전이 중 상태 블록이 인용하지 않은 것의 수
+    _lc=" $(ltr_cited "$1" | tr '\n' ' ')"
+    _ln=0
+    for _lt in $(ltr_ids "$1"); do case "$_lc" in *" $_lt "*) ;; *) _ln=$((_ln + 1)) ;; esac; done
+    echo "$_ln"
+}
+ltr_orphans() { # <규약 파일> → 상태 블록이 인용했으나 선언되지 않은 전이의 수
+    _ld=" $(ltr_ids "$1" | tr '\n' ' ')"
+    _ln=0
+    for _lt in $(ltr_cited "$1"); do case "$_ld" in *" $_lt "*) ;; *) _ln=$((_ln + 1)) ;; esac; done
+    echo "$_ln"
+}
+NLTR=$(ltr_ids "$CONV" | grep -c .)
+NLCI=$(ltr_cited "$CONV" | grep -c .)
+LTR_MARKS="$(LC_ALL=C grep -cF '<!-- lifecycle-states:start -->' "$CONV") $(LC_ALL=C grep -cF '<!-- lifecycle-states:end -->' "$CONV")"
+# (W108~W110) **픽스처 통제** — 전이 셋(`tr-fa` · `tr-fb` · `tr-fc`)을 선언하고, 출처 파일에는 `tr-fa`의 앵커를 한 줄 ·
+# `tr-fc`의 앵커를 **두 줄** 두고 `tr-fb`의 앵커는 두지 않는다. 상태 블록은 `tr-fa` · `tr-fc`와 표에 없는 `tr-fzz`를 인용한다.
+# 앵커는 2(없음 하나 · 두 줄 하나), 덮음 · 고아는 1이어야 한다 — 판정을 「무조건 0」으로 바꾸거나, 앵커 판정을 「있다」로
+# 되돌리거나(1이 된다), 인용을 **전이 표 자신**에서 읽게 바꾸면(자기 대조 — 늘 덮인다) 여기서 붉다. 읽는 대상이 픽스처뿐이라
+# 기준선이 구조로 상수다.
+mkdir -p "$SBX/ltrfx"
+printf '  - `lifecycle-transitions:` tr-fa tr-fb tr-fc\n  - `tr-fa:` `sk.md` `anc-a`\n  - `tr-fb:` `sk.md` `anc-b`\n  - `tr-fc:` `sk.md` `anc-c`\n<!-- lifecycle-states:start -->\n  - s1 `tr-fa` `tr-fc` `tr-fzz`\n<!-- lifecycle-states:end -->\n' > "$SBX/ltrfx/conv.md"
+printf 'anc-a\nanc-c one\nanc-c two\n' > "$SBX/ltrfx/sk.md"
+chk "W99: lifecycle-transitions 선언 줄 정확히 1개" "$(decl_count "$CONV" "$LTR_KEY")" "1"
+chk "W100: 전이 추출 positive-control(>0)" "$([ "$NLTR" -gt 0 ] && echo ok || echo no)" "ok"
+chk "W101: lifecycle-transitions 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$LTR_KEY")" "0"
+chk "W102: 선언 줄이 정확히 하나가 아닌 전이 0개" "$(ltr_dup "$CONV")" "0"
+chk "W103: 출처 파일에서 앵커가 정확히 한 줄이 아닌 전이 0개" "$(ltr_anchor_missing "$CONV" "$ROOT")" "0"
+chk "W104: 상태 블록 마커가 각각 정확히 하나" "$LTR_MARKS" "1 1"
+chk "W105: 전이 인용 추출 positive-control(>0)" "$([ "$NLCI" -gt 0 ] && echo ok || echo no)" "ok"
+chk "W106: 상태 목록이 인용하지 않은 전이 0개" "$(ltr_uncovered "$CONV")" "0"
+chk "W107: 상태 목록이 인용한 표 밖의 전이 0개" "$(ltr_orphans "$CONV")" "0"
+chk "W108: 통제 - 픽스처에서 앵커가 없거나 두 줄인 전이를 센다" "$(ltr_anchor_missing "$SBX/ltrfx/conv.md" "$SBX/ltrfx")" "2"
+chk "W109: 통제 - 픽스처에서 인용되지 않은 전이를 센다" "$(ltr_uncovered "$SBX/ltrfx/conv.md")" "1"
+chk "W110: 통제 - 픽스처에서 표 밖의 인용을 센다" "$(ltr_orphans "$SBX/ltrfx/conv.md")" "1"
 chk "W27: measure-cache 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$MC_KEY")" "0"
 # (W28~W29) **표지 키 둘**에는 같은 금지를 다른 사유로 건다 — `markers_of`의 분리 폭은 두 사본 모두
 # ASCII 공백 하나로 못박혀 있어 금지 문자가 축을 **가르지 않는다**. 대신 **표지 둘을 한 토큰으로
