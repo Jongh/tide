@@ -5009,6 +5009,186 @@ chk "W27: measure-cache 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps 
 # 없어야 한다.**
 chk "W28: scope-limits 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$SCOPE_LIM_KEY")" "0"
 chk "W29: verify-scope 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$VS_KEY")" "0"
+
+# (W111~W131·M72) **사이클 시작점이 리뷰 판정을 읽는가.** `/tide:cycle`의 인자 없는 시작점은 판정을 보지
+# 않아 판정 `불가`에서 새 마일스톤으로 갔고(상태 목록의 `st-fail-then-draft`), 판정 규칙의 단일 원본인
+# `/tide:status`와 어긋났다. 결합 대상은 **두 ASCII 토큰**이다 — 판정을 읽는 법의 선언(`review-report`)과
+# 그 어긋남의 이름(`st-fail-then-draft`).
+#   왜 판정 값(`가능`/`불가`)을 앵커로 쓰지 않는가: 두 낱말은 이 스킬에 **이미 여러 번** 있었다(M72 편집
+#   전 3회·7회). 존재만 묻는 케이스는 갈래를 통째로 지워도 초록이라 **동어반복**이고, 그것이 체크리스트가
+#   「이미 초록이면 아무것도 증명하지 못한다」로 막는 부류다. `review-report`는 편집 전 0회였다.
+#   `W113`이 **파일 전역이 아니라 창**으로 묻는 이유는 `W81`·`W82`가 연 것과 같다 — 포인터만 남기고 갈래를
+#   다른 자리로 옮기면 전역 공존은 초록이다. 창 판정은 `item_win_probe`를 그대로 쓴다.
+CYC_SKILL="$ROOT/skills/cycle/SKILL.md"
+SI_ROW_TOK='review-report'
+ST_ACC_TOK='st-fail-then-draft'
+# (W111) 추출 positive-control — 결합의 양끝이 규약에 실제로 있어야 한다. 규약 쪽이 비면 아래 결합이
+# 빈 토큰으로 공허하게 성립한다(`W8`·`W20`과 같은 형태).
+chk "W111: 판정 읽기 결합의 규약 쪽 positive-control" \
+    "$([ "$(grep -cF "$SI_ROW_TOK" "$CONV")" -gt 0 ] && [ "$(grep -cF "$ST_ACC_TOK" "$CONV")" -gt 0 ] && echo ok || echo no)" "ok"
+# (W112) 본 검사 — cycle 스킬이 판정을 읽는 법의 선언을 가리킨다.
+chk "W112: cycle 스킬이 판정 읽기 선언을 가리킨다" "$(has_token "$CYC_SKILL" "$SI_ROW_TOK")" "yes"
+# (W113) 본 검사 — 그 포인터와 사고 상태 이름이 **같은 항목 창** 안에 있다(전역 공존이 아니다).
+chk "W113: 판정 갈래와 사고 상태가 같은 창" "$(item_win_probe "$CYC_SKILL" "$SI_ROW_TOK" "$ST_ACC_TOK" | LC_ALL=C awk '{ print $1 }')" "yes"
+# (W114) 통제 — 앵커를 창 밖으로 옮긴 픽스처를 잡는다(`W83`·`W89`와 동형).
+mkdir -p "$SBX/cycfx"
+{
+    printf '%s\n' '- 인자 없음'
+    printf '%s\n' '  - report pair present -> split by verdict (`review-report` row)'
+    printf '%s\n' '    - verdict ok -> milestone'
+    printf '%s\n' '- another item at the same depth'
+    printf '%s\n' '  - `st-fail-then-draft` moved out of the window'
+} > "$SBX/cycfx/cycle.md"
+chk "W114: 통제 - 창 밖으로 옮긴 사고 상태 앵커를 잡는다" \
+    "$(item_win_probe "$SBX/cycfx/cycle.md" "$SI_ROW_TOK" "$ST_ACC_TOK" | LC_ALL=C awk '{ print $1 }')" "no"
+# (W115~W116) **적대 변이가 연 자리.** 갈래를 통째로 지우고 포인터와 사고 상태를 **한 줄에 몰면** 창
+# 판정(`W113`)이 초록이다 — 한 줄은 언제나 자기 창 안이기 때문이다(M72 되돌림 R3 실측: 116/0 초록).
+# 그래서 사고 상태가 포인터와 **다른 줄**에 있을 것을 함께 묻는다. 갈래가 살아 있으면 판정 두 값이
+# 포인터 아래의 **별도 줄**에 서고, 갈래를 지워 한 문장으로 접으면 그 줄이 사라진다.
+#   **깊이로 묻지 않는 이유(실측)**: 포인터는 항목의 **연속 줄**이라 들여쓰기가 형제 항목과 같다
+#   (M72 구현 중 실측 — 깊이 판정은 실파일에서 붉었다). 「다른 줄」이 이 변이를 가르는 최소 조건이고,
+#   같은 창인가는 `W113`이 이미 묻는다. 둘을 함께 통과해야 갈래가 산 것이다.
+inner_on_other_line() { # <파일> <바깥 토큰> <안쪽 토큰> → yes|no
+    LC_ALL=C awk -v outer="$2" -v inner="$3" '
+        { sub(/\r$/, ""); if (index($0, inner) > 0 && index($0, outer) == 0) { found = 1 } }
+        END { print (found ? "yes" : "no") }' "$1"
+}
+chk "W115: 사고 상태가 포인터와 다른 줄에 있다" "$(inner_on_other_line "$CYC_SKILL" "$SI_ROW_TOK" "$ST_ACC_TOK")" "yes"
+# (W116) 통제 — 적대 변이를 픽스처로 승격한다. 두 토큰이 **같은 줄에만** 있으면 갈래가 없는 것이므로 붉어야 한다.
+{
+    printf '%s\n' '- no argument'
+    printf '%s\n' '  - report pair present -> milestone'
+    printf '%s\n' '- the `review-report` row is how the verdict is read, and `st-fail-then-draft` is the mismatch'
+} > "$SBX/cycfx/flat.md"
+chk "W116: 통제 - 갈래 없이 한 줄에 몬 변이를 잡는다" "$(inner_on_other_line "$SBX/cycfx/flat.md" "$SI_ROW_TOK" "$ST_ACC_TOK")" "no"
+
+# (W117~W131·M72 라운드 3) **대응을 규약 선언에서 읽고, 목적지는 「화살표 뒤 · 괄호 앞」에서 읽는다.**
+# 라운드 0~2는 술어가 세 번 다 **「그 산문에 목적지가 언급되는가」** 였고, 좁힐 때마다 반대 방향이 열렸다:
+# 라운드 2 판본에서도 `→ 그냥 멈춰 안내한다 (참고: 예전에는 **impl 단계부터**였다)` 가 **두 사본 128/0
+# 초록**이었고(동작이 사라졌다), `**milestone 단계부터**가 아니다` 라는 대비 설명 한 줄에 **127/1 거짓
+# 붉음**이었다. 무는 자리를 바꾼다 — ⑴ 대응은 규약의 `start-point-map:` **선언**에서 읽고(스킬 산문이
+# 아니다) ⑵ 목적지는 갈래 항목의 `→` **뒤**, 첫 여는 괄호 **앞** 본문에서만 읽는다(`start-point-target`).
+# 괄호 안의 회고 문구와 그 괄호 뒤에 이어진 줄의 대비 설명은 목적지가 아니다(괄호 없이 이어지면 붉는다).
+CYC_SEC_ANCHOR='시작점 판단'
+SPM_KEY='start-point-map:'
+KEY_FAIL='- 판정 `불가`'
+KEY_OK='- 판정 `가능`'
+KEY_UNREAD='- **판정을 읽지 못하면**'
+sec_span() { # <파일> <절 앵커> → 그 절의 줄만 (없으면 빈 출력)
+    LC_ALL=C awk -v anc="$2" '
+        { sub(/\r$/, "") }
+        /^## / { inside = (index($0, anc) > 0) ; if (inside) next }
+        inside { print }
+    ' "$1"
+}
+spm_dest() { # <규약 파일> <키> → 그 키에 선언된 목적지 (없으면 빈 출력)
+    decl_tail "$1" "$SPM_KEY" | LC_ALL=C awk -v k="$2" '
+        { n = split($0, a, " ")
+          for (i = 1; i <= n; i++) { p = index(a[i], "="); if (p > 0 && substr(a[i], 1, p - 1) == k) { print substr(a[i], p + 1); exit } } }'
+}
+spm_pairs() { # <규약 파일> → 선언된 쌍의 수
+    decl_tail "$1" "$SPM_KEY" | LC_ALL=C awk '{ n = split($0, a, " "); c = 0; for (i = 1; i <= n; i++) if (index(a[i], "=") > 1) c++; print c }'
+}
+branch_target() { # <파일> <절 앵커> <항목 키> → "<목적지를 가진 항목 수> <읽어낸 목적지들(공백 구분·정렬)>"
+    # 항목 창(갈래 줄 + 더 깊은 이어진 줄)을 이어 붙이고, `→` 뒤 · 첫 `(` 앞 구간에서만 `**{X} 단계부터**`를 읽는다.
+    sec_span "$1" "$2" | LC_ALL=C awk -v key="$3" '
+        function ind(s,   n) { n = 0; while (substr(s, n + 1, 1) == " ") n++; return n }
+        function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }   # 공백·탭 — ps1의 Trim(공백, 탭)과 같다
+        function target(j,   p) {
+            p = index(j, "\342\206\222"); if (p == 0) return ""      # 화살표가 없으면 목적지 구간이 없다
+            j = substr(j, p + 3)
+            p = index(j, "("); if (p > 0) j = substr(j, 1, p - 1)     # 첫 여는 괄호 앞까지
+            return j
+        }
+        function scan(j,   t, p, q, seg) {
+            t = target(j); if (t == "") return
+            while ((p = index(t, "**")) > 0) {
+                t = substr(t, p + 2); q = index(t, "**"); if (q == 0) return
+                seg = substr(t, 1, q - 1); t = substr(t, q + 2)
+                if (sub(/ \353\213\250\352\263\204\353\266\200\355\204\260$/, "", seg)) {   # 단계 낱말로 끝날 때만 — ps1의 EndsWith와 같다
+                    if (!(seg in seen)) { seen[seg] = 1; out = (out == "" ? seg : out " " seg) }
+                    n++
+                }
+            }
+        }
+        function flush() { if (open) { scan(joined); open = 0; joined = "" } }
+        {
+            if (index($0, key) > 0) { flush(); open = 1; depth = ind($0); joined = trim($0); next }
+            if (open) {
+                if (trim($0) == "") next
+                if (ind($0) > depth) { joined = joined " " trim($0); next }
+                flush()
+            }
+        }
+        END { flush(); printf "%d %s\n", n, out }
+    '
+}
+# (W117) 추출 positive-control — 절 안 갈래 줄이 비면 아래 판정이 공허하게 「0 」만 낸다.
+CYC_BR_N=$(sec_span "$CYC_SKILL" "$CYC_SEC_ANCHOR" | LC_ALL=C grep -c -- '- 판정 `')
+chk "W117: 시작점 절 갈래 줄 추출 positive-control(>=2)" "$([ "${CYC_BR_N:-0}" -ge 2 ] && echo ok || echo no)" "ok"
+# (W127·W128) **선언 쪽** — 대응 선언 줄이 정확히 하나이고, 쌍이 실제로 뽑힌다(0이면 아래가 공허하다).
+chk "W127: start-point-map 선언 줄 정확히 1개" "$(decl_count "$CONV" "$SPM_KEY")" "1"
+chk "W128: 선언 쌍 추출 positive-control(>=3)" "$([ "$(spm_pairs "$CONV")" -ge 3 ] && echo ok || echo no)" "ok"
+# (W118~W120) **본 검사 — 선언된 대응과 문면이 같은가.** 갈래마다 목적지를 가진 항목이 정확히 하나이고,
+# 화살표 뒤·괄호 앞에서 읽어낸 목적지가 **선언과 같아야** 한다.
+chk "W118: 불가 갈래의 시작점이 선언과 같다" "$(branch_target "$CYC_SKILL" "$CYC_SEC_ANCHOR" "$KEY_FAIL")" "1 $(spm_dest "$CONV" '불가')"
+chk "W119: 가능 갈래의 시작점이 선언과 같다" "$(branch_target "$CYC_SKILL" "$CYC_SEC_ANCHOR" "$KEY_OK")" "1 $(spm_dest "$CONV" '가능')"
+chk "W120: 읽지 못한 갈래의 시작점이 선언과 같다" "$(branch_target "$CYC_SKILL" "$CYC_SEC_ANCHOR" "$KEY_UNREAD")" "1 $(spm_dest "$CONV" '읽지못함')"
+# (W121) **본 검사 — 두 스킬의 판정 값 집합이 같은가**(M72-T03의 「무는 것」 ③). 표기가 갈려 있으므로
+# (status는 곧은 따옴표 · cycle은 백틱) **값 자체**를 뽑아 **ordinal**로 정렬해 비교한다.
+verdict_set() { # <파일> → 그 파일이 쓰는 판정 값을 ordinal 정렬해 한 줄로
+    LC_ALL=C awk '
+        { sub(/\r$/, ""); s = $0
+          while (match(s, /판정 ["`][^"`]+["`]/)) {
+              seg = substr(s, RSTART, RLENGTH)
+              sub(/^판정 ["`]/, "", seg); sub(/["`]$/, "", seg)
+              if (seg != "") print seg
+              s = substr(s, RSTART + RLENGTH)
+          }
+        }' "$1" | LC_ALL=C sort -u | LC_ALL=C tr '\n' ' ' | LC_ALL=C sed 's/ *$//'
+}
+chk "W121: status와 cycle의 판정 값 집합이 같다" "$(verdict_set "$ROOT/skills/status/SKILL.md")" "$(verdict_set "$CYC_SKILL")"
+# (W131) `W121`의 추출 positive-control — 양쪽이 비면 `"" == ""`로 공허하게 성립한다.
+chk "W131: 판정 값 추출 positive-control" "$([ -n "$(verdict_set "$ROOT/skills/status/SKILL.md")" ] && [ -n "$(verdict_set "$CYC_SKILL")" ] && echo ok || echo no)" "ok"
+# (W122~W124·W129) 통제 — 네 변이를 픽스처로 승격한다.
+mkdir -p "$SBX/cycfx"
+_cyc_fx2() { # <파일> <불가 항목 본문> [추가 줄]
+    {
+        printf '%s\n' '## 시작점 판단'
+        printf '%s\n' '- 인자 없음'
+        printf '%s\n' '    - 판정 `가능` → **milestone 단계부터**'
+        printf '%s\n' "    - 판정 \`불가\` → $2"
+        [ -n "${3-}" ] && printf '%s\n' "$3"
+        printf '%s\n' '## 뒤 절'
+    } > "$1"
+}
+_cyc_fx2 "$SBX/cycfx/dest-review.md" '**review 단계부터** (impl 보고서는 이미 있다)'
+_cyc_fx2 "$SBX/cycfx/prose-impl.md" '**milestone 단계부터** (새 마일스톤 — impl 보고서는 그대로)'
+_cyc_fx2 "$SBX/cycfx/dup-dest.md" '**milestone 단계부터**' '    - 판정 `불가` 예전 길 → **impl 단계부터**'
+_cyc_fx2 "$SBX/cycfx/paren-only.md" '그냥 멈춰 안내한다 (참고: 예전에는 **impl 단계부터**였다)'
+chk "W122: 통제 - 목적지를 review로 바꾼 변이를 잡는다" "$(branch_target "$SBX/cycfx/dest-review.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL")" "1 review"
+chk "W123: 통제 - 산문에 impl이 남은 반전을 잡는다" "$(branch_target "$SBX/cycfx/prose-impl.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL")" "1 milestone"
+chk "W124: 통제 - 목적지를 가진 둘째 항목을 잡는다" "$(branch_target "$SBX/cycfx/dup-dest.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL")" "2 milestone impl"
+chk "W129: 통제 - 목적지가 괄호 안에만 있으면 목적지가 아니다" "$(branch_target "$SBX/cycfx/paren-only.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL")" "0 "
+# (W125·W126·W130) **오탐 방향** — 동작을 바꾸지 않는 편집에는 초록이어야 한다.
+{
+    printf '%s\n' '## 시작점 판단'
+    printf '%s\n' '    - 판정 `가능` → **milestone 단계부터**'
+    printf '%s\n' '    - 판정 `불가` → 그 마일스톤을 대상으로'
+    printf '%s\n' '      **impl 단계부터** (재작업).'
+    printf '%s\n' '    - 판정 `불가`가 연속이면 재분해를 권한다'
+    printf '%s\n' '## 뒤 절'
+} > "$SBX/cycfx/folded.md"
+{
+    printf '%s\n' '## 시작점 판단'
+    printf '%s\n' '    - 판정 `가능` → **milestone 단계부터**'
+    printf '%s\n' '    - 판정 `불가` → 그 마일스톤으로 **impl 단계부터** (재작업).'
+    printf '%s\n' '      **milestone 단계부터**가 아니다.'
+    printf '%s\n' '## 뒤 절'
+} > "$SBX/cycfx/contrast.md"
+chk "W125: 오탐 방향 - 줄을 접어도 초록이다" "$(branch_target "$SBX/cycfx/folded.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL")" "1 impl"
+chk "W126: 오탐 방향 - 목적지 없는 설명 줄은 항목 수에 들지 않는다" "$(branch_target "$SBX/cycfx/folded.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL" | LC_ALL=C awk '{ print $1 }')" "1"
+chk "W130: 오탐 방향 - 이어진 줄의 대비 설명은 목적지가 아니다" "$(branch_target "$SBX/cycfx/contrast.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL")" "1 impl"
 fi
 
 # (W31~W41 · M64-T04) **측정 배당** — 규약이 `sh` 축 판정의 책임처와 보고서 값의 출처를 가르는 선언
