@@ -5636,6 +5636,224 @@ try {
     # is still above zero. An invisible character must not be able to retire a boundary marker.
     Chk "W28: no forbidden separator in the scope-limits declaration tail" (BadSeps $CONV $SCOPE_LIM_KEY) '0'
     Chk "W29: no forbidden separator in the verify-scope declaration tail" (BadSeps $CONV $VS_KEY) '0'
+
+    # (W111-W131 / M72) DOES THE CYCLE START POINT READ THE REVIEW VERDICT. The no-argument start point
+    # of /tide:cycle did not look at the verdict, so a "not possible" verdict went to a new milestone
+    # (the accident state `st-fail-then-draft` in the state list) instead of rework, disagreeing with
+    # /tide:status, which is the single source of that rule. Two ASCII tokens are coupled -- the
+    # declaration of HOW the verdict is read (`review-report`) and the NAME of that disagreement
+    # (`st-fail-then-draft`).
+    #   Why the verdict words themselves are not the anchor: both already occurred several times in
+    #   this skill before the M72 edit (3 and 7). A presence-only case stays green even if the whole
+    #   branch is deleted -- a tautology, the class the checklist blocks with "already green proves
+    #   nothing". `review-report` occurred zero times before the edit.
+    #   W113 asks by WINDOW rather than file-wide for the same reason W81/W82 exist -- keeping the
+    #   pointer while moving the branch elsewhere leaves file-wide coexistence green.
+    $CYC_SKILL = Join-Path $ROOT 'skills/cycle/SKILL.md'
+    $SI_ROW_TOK = 'review-report'
+    $ST_ACC_TOK = 'st-fail-then-draft'
+    # (W111) extraction positive-control -- both ends must really exist in the convention, otherwise
+    # the coupling below holds vacuously on empty tokens (same shape as W8/W20).
+    $siRowN = @(Select-String -Path $CONV -SimpleMatch $SI_ROW_TOK).Count
+    $stAccN = @(Select-String -Path $CONV -SimpleMatch $ST_ACC_TOK).Count
+    Chk "W111: positive-control for the convention side of the verdict-read coupling" $(if ($siRowN -gt 0 -and $stAccN -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # (W112) main check -- the cycle skill points at the declaration of how the verdict is read.
+    Chk "W112: the cycle skill points at the verdict-read declaration" (HasToken $CYC_SKILL $SI_ROW_TOK) 'yes'
+    # (W113) main check -- that pointer and the accident-state name sit in the SAME item window.
+    Chk "W113: verdict branch and accident state share one window" ((ItemWinProbe $CYC_SKILL $SI_ROW_TOK $ST_ACC_TOK).Split(' ')[0]) 'yes'
+    # (W114) control -- a fixture with the anchor moved out of the window is caught (like W83/W89).
+    $cycFxDir = Join-Path $SBX 'cycfx'
+    if (-not (Test-Path $cycFxDir)) { New-Item -ItemType Directory -Path $cycFxDir | Out-Null }
+    $cycFx = Join-Path $cycFxDir 'cycle.md'
+    Set-Content -LiteralPath $cycFx -Encoding ascii -Value @(
+        '- no argument',
+        '  - report pair present -> split by verdict (`review-report` row)',
+        '    - verdict ok -> milestone',
+        '- another item at the same depth',
+        '  - `st-fail-then-draft` moved out of the window')
+    Chk "W114: control -- an accident-state anchor moved out of the window is caught" ((ItemWinProbe $cycFx $SI_ROW_TOK $ST_ACC_TOK).Split(' ')[0]) 'no'
+    # (W115-W116) WHAT THE ADVERSARIAL MUTATION OPENED. Deleting the branch entirely and putting the
+    # pointer and the accident state ON ONE LINE leaves the window check (W113) green -- a single line
+    # is always inside its own window (measured in the M72 reversal R3: 116/0 green). So we also ask
+    # that the accident state sit on a LINE OTHER THAN the pointer's. While the branch lives, the two
+    # verdict values stand on their own lines under the pointer; fold the branch into one sentence and
+    # that line is gone.
+    #   Why not by indent (measured): the pointer is a CONTINUATION line of its item, so its indent
+    #   equals that of the sibling items -- an indent test reddened on the real file during M72. The
+    #   "other line" test is the minimal condition that separates this mutation, and W113 already asks
+    #   whether they share a window. Both must pass for the branch to be alive.
+    function InnerOnOtherLine([string]$path, [string]$outer, [string]$inner) {
+        foreach ($ln in [System.IO.File]::ReadAllLines($path)) {
+            if ($ln.Contains($inner) -and -not $ln.Contains($outer)) { return 'yes' }
+        }
+        return 'no'
+    }
+    Chk "W115: the accident state sits on a line other than the pointer's" (InnerOnOtherLine $CYC_SKILL $SI_ROW_TOK $ST_ACC_TOK) 'yes'
+    # (W116) control -- the adversarial mutation promoted to a fixture. Both tokens on ONE line means
+    # the branch is gone, so it must redden.
+    $cycFlat = Join-Path $cycFxDir 'flat.md'
+    Set-Content -LiteralPath $cycFlat -Encoding ascii -Value @(
+        '- no argument',
+        '  - report pair present -> milestone',
+        '- the `review-report` row is how the verdict is read, and `st-fail-then-draft` is the mismatch')
+    Chk "W116: control -- a flattened one-line mutation without the branch is caught" (InnerOnOtherLine $cycFlat $SI_ROW_TOK $ST_ACC_TOK) 'no'
+
+    # (W117-W131 / M72 round 3) READ THE MAPPING FROM THE CONVENTION DECLARATION, AND READ THE DESTINATION
+    # FROM "AFTER THE ARROW, BEFORE THE PARENTHESIS". Rounds 0-2 all asked "is the destination MENTIONED in
+    # this prose", and every narrowing opened the opposite direction. Even the round 2 form left
+    # "-> it just stops (note: it used to be **impl <step-word>**)" at 128/0 GREEN in both copies while the
+    # behaviour was gone, and reddened 127/1 on a harmless contrastive line "**milestone <step-word>** is not
+    # what happens". So the seat moves: (1) the mapping is read from the convention's `start-point-map:`
+    # DECLARATION, not from skill prose; (2) the destination is read only from the branch item's text AFTER
+    # the arrow and BEFORE the first opening parenthesis (`start-point-target`). A retrospective note inside
+    # parentheses, and a contrastive line that follows AFTER that parenthesis, are not destinations (one with no parenthesis before it is read, and goes red).
+    $STEP_WORD = Uni 0xB2E8,0xACC4,0xBD80,0xD130                        # dan-gye-bu-teo = "from the ... step"
+    $ARROW = [string][char]0x2192
+    $CYC_SEC_ANCHOR = Uni 0xC2DC,0xC791,0xC810,0x0020,0xD310,0xB2E8     # si-jak-jeom pan-dan = start-point decision
+    $SPM_KEY = 'start-point-map:'
+    $VERDICT_WORD = Uni 0xD310,0xC815                                   # pan-jeong = verdict
+    $VERDICT_FAIL = Uni 0xBD88,0xAC00                                   # bul-ga    = not possible
+    $VERDICT_OK = Uni 0xAC00,0xB2A5                                     # ga-neung  = possible
+    $VERDICT_UNREAD = Uni 0xC77D,0xC9C0,0xBABB,0xD568                   # ilk-ji-mot-ham = cannot be read (map key)
+    $KEY_FAIL = '- ' + $VERDICT_WORD + ' `' + $VERDICT_FAIL + '`'
+    $KEY_OK = '- ' + $VERDICT_WORD + ' `' + $VERDICT_OK + '`'
+    $KEY_UNREAD = '- **' + (Uni 0xD310,0xC815,0xC744,0x0020,0xC77D,0xC9C0,0x0020,0xBABB,0xD558,0xBA74) + '**'
+    function SecSpan([string]$path, [string]$anchor) {
+        $out = New-Object System.Collections.Generic.List[string]
+        $inside = $false
+        foreach ($ln in [System.IO.File]::ReadAllLines($path)) {
+            if ($ln.StartsWith('## ', [System.StringComparison]::Ordinal)) { $inside = $ln.Contains($anchor); continue }
+            if ($inside) { $out.Add($ln) }
+        }
+        return $out
+    }
+    function SpmDest([string]$conv, [string]$key) {
+        foreach ($tok in ((DeclTail $conv $SPM_KEY) -split '\s+')) {
+            $p = $tok.IndexOf('=')
+            if ($p -gt 0 -and $tok.Substring(0, $p) -eq $key) { return $tok.Substring($p + 1) }
+        }
+        return ''
+    }
+    function SpmPairs([string]$conv) {
+        $c = 0
+        foreach ($tok in ((DeclTail $conv $SPM_KEY) -split '\s+')) { if ($tok.IndexOf('=') -gt 0) { $c++ } }
+        return $c
+    }
+    $btWs = [char[]]@([char]0x20, [char]0x09)   # space and tab only -- the sh copy's trim() strips exactly these
+    function BranchTarget([string]$path, [string]$anchor, [string]$key) {
+        $script:btN = 0
+        $script:btSeen = New-Object System.Collections.Generic.List[string]
+        $script:btOpen = $false; $script:btJoined = ''; $script:btDepth = 0
+        $scan = {
+            if (-not $script:btOpen) { return }
+            $j = $script:btJoined
+            $p = $j.IndexOf($ARROW, [System.StringComparison]::Ordinal)
+            if ($p -ge 0) {
+                $t = $j.Substring($p + 1)
+                $q = $t.IndexOf('(', [System.StringComparison]::Ordinal)
+                if ($q -ge 0) { $t = $t.Substring(0, $q) }
+                while ($true) {
+                    $a = $t.IndexOf('**', [System.StringComparison]::Ordinal); if ($a -lt 0) { break }
+                    $t = $t.Substring($a + 2)
+                    $b = $t.IndexOf('**', [System.StringComparison]::Ordinal); if ($b -lt 0) { break }
+                    $seg = $t.Substring(0, $b); $t = $t.Substring($b + 2)
+                    if ($seg.EndsWith(' ' + $STEP_WORD, [System.StringComparison]::Ordinal)) {
+                        $seg = $seg.Substring(0, $seg.Length - $STEP_WORD.Length - 1)
+                        if (-not $script:btSeen.Contains($seg)) { $script:btSeen.Add($seg) }
+                        $script:btN++
+                    }
+                }
+            }
+            $script:btOpen = $false; $script:btJoined = ''
+        }
+        foreach ($ln in (SecSpan $path $anchor)) {
+            if ($ln.Contains($key)) {
+                & $scan
+                $script:btOpen = $true
+                $script:btDepth = $ln.Length - $ln.TrimStart(' ').Length
+                $script:btJoined = $ln.Trim($btWs)
+                continue
+            }
+            if ($script:btOpen) {
+                if ($ln.Trim($btWs) -eq '') { continue }
+                $d = $ln.Length - $ln.TrimStart(' ').Length
+                if ($d -gt $script:btDepth) { $script:btJoined = $script:btJoined + ' ' + $ln.Trim($btWs); continue }
+                & $scan
+            }
+        }
+        & $scan
+        return ('{0} {1}' -f $script:btN, ($script:btSeen -join ' '))
+    }
+    # (W117) extraction positive-control -- an empty section makes the probes answer a vacuous "0 ".
+    $cycBrKey = '- ' + $VERDICT_WORD + ' `'
+    $cycBrN = @(SecSpan $CYC_SKILL $CYC_SEC_ANCHOR | Where-Object { $_.Contains($cycBrKey) }).Count
+    Chk "W117: positive-control for branch lines in the start-point section (>=2)" $(if ($cycBrN -ge 2) { 'ok' } else { 'no' }) 'ok'
+    # (W127-W128) THE DECLARATION SIDE -- exactly one declaration line, and pairs actually extracted.
+    Chk "W127: exactly one start-point-map declaration line" (DeclCount $CONV $SPM_KEY) '1'
+    Chk "W128: positive-control for declared pairs (>=3)" $(if ((SpmPairs $CONV) -ge 3) { 'ok' } else { 'no' }) 'ok'
+    # (W118-W120) MAIN CHECKS -- does the prose match the DECLARED mapping. One item carries a destination
+    # and the destination read after the arrow, before the parenthesis, equals the declared one.
+    Chk "W118: the not-possible branch matches the declaration" (BranchTarget $CYC_SKILL $CYC_SEC_ANCHOR $KEY_FAIL) ('1 ' + (SpmDest $CONV $VERDICT_FAIL))
+    Chk "W119: the possible branch matches the declaration" (BranchTarget $CYC_SKILL $CYC_SEC_ANCHOR $KEY_OK) ('1 ' + (SpmDest $CONV $VERDICT_OK))
+    Chk "W120: the unreadable-verdict branch matches the declaration" (BranchTarget $CYC_SKILL $CYC_SEC_ANCHOR $KEY_UNREAD) ('1 ' + (SpmDest $CONV $VERDICT_UNREAD))
+    # (W121) MAIN CHECK -- do the two skills use the same verdict value set. The notation differs, so the
+    # VALUES are extracted and sorted ORDINALLY (Sort-Object is culture-aware -- see OrdinalSortUnique).
+    function VerdictSet([string]$path) {
+        $vals = New-Object System.Collections.Generic.List[string]
+        $rx = [regex]("" + $VERDICT_WORD + " [`"``]([^`"``]+)[`"``]")
+        foreach ($ln in [System.IO.File]::ReadAllLines($path)) {
+            foreach ($m in $rx.Matches($ln)) { $vals.Add($m.Groups[1].Value) }
+        }
+        return ((OrdinalSortUnique $vals) -join ' ')
+    }
+    Chk "W121: status and cycle use the same verdict value set" (VerdictSet (Join-Path $ROOT 'skills/status/SKILL.md')) (VerdictSet $CYC_SKILL)
+    # (W131) positive-control for W121 -- two empty sets would satisfy it vacuously.
+    $vsStatus = VerdictSet (Join-Path $ROOT 'skills/status/SKILL.md')
+    $vsCycle = VerdictSet $CYC_SKILL
+    Chk "W131: positive-control for verdict-value extraction" $(if ($vsStatus -ne '' -and $vsCycle -ne '') { 'ok' } else { 'no' }) 'ok'
+    # (W122-W124, W129) controls -- four mutations promoted to fixtures.
+    if (-not (Test-Path $cycFxDir)) { New-Item -ItemType Directory -Path $cycFxDir | Out-Null }
+    function CycFx2([string]$path, [string]$failBody, [string]$extra) {
+        $lines = New-Object System.Collections.Generic.List[string]
+        $lines.Add('## ' + $CYC_SEC_ANCHOR)
+        $lines.Add('- ' + (Uni 0xC778,0xC790,0x0020,0xC5C6,0xC74C))
+        $lines.Add('    ' + $KEY_OK + ' ' + $ARROW + ' **milestone ' + $STEP_WORD + '**')
+        $lines.Add('    ' + $KEY_FAIL + ' ' + $ARROW + ' ' + $failBody)
+        if ($extra -ne '') { $lines.Add($extra) }
+        $lines.Add('## ' + (Uni 0xB4A4,0x0020,0xC808))
+        Set-Content -LiteralPath $path -Encoding utf8 -Value $lines
+    }
+    $fxReview = Join-Path $cycFxDir 'dest-review.md'
+    $fxProse = Join-Path $cycFxDir 'prose-impl.md'
+    $fxDup = Join-Path $cycFxDir 'dup-dest.md'
+    $fxParen = Join-Path $cycFxDir 'paren-only.md'
+    CycFx2 $fxReview ('**review ' + $STEP_WORD + '** (impl report already exists)') ''
+    CycFx2 $fxProse ('**milestone ' + $STEP_WORD + '** (new milestone -- the impl report stays)') ''
+    CycFx2 $fxDup ('**milestone ' + $STEP_WORD + '**') ('    ' + $KEY_FAIL + ' old path ' + $ARROW + ' **impl ' + $STEP_WORD + '**')
+    CycFx2 $fxParen ('it just stops (note: it used to be **impl ' + $STEP_WORD + '**)') ''
+    Chk "W122: control -- a destination changed to review is caught" (BranchTarget $fxReview $CYC_SEC_ANCHOR $KEY_FAIL) '1 review'
+    Chk "W123: control -- an inversion with impl left in prose is caught" (BranchTarget $fxProse $CYC_SEC_ANCHOR $KEY_FAIL) '1 milestone'
+    Chk "W124: control -- a second item carrying a destination is caught" (BranchTarget $fxDup $CYC_SEC_ANCHOR $KEY_FAIL) '2 milestone impl'
+    Chk "W129: control -- a destination only inside parentheses is not a destination" (BranchTarget $fxParen $CYC_SEC_ANCHOR $KEY_FAIL) '0 '
+    # (W125, W126, W130) FALSE-POSITIVE DIRECTION -- edits that change no behaviour must stay green.
+    $fxFold = Join-Path $cycFxDir 'folded.md'
+    Set-Content -LiteralPath $fxFold -Encoding utf8 -Value @(
+        ('## ' + $CYC_SEC_ANCHOR),
+        ('    ' + $KEY_OK + ' ' + $ARROW + ' **milestone ' + $STEP_WORD + '**'),
+        ('    ' + $KEY_FAIL + ' ' + $ARROW + ' target that milestone'),
+        ('      **impl ' + $STEP_WORD + '** (rework).'),
+        ('    ' + $KEY_FAIL + ' repeated means a re-split is advised'),
+        ('## ' + (Uni 0xB4A4,0x0020,0xC808)))
+    $fxContrast = Join-Path $cycFxDir 'contrast.md'
+    Set-Content -LiteralPath $fxContrast -Encoding utf8 -Value @(
+        ('## ' + $CYC_SEC_ANCHOR),
+        ('    ' + $KEY_OK + ' ' + $ARROW + ' **milestone ' + $STEP_WORD + '**'),
+        ('    ' + $KEY_FAIL + ' ' + $ARROW + ' toward that milestone **impl ' + $STEP_WORD + '** (rework).'),
+        ('      **milestone ' + $STEP_WORD + '** is not what happens.'),
+        ('## ' + (Uni 0xB4A4,0x0020,0xC808)))
+    Chk "W125: false-positive direction -- a folded line stays green" (BranchTarget $fxFold $CYC_SEC_ANCHOR $KEY_FAIL) '1 impl'
+    Chk "W126: false-positive direction -- an explanatory line with no destination is not counted" ((BranchTarget $fxFold $CYC_SEC_ANCHOR $KEY_FAIL).Split(' ')[0]) '1'
+    Chk "W130: false-positive direction -- a contrastive continuation line is not a destination" (BranchTarget $fxContrast $CYC_SEC_ANCHOR $KEY_FAIL) '1 impl'
     }
 
     # (W31-W41 / M64-T04) MEASUREMENT ALLOCATION -- the convention plants two declaration lines that
