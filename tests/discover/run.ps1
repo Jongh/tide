@@ -5637,7 +5637,7 @@ try {
     Chk "W28: no forbidden separator in the scope-limits declaration tail" (BadSeps $CONV $SCOPE_LIM_KEY) '0'
     Chk "W29: no forbidden separator in the verify-scope declaration tail" (BadSeps $CONV $VS_KEY) '0'
 
-    # (W111-W131 / M72) DOES THE CYCLE START POINT READ THE REVIEW VERDICT. The no-argument start point
+    # (W111-W151 / M72, M73) DOES THE CYCLE START POINT READ THE REVIEW VERDICT. The no-argument start point
     # of /tide:cycle did not look at the verdict, so a "not possible" verdict went to a new milestone
     # (the accident state `st-fail-then-draft` in the state list) instead of rework, disagreeing with
     # /tide:status, which is the single source of that rule. Two ASCII tokens are coupled -- the
@@ -5698,15 +5698,15 @@ try {
         '- the `review-report` row is how the verdict is read, and `st-fail-then-draft` is the mismatch')
     Chk "W116: control -- a flattened one-line mutation without the branch is caught" (InnerOnOtherLine $cycFlat $SI_ROW_TOK $ST_ACC_TOK) 'no'
 
-    # (W117-W131 / M72 round 3) READ THE MAPPING FROM THE CONVENTION DECLARATION, AND READ THE DESTINATION
-    # FROM "AFTER THE ARROW, BEFORE THE PARENTHESIS". Rounds 0-2 all asked "is the destination MENTIONED in
-    # this prose", and every narrowing opened the opposite direction. Even the round 2 form left
-    # "-> it just stops (note: it used to be **impl <step-word>**)" at 128/0 GREEN in both copies while the
-    # behaviour was gone, and reddened 127/1 on a harmless contrastive line "**milestone <step-word>** is not
-    # what happens". So the seat moves: (1) the mapping is read from the convention's `start-point-map:`
-    # DECLARATION, not from skill prose; (2) the destination is read only from the branch item's text AFTER
-    # the arrow and BEFORE the first opening parenthesis (`start-point-target`). A retrospective note inside
-    # parentheses, and a contrastive line that follows AFTER that parenthesis, are not destinations (one with no parenthesis before it is read, and goes red).
+    # (W117-W121, W127, W128, W131-W136 / M73) A BRANCH ITEM IS EXACTLY ONE LINE ASSEMBLED FROM THE DECLARATION
+    # (`start-point-line`). M72 narrowed the seat it READ the destination from for four rounds (line -> item window
+    # -> fixed phrase -> after the arrow, before the parenthesis); every narrowing opened the opposite direction, and
+    # in round 3 a negation or a retrospective with no parenthesis inside the read seat was still 133/0 GREEN in
+    # both copies (accepted as residual risk). M73 repeats the switch M61 made: instead of adding prohibitions it
+    # asserts that the WHOLE item equals the expected line. The expected line is assembled from the convention's
+    # `start-point-map:` declaration, so nothing is pinned in the runner. Explanations live in sibling items and
+    # their MEANING is not asked (open boundary -- convention). The M72 "read seat" checks (W122-W126, W129, W130)
+    # are retired (README).
     $STEP_WORD = Uni 0xB2E8,0xACC4,0xBD80,0xD130                        # dan-gye-bu-teo = "from the ... step"
     $ARROW = [string][char]0x2192
     $CYC_SEC_ANCHOR = Uni 0xC2DC,0xC791,0xC810,0x0020,0xD310,0xB2E8     # si-jak-jeom pan-dan = start-point decision
@@ -5718,6 +5718,7 @@ try {
     $KEY_FAIL = '- ' + $VERDICT_WORD + ' `' + $VERDICT_FAIL + '`'
     $KEY_OK = '- ' + $VERDICT_WORD + ' `' + $VERDICT_OK + '`'
     $KEY_UNREAD = '- **' + (Uni 0xD310,0xC815,0xC744,0x0020,0xC77D,0xC9C0,0x0020,0xBABB,0xD558,0xBA74) + '**'
+    $fpWs = [char[]]@([char]0x20, [char]0x09)   # space and tab only -- the sh copy strips exactly [ \t]
     function SecSpan([string]$path, [string]$anchor) {
         $out = New-Object System.Collections.Generic.List[string]
         $inside = $false
@@ -5728,74 +5729,56 @@ try {
         return $out
     }
     function SpmDest([string]$conv, [string]$key) {
-        foreach ($tok in ((DeclTail $conv $SPM_KEY) -split '\s+')) {
+        foreach ($tok in ((DeclTail $conv $SPM_KEY) -split ' ')) {
             $p = $tok.IndexOf('=')
-            if ($p -gt 0 -and $tok.Substring(0, $p) -eq $key) { return $tok.Substring($p + 1) }
+            if ($p -gt 0 -and [string]::Equals($tok.Substring(0, $p), $key, [System.StringComparison]::Ordinal)) { return $tok.Substring($p + 1) }
         }
         return ''
     }
     function SpmPairs([string]$conv) {
         $c = 0
-        foreach ($tok in ((DeclTail $conv $SPM_KEY) -split '\s+')) { if ($tok.IndexOf('=') -gt 0) { $c++ } }
+        foreach ($tok in ((DeclTail $conv $SPM_KEY) -split ' ')) { if ($tok.IndexOf('=') -gt 0) { $c++ } }
         return $c
     }
-    $btWs = [char[]]@([char]0x20, [char]0x09)   # space and tab only -- the sh copy's trim() strips exactly these
-    function BranchTarget([string]$path, [string]$anchor, [string]$key) {
-        $script:btN = 0
-        $script:btSeen = New-Object System.Collections.Generic.List[string]
-        $script:btOpen = $false; $script:btJoined = ''; $script:btDepth = 0
-        $scan = {
-            if (-not $script:btOpen) { return }
-            $j = $script:btJoined
-            $p = $j.IndexOf($ARROW, [System.StringComparison]::Ordinal)
-            if ($p -ge 0) {
-                $t = $j.Substring($p + 1)
-                $q = $t.IndexOf('(', [System.StringComparison]::Ordinal)
-                if ($q -ge 0) { $t = $t.Substring(0, $q) }
-                while ($true) {
-                    $a = $t.IndexOf('**', [System.StringComparison]::Ordinal); if ($a -lt 0) { break }
-                    $t = $t.Substring($a + 2)
-                    $b = $t.IndexOf('**', [System.StringComparison]::Ordinal); if ($b -lt 0) { break }
-                    $seg = $t.Substring(0, $b); $t = $t.Substring($b + 2)
-                    if ($seg.EndsWith(' ' + $STEP_WORD, [System.StringComparison]::Ordinal)) {
-                        $seg = $seg.Substring(0, $seg.Length - $STEP_WORD.Length - 1)
-                        if (-not $script:btSeen.Contains($seg)) { $script:btSeen.Add($seg) }
-                        $script:btN++
-                    }
-                }
-            }
-            $script:btOpen = $false; $script:btJoined = ''
-        }
+    function SpmLine([string]$conv, [string]$declKey, [string]$itemKey) {
+        $d = SpmDest $conv $declKey
+        if ($d -eq '') { return '' }
+        return ($itemKey + ' ' + $ARROW + ' **' + $d + ' ' + $STEP_WORD + '**')
+    }
+    function FormProbe([string]$path, [string]$anchor, [string]$key, [string]$want) {
+        # A line whose leading space/tab-stripped text STARTS with the key is a branch item. Depth is the count of
+        # leading spaces; a following non-blank line that is deeper is a continuation of that item.
+        $n = 0; $eq = 0; $cont = 0; $open = $false; $depth = 0
         foreach ($ln in (SecSpan $path $anchor)) {
-            if ($ln.Contains($key)) {
-                & $scan
-                $script:btOpen = $true
-                $script:btDepth = $ln.Length - $ln.TrimStart(' ').Length
-                $script:btJoined = $ln.Trim($btWs)
+            $t = $ln.TrimStart($fpWs)
+            $d = $ln.Length - $ln.TrimStart(' ').Length
+            if ($t.StartsWith($key, [System.StringComparison]::Ordinal)) {
+                $n++; $open = $true; $depth = $d
+                if ([string]::Equals($t, $want, [System.StringComparison]::Ordinal)) { $eq++ }
                 continue
             }
-            if ($script:btOpen) {
-                if ($ln.Trim($btWs) -eq '') { continue }
-                $d = $ln.Length - $ln.TrimStart(' ').Length
-                if ($d -gt $script:btDepth) { $script:btJoined = $script:btJoined + ' ' + $ln.Trim($btWs); continue }
-                & $scan
+            if ($open) {
+                if ($t -eq '') { continue }
+                if ($d -gt $depth) { $cont++; continue }
+                $open = $false
             }
         }
-        & $scan
-        return ('{0} {1}' -f $script:btN, ($script:btSeen -join ' '))
+        $same = if ($n -eq 1 -and $eq -eq 1) { 'yes' } else { 'no' }
+        $hasCont = if ($cont -gt 0) { 'yes' } else { 'no' }
+        return ('{0} {1} {2}' -f $n, $same, $hasCont)
     }
-    # (W117) extraction positive-control -- an empty section makes the probes answer a vacuous "0 ".
+    # (W117) extraction positive-control -- an empty section makes the probes answer a vacuous "0 no no".
     $cycBrKey = '- ' + $VERDICT_WORD + ' `'
     $cycBrN = @(SecSpan $CYC_SKILL $CYC_SEC_ANCHOR | Where-Object { $_.Contains($cycBrKey) }).Count
     Chk "W117: positive-control for branch lines in the start-point section (>=2)" $(if ($cycBrN -ge 2) { 'ok' } else { 'no' }) 'ok'
     # (W127-W128) THE DECLARATION SIDE -- exactly one declaration line, and pairs actually extracted.
     Chk "W127: exactly one start-point-map declaration line" (DeclCount $CONV $SPM_KEY) '1'
     Chk "W128: positive-control for declared pairs (>=3)" $(if ((SpmPairs $CONV) -ge 3) { 'ok' } else { 'no' }) 'ok'
-    # (W118-W120) MAIN CHECKS -- does the prose match the DECLARED mapping. One item carries a destination
-    # and the destination read after the arrow, before the parenthesis, equals the declared one.
-    Chk "W118: the not-possible branch matches the declaration" (BranchTarget $CYC_SKILL $CYC_SEC_ANCHOR $KEY_FAIL) ('1 ' + (SpmDest $CONV $VERDICT_FAIL))
-    Chk "W119: the possible branch matches the declaration" (BranchTarget $CYC_SKILL $CYC_SEC_ANCHOR $KEY_OK) ('1 ' + (SpmDest $CONV $VERDICT_OK))
-    Chk "W120: the unreadable-verdict branch matches the declaration" (BranchTarget $CYC_SKILL $CYC_SEC_ANCHOR $KEY_UNREAD) ('1 ' + (SpmDest $CONV $VERDICT_UNREAD))
+    # (W118-W120) MAIN CHECKS -- is each branch item the one line assembled from the declaration: exactly one
+    # item per key, byte-equal to the expected line, no continuation lines ("1 yes no").
+    Chk "W118: the not-possible branch is the line assembled from the declaration" (FormProbe $CYC_SKILL $CYC_SEC_ANCHOR $KEY_FAIL (SpmLine $CONV $VERDICT_FAIL $KEY_FAIL)) '1 yes no'
+    Chk "W119: the possible branch is the line assembled from the declaration" (FormProbe $CYC_SKILL $CYC_SEC_ANCHOR $KEY_OK (SpmLine $CONV $VERDICT_OK $KEY_OK)) '1 yes no'
+    Chk "W120: the unreadable-verdict branch is the line assembled from the declaration" (FormProbe $CYC_SKILL $CYC_SEC_ANCHOR $KEY_UNREAD (SpmLine $CONV $VERDICT_UNREAD $KEY_UNREAD)) '1 yes no'
     # (W121) MAIN CHECK -- do the two skills use the same verdict value set. The notation differs, so the
     # VALUES are extracted and sorted ORDINALLY (Sort-Object is culture-aware -- see OrdinalSortUnique).
     function VerdictSet([string]$path) {
@@ -5811,49 +5794,158 @@ try {
     $vsStatus = VerdictSet (Join-Path $ROOT 'skills/status/SKILL.md')
     $vsCycle = VerdictSet $CYC_SKILL
     Chk "W131: positive-control for verdict-value extraction" $(if ($vsStatus -ne '' -and $vsCycle -ne '') { 'ok' } else { 'no' }) 'ok'
-    # (W122-W124, W129) controls -- four mutations promoted to fixtures.
+    # (W132-W135) controls -- four form-breaking mutations promoted to fixtures. The expected line and the fixture's
+    # NOT-POSSIBLE branch line are assembled from the real convention declaration -- pinning a destination in the
+    # fixture makes the controls go falsely red on a legitimate declaration change (M73 reversal measurement). The
+    # possible / unreadable lines stay pinned -- these controls probe only the not-possible key. The fully assembled
+    # fixtures are the block ones (W141-W146, W151).
     if (-not (Test-Path $cycFxDir)) { New-Item -ItemType Directory -Path $cycFxDir | Out-Null }
-    function CycFx2([string]$path, [string]$failBody, [string]$extra) {
+    $lineOk = '    ' + $KEY_OK + ' ' + $ARROW + ' **milestone ' + $STEP_WORD + '**'
+    $cycWantFail = SpmLine $CONV $VERDICT_FAIL $KEY_FAIL
+    $lineFail = '    ' + $cycWantFail
+    $lineUnread = '    ' + $KEY_UNREAD + ' ' + $ARROW + ' **milestone ' + $STEP_WORD + '**'
+    function CycFx3([string]$path, [string]$failLine, [string]$extra) {
         $lines = New-Object System.Collections.Generic.List[string]
         $lines.Add('## ' + $CYC_SEC_ANCHOR)
         $lines.Add('- ' + (Uni 0xC778,0xC790,0x0020,0xC5C6,0xC74C))
-        $lines.Add('    ' + $KEY_OK + ' ' + $ARROW + ' **milestone ' + $STEP_WORD + '**')
-        $lines.Add('    ' + $KEY_FAIL + ' ' + $ARROW + ' ' + $failBody)
+        $lines.Add($lineOk)
+        $lines.Add($failLine)
         if ($extra -ne '') { $lines.Add($extra) }
+        $lines.Add($lineUnread)
         $lines.Add('## ' + (Uni 0xB4A4,0x0020,0xC808))
         Set-Content -LiteralPath $path -Encoding utf8 -Value $lines
     }
-    $fxReview = Join-Path $cycFxDir 'dest-review.md'
-    $fxProse = Join-Path $cycFxDir 'prose-impl.md'
-    $fxDup = Join-Path $cycFxDir 'dup-dest.md'
-    $fxParen = Join-Path $cycFxDir 'paren-only.md'
-    CycFx2 $fxReview ('**review ' + $STEP_WORD + '** (impl report already exists)') ''
-    CycFx2 $fxProse ('**milestone ' + $STEP_WORD + '** (new milestone -- the impl report stays)') ''
-    CycFx2 $fxDup ('**milestone ' + $STEP_WORD + '**') ('    ' + $KEY_FAIL + ' old path ' + $ARROW + ' **impl ' + $STEP_WORD + '**')
-    CycFx2 $fxParen ('it just stops (note: it used to be **impl ' + $STEP_WORD + '**)') ''
-    Chk "W122: control -- a destination changed to review is caught" (BranchTarget $fxReview $CYC_SEC_ANCHOR $KEY_FAIL) '1 review'
-    Chk "W123: control -- an inversion with impl left in prose is caught" (BranchTarget $fxProse $CYC_SEC_ANCHOR $KEY_FAIL) '1 milestone'
-    Chk "W124: control -- a second item carrying a destination is caught" (BranchTarget $fxDup $CYC_SEC_ANCHOR $KEY_FAIL) '2 milestone impl'
-    Chk "W129: control -- a destination only inside parentheses is not a destination" (BranchTarget $fxParen $CYC_SEC_ANCHOR $KEY_FAIL) '0 '
-    # (W125, W126, W130) FALSE-POSITIVE DIRECTION -- edits that change no behaviour must stay green.
-    $fxFold = Join-Path $cycFxDir 'folded.md'
-    Set-Content -LiteralPath $fxFold -Encoding utf8 -Value @(
-        ('## ' + $CYC_SEC_ANCHOR),
-        ('    ' + $KEY_OK + ' ' + $ARROW + ' **milestone ' + $STEP_WORD + '**'),
-        ('    ' + $KEY_FAIL + ' ' + $ARROW + ' target that milestone'),
-        ('      **impl ' + $STEP_WORD + '** (rework).'),
-        ('    ' + $KEY_FAIL + ' repeated means a re-split is advised'),
-        ('## ' + (Uni 0xB4A4,0x0020,0xC808)))
-    $fxContrast = Join-Path $cycFxDir 'contrast.md'
-    Set-Content -LiteralPath $fxContrast -Encoding utf8 -Value @(
-        ('## ' + $CYC_SEC_ANCHOR),
-        ('    ' + $KEY_OK + ' ' + $ARROW + ' **milestone ' + $STEP_WORD + '**'),
-        ('    ' + $KEY_FAIL + ' ' + $ARROW + ' toward that milestone **impl ' + $STEP_WORD + '** (rework).'),
-        ('      **milestone ' + $STEP_WORD + '** is not what happens.'),
-        ('## ' + (Uni 0xB4A4,0x0020,0xC808)))
-    Chk "W125: false-positive direction -- a folded line stays green" (BranchTarget $fxFold $CYC_SEC_ANCHOR $KEY_FAIL) '1 impl'
-    Chk "W126: false-positive direction -- an explanatory line with no destination is not counted" ((BranchTarget $fxFold $CYC_SEC_ANCHOR $KEY_FAIL).Split(' ')[0]) '1'
-    Chk "W130: false-positive direction -- a contrastive continuation line is not a destination" (BranchTarget $fxContrast $CYC_SEC_ANCHOR $KEY_FAIL) '1 impl'
+    $fxTail = Join-Path $cycFxDir 'tail.md'
+    $fxCont = Join-Path $cycFxDir 'cont.md'
+    $fxDupe = Join-Path $cycFxDir 'dup.md'
+    $fxRetro = Join-Path $cycFxDir 'retro.md'
+    $fxSibling = Join-Path $cycFxDir 'sibling.md'
+    CycFx3 $fxTail ($lineFail + ' (rework).') ''
+    CycFx3 $fxCont $lineFail '      (rework -- the fix the verdict asks for)'
+    CycFx3 $fxDupe $lineFail $lineFail
+    CycFx3 $fxRetro ('    ' + $KEY_FAIL + ' ' + $ARROW + ' it used to be **impl ' + $STEP_WORD + '** but now it stops') ''
+    CycFx3 $fxSibling $lineFail ('    - explanation of the branch above -- `' + $VERDICT_FAIL + '` is rework on that milestone')
+    Chk "W132: control -- prose on the tail of a branch line is caught" (FormProbe $fxTail $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail) '1 no no'
+    Chk "W133: control -- a continuation line under a branch is caught" (FormProbe $fxCont $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail) '1 yes yes'
+    Chk "W134: control -- a duplicated branch is caught" (FormProbe $fxDupe $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail) '2 no no'
+    Chk "W135: control -- a retrospective inside the branch (M72 residual) is caught" (FormProbe $fxRetro $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail) '1 no no'
+    # (W136) FALSE-POSITIVE DIRECTION -- a sibling explanation item is not a branch. If it were counted, moving the
+    # explanations out of the branch would go falsely red.
+    Chk "W136: false-positive direction -- a sibling explanation item is not counted as a branch" (FormProbe $fxSibling $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail) '1 yes no'
+    # (W137-W146 / M73 round 1) BRANCHES STAND AS A BLOCK (`start-point-block`). Round 0 asserted only the single
+    # branch LINE, and the review measured four ordinary edits that erase the behaviour without touching that line --
+    # a same-indent continuation under a branch, a changed parent condition, a comment/fence wrapped around the
+    # branches, a conflicting branch under another list marker (all 131/0 GREEN in both copies). Instead of adding
+    # prohibitions one at a time, the WHOLE BLOCK is asserted: parent line (assembled from `start-point-parent:`) ->
+    # pointer line -> the three branches, CONTIGUOUS; the line right before the parent and the first line after the
+    # block are list items; branch-shaped lines, whatever the list marker, are exactly three.
+    $SPP_KEY = 'start-point-parent:'
+    $SPT_KEY = 'start-point-pointer:'
+    $SP_PTR_TOK = '`review-report`'
+    function SppLine([string]$conv) {
+        $v = DeclTail $conv $SPP_KEY
+        if ($null -eq $v -or $v -eq '') { return '' }
+        if ($v.StartsWith(' ', [System.StringComparison]::Ordinal)) { $v = $v.Substring(1) }
+        if ($v -eq '') { return '' }
+        return ('- ' + $v)
+    }
+    function SptLine([string]$conv) {
+        $v = DeclTail $conv $SPT_KEY
+        if ($null -eq $v) { return '' }
+        if ($v.StartsWith(' ', [System.StringComparison]::Ordinal)) { $v = $v.Substring(1) }
+        return $v
+    }
+    $bpK1 = $VERDICT_WORD + ' `'
+    $bpK2 = '**' + (Uni 0xD310,0xC815,0xC744,0x0020,0xC77D,0xC9C0,0x0020,0xBABB,0xD558,0xBA74) + '**'
+    function BpUnmark([string]$s) {
+        if ($s.Length -ge 2 -and ('-*+'.IndexOf($s[0]) -ge 0) -and $s[1] -eq ' ') { return $s.Substring(2) }
+        $m = [regex]::Match($s, '^[0-9]+\. ')
+        if ($m.Success) { return $s.Substring($m.Length) }
+        return $s
+    }
+    function BlockProbe([string]$path, [string]$anchor, [string]$wp, [string]$wt, [string]$wo, [string]$wf, [string]$wu) {
+        $L = @(SecSpan $path $anchor)
+        $n = $L.Count; $pc = 0; $pi = -1; $bc = 0
+        for ($i = 0; $i -lt $n; $i++) {
+            if ($L[$i].Contains($SP_PTR_TOK)) { $pc++; if ($pi -lt 0) { $pi = $i } }
+            $t = BpUnmark ($L[$i].TrimStart($fpWs))
+            if ($t.StartsWith($bpK1, [System.StringComparison]::Ordinal) -or $t.StartsWith($bpK2, [System.StringComparison]::Ordinal)) { $bc++ }
+        }
+        $par = ($pi -ge 1 -and [string]::Equals($L[$pi - 1].TrimStart($fpWs), $wp, [System.StringComparison]::Ordinal))
+        $ptr = ($pi -ge 0 -and [string]::Equals($L[$pi].TrimStart($fpWs), $wt, [System.StringComparison]::Ordinal))
+        $blk = ($pi -ge 0 -and $pi + 3 -lt $n -and
+                [string]::Equals($L[$pi + 1].TrimStart($fpWs), $wo, [System.StringComparison]::Ordinal) -and
+                [string]::Equals($L[$pi + 2].TrimStart($fpWs), $wf, [System.StringComparison]::Ordinal) -and
+                [string]::Equals($L[$pi + 3].TrimStart($fpWs), $wu, [System.StringComparison]::Ordinal))
+        $aft = $false
+        if ($pi -ge 0) {
+            $j = $pi + 4
+            while ($j -lt $n -and $L[$j].TrimStart($fpWs) -eq '') { $j++ }
+            $aft = ($j -ge $n -or $L[$j].TrimStart($fpWs).StartsWith('- ', [System.StringComparison]::Ordinal))
+        }
+        $bef = ($pi -ge 2 -and $L[$pi - 2].TrimStart($fpWs).StartsWith('- ', [System.StringComparison]::Ordinal))
+        $yn = { param($b) if ($b) { 'yes' } else { 'no' } }
+        return ('{0} {1} {2} {3} {4} {5} {6}' -f $pc, (& $yn $par), (& $yn $ptr), (& $yn $blk), (& $yn $aft), (& $yn $bef), $bc)
+    }
+    $cycWantParent = SppLine $CONV
+    $cycWantPointer = SptLine $CONV
+    $cycWantOk = SpmLine $CONV $VERDICT_OK $KEY_OK
+    $cycWantUnread = SpmLine $CONV $VERDICT_UNREAD $KEY_UNREAD
+    function CycBlock([string]$path) { return (BlockProbe $path $CYC_SEC_ANCHOR $cycWantParent $cycWantPointer $cycWantOk $cycWantFail $cycWantUnread) }
+    # (W137) MAIN CHECK -- the branch block. Normal is "1 yes yes yes yes yes 3" (seven values from round 2 -- the pointer line is the third).
+    Chk "W137: the start-point branches stand as the block assembled from the declarations" (CycBlock $CYC_SKILL) '1 yes yes yes yes yes 3'
+    # (W138-W140) declaration side -- the parent declaration is unique, and both tails carry no forbidden separator
+    # (same shape as the other declaration lines, W26 etc.).
+    Chk "W138: no forbidden separator in the start-point-map declaration tail" (BadSeps $CONV $SPM_KEY) '0'
+    Chk "W139: exactly one start-point-parent declaration line" (DeclCount $CONV $SPP_KEY) '1'
+    Chk "W140: no forbidden separator in the start-point-parent declaration tail" (BadSeps $CONV $SPP_KEY) '0'
+    # (W141-W145) controls -- the round 0 review's mutations promoted to fixtures. The base fixture's parent and branch
+    # lines are assembled FROM THE DECLARATIONS.
+    $blkBase = New-Object System.Collections.Generic.List[string]
+    $blkBase.Add('## ' + $CYC_SEC_ANCHOR)
+    $blkBase.Add('- ' + (Uni 0xC778,0xC790,0x0020,0xC5C6,0xC74C) + ' ' + $ARROW + ' report state:')
+    $blkBase.Add('  - impl report missing ' + $ARROW + ' **impl ' + $STEP_WORD + '**')
+    $blkBase.Add('  ' + $cycWantParent)
+    $blkBase.Add('    ' + $cycWantPointer)
+    $blkBase.Add('    ' + $cycWantOk)
+    $blkBase.Add('    ' + $cycWantFail)
+    $blkBase.Add('    ' + $cycWantUnread)
+    $blkBase.Add('    - explanation of the three lines above -- how to read the verdict and the accident state go here')
+    $blkBase.Add('- **no milestone document** ' + $ARROW + ' **milestone ' + $STEP_WORD + '**')
+    $blkBase.Add('## ' + (Uni 0xB4A4,0x0020,0xC808))
+    function BlkFx([string]$name, [scriptblock]$edit) {
+        $l = New-Object System.Collections.Generic.List[string]
+        foreach ($x in $blkBase) { $l.Add($x) }
+        & $edit $l
+        $p = Join-Path $cycFxDir $name
+        Set-Content -LiteralPath $p -Encoding utf8 -Value $l
+        return $p
+    }
+    # Insert positions mirror the sh copy's 1-based "after line N" (List.Insert index N).
+    $fxBlk = BlkFx 'blk.md' { param($l) }
+    $fxLazy = BlkFx 'blk-lazy.md' { param($l) $l.Insert(8, '    it no longer goes to that milestone and stops.') }
+    $fxParent = BlkFx 'blk-parent.md' { param($l) $l[3] = '  - impl' + [char]0x00B7 + 'review reports both present ' + $ARROW + ' **milestone ' + $STEP_WORD + '** -- the branches below are for reference' }
+    $fxCmt = BlkFx 'blk-cmt.md' { param($l) $l.Insert(5, '<!-- retired branches:'); $l.Insert(9, '-->') }
+    $fxStar = BlkFx 'blk-star.md' { param($l) $l.Insert(9, '    * ' + $VERDICT_WORD + ' `' + $VERDICT_FAIL + '` ' + $ARROW + ' **milestone ' + $STEP_WORD + '**') }
+    $fxHead = BlkFx 'blk-head.md' { param($l) $l.Insert(3, '### retired rules') }
+    Chk "W141: control -- a same-indent continuation line after the block is caught" (CycBlock $fxLazy) '1 yes yes yes no yes 3'
+    Chk "W142: control -- a changed parent condition is caught" (CycBlock $fxParent) '1 no yes yes yes yes 3'
+    Chk "W143: control -- a comment wrapped around the branches is caught" (CycBlock $fxCmt) '1 yes yes no yes yes 3'
+    Chk "W144: control -- a conflicting branch under another list marker is caught" (CycBlock $fxStar) '1 yes yes yes yes yes 4'
+    Chk "W145: control -- a sub-heading right before the parent line is caught" (CycBlock $fxHead) '1 yes yes yes yes no 3'
+    # (W146) FALSE-POSITIVE DIRECTION -- the base fixture (a normal block with a sibling explanation and a next item)
+    # must stay green.
+    Chk "W146: false-positive direction -- a normal block with an explanation item and a next item stays green" (CycBlock $fxBlk) '1 yes yes yes yes yes 3'
+    # (W147-W151 / M73 round 2) THE POINTER LINE IS PINNED TOO -- the round 1 review measured that rewriting the prose of
+    # the pointer line (inside the block, checked only for its token) flips the parent condition at 141/0 GREEN in both
+    # copies. The pointer line must now equal the line assembled from `start-point-pointer:`. Both declaration values get
+    # an extraction positive-control (same shape as W128 -- an empty value makes the expected line empty and the probe vacuous).
+    Chk "W147: positive-control for the start-point-parent value" $(if ($cycWantParent -ne '' -and $cycWantParent -ne '- ') { 'ok' } else { 'no' }) 'ok'
+    Chk "W148: exactly one start-point-pointer declaration line" (DeclCount $CONV $SPT_KEY) '1'
+    Chk "W149: no forbidden separator in the start-point-pointer declaration tail" (BadSeps $CONV $SPT_KEY) '0'
+    Chk "W150: positive-control for the start-point-pointer value" $(if ($cycWantPointer -ne '') { 'ok' } else { 'no' }) 'ok'
+    $fxPtr = BlkFx 'blk-ptr.md' { param($l) $l[4] = '    -- this condition and the branches below are retired; regardless of the verdict it always goes **milestone ' + $STEP_WORD + '** (how to read the verdict: the `review-report` row)' }
+    Chk "W151: control -- a parent condition flipped by the pointer line's prose is caught" (CycBlock $fxPtr) '1 yes no yes yes yes 3'
     }
 
     # (W31-W41 / M64-T04) MEASUREMENT ALLOCATION -- the convention plants two declaration lines that
