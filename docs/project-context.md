@@ -96,7 +96,9 @@
 
 - **사이클**: kickoff → milestone → impl → review → release. `status`는 읽기 전용 현재 위치 보고.
   `debug`는 **사이클 밖 행위 커맨드**다(계획 우선 사이클과 달리 발견 우선 — 출구는 release로 같다)
-- **부수효과 분리**: impl·review는 git 작업 금지(코드·보고서만), git commit/tag/push는 release에서만
+- **부수효과 분리**: impl·review는 git 작업 금지(코드·보고서만), git commit/tag/push는 release에서만 —
+  에픽·회고 문서만의 커밋(`/tide:release docs` · `docs-commit-paths:`)도 같은 release 단계 안의 경로다(M74).
+  단일 원본은 `docs/conventions-release.md`의 "문서 커밋 경로" 절
 - **tide-guard**: `.tide/phase`가 `release`가 아니면 git **쓰기**(commit·태그 생성/삭제·push)를 기계적으로
   차단(exit 2)하고 git **읽기**(커밋 읽기·태그 목록·메시지 검색·이력 파일 읽기)는 통과시킨다(M28). verb는
   git **서브커맨드 위치**에서만 판정한다 — 옵션 값(`--grep=commit`)·경로(`HEAD:src/tag.rs`)·복합 서브커맨드

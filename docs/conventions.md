@@ -293,6 +293,9 @@ tide는 porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴�
   메시지 검색(`--grep=…`)·이력 파일 읽기(`HEAD:<path>`)는 막지 않는다. 안내 메시지(한국어): "'{phase}'
   단계에서는 git 쓰기(commit·태그 생성/삭제·push)가 차단됩니다 — 읽기는 허용됩니다. git 쓰기는
   /tide:release 단계에서만 가능합니다."
+- **문서 커밋 경로도 이 `release` phase 안이다**: 릴리즈가 아닐 때 에픽·회고 문서만 커밋하는
+  `/tide:release docs`는 새 phase 값 없이 같은 `release` phase에서만 git을 쓰므로 가드 계약은 그대로다.
+  허용 경로(`docs-commit-paths:`)와 전제 셋은 `docs/conventions-release.md`의 "문서 커밋 경로" 절이 정한다.
 - **서브커맨드 위치 판정**: verb(`commit`·`tag`·`push`)는 git **서브커맨드**일 때만 본다 — `git` 뒤
   전역 옵션(`-C <dir>`·`-c <kv>`·`--git-dir`·`--work-tree`·`--namespace`·`--super-prefix`·`--exec-path`
   등 인자 소비형은 그 인자까지)을 건너뛴 첫 비-옵션 토큰. verb 글자가 옵션 값(`--grep=commit`)·경로
@@ -1011,8 +1014,13 @@ release 1번 검사의 판정 근거는 리뷰 보고서 또는 debug 보고서�
 
   - **발화 조건은 「이 실행에서 태그가 달렸는가」 하나다** — 게시 성공 여부가 아니다. 그래서
     push-only·`release` 모드의 게시 성공과 **`unpublished-release` 종료**에서 돌고, `pr` 모드의
-    **마무리**에서 돌며, `pr` 모드의 **생성·대기·중단**에서는 돌지 않는다(그 셋은 태그가 없다).
+    **마무리**에서 돌며, `pr` 모드의 **생성·대기·중단**과 **문서 커밋 경로**(`/tide:release docs`)에서는
+    돌지 않는다(넷 다 태그가 없다).
     재서술처는 `skills/release/SKILL.md`와 `docs/commands.md` **둘**이다.
+  - **회고가 낸 변경은 문서 커밋 경로로 먼저 커밋할 수 있다** — 그 변경은 이번 태그에 실리지 않고 다음
+    사이클의 커밋 범위로 가지만, 다음 릴리즈를 기다리지 않고 `/tide:release docs`로 내보낼 수 있다. 그
+    경로는 태그를 달지 않으므로 거기서 회고가 다시 돌지 않는다(`docs-commit-paths:` 선언과 전제의 단일
+    원본은 `docs/conventions-release.md`의 "문서 커밋 경로" 절).
   - **`.tide/phase`가 `idle`로 돌아온 뒤에 돈다** — 회고는 git을 쓰지 않으므로 가드를 열어 둘 이유가
     없고, *"git 쓰기는 release 단계에서만"* 불변에 그 편이 더 충실하다.
   - **회고 실패는 릴리즈를 실패로 만들지 않는다** — 릴리즈가 **성립한 뒤에** 도는 사후 절차이므로
@@ -2164,7 +2172,7 @@ release 프리플라이트에서 사이트를 빌드한 **산출물 기준**으�
 | fleet-verify | git commit/tag/push / release / 어떤 레포 phase=release 쓰기 (verification-only) | 프롬프트 + hook(git) |
 | retro | 회고 문서(`docs/reports/retro.md`) 외 파일 생성·수정 / `.tide/phase` 변경 / git 작업 | 프롬프트 |
 | cycle | git commit / git tag / git push (release 단계는 체이닝에서 제외) | 프롬프트 + hook(git) |
-| release | (없음 — 유일하게 git 조작 허용) | 프리플라이트 통과 필요 |
+| release | (없음 — 유일하게 git 조작 허용 · 문서 커밋 경로(`/tide:release docs` · `docs-commit-paths:`)도 이 단계 안) | 프리플라이트 통과 필요(문서 커밋 경로는 전제 셋 — phase `idle` · debug 세션 없음 · 선언 밖 미커밋 변경 0) |
 
 ## 규약 ↔ 실행/인프라 동기화
 

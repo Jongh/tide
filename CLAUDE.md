@@ -15,8 +15,8 @@
   가리킨다(번호는 G8이 금지한다). 집행: Part G.
 - **케이스 수를 여러 곳에 적지 않는다.** 단일 선언처는 각 `tests/{name}/README.md`의 `cases:` 한
   줄이고, 러너가 실측과 대조한다. 사이클 중 변하는 수는 문서에 박지 말고 **선언처를 가리킨다**.
-- **git 쓰기는 `/tide:release` 단계에서만** 통과한다(`.tide/phase` + `hooks/tide-guard.*`).
-  다른 단계에서 commit·tag·push를 시도하면 훅이 exit 2로 막는다. 읽기는 항상 통과한다.
+- **git 쓰기는 `/tide:release` 단계에서만** 통과한다(`.tide/phase` + `hooks/tide-guard.*`) — 다른 단계의
+  commit·tag·push는 훅이 exit 2로 막는다(읽기는 통과). 에픽·회고 문서만의 커밋도 그 단계 안(`/tide:release docs` · `docs-commit-paths:`)이다.
 - **규약은 한 파일이 아니라 문서 집합이다** — `docs/conventions*.md`(본체 + 주제 조각). 목록을
   스크립트·문서에 하드코딩하지 말고 글롭으로 발견한다.
 - **하니스는 네 실행 환경에서 같은 수를 내야 한다** — `dash` · `bash` · Windows PowerShell 5.1 ·

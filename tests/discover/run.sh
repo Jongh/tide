@@ -3992,6 +3992,121 @@ chk "S6: 배선 - release 스킬이 push 축 이름을 갖는다" "$(has_token "
 chk "S7: 픽스처 통제 - 이름이 빠지면 잡는다" "$(has_token "$(ts_fixture)" "$(ts_token)")" "no"
 fi
 
+# (S8~S19 · M74) **문서 커밋 경로** — 에픽 · 회고 문서를 릴리즈 밖에서 커밋하는 `/tide:release docs`의 허용 경로는 규약 조각의
+# `docs-commit-paths:` 한 줄이 들고, release 스킬은 그 선언을 **가리키기만** 한다(Part R과 같은 형태). 무는 것은 ⑴ 선언의 유일성 ·
+# 금지 구분자 · 추출 ⑵ 값의 형태(`*`는 끝의 `/*` 하나 · `@` 조건은 선언된 다른 값) ⑶ 값이 행동 표면과 사이클 산출물을 담지 않는가
+# ⑷ 값의 경로가 실재하는가 ⑸ 스킬의 「문서 커밋 경로」 절이 선언을 가리키고 경로를 다시 열거하지 않는가 ⑹ 회고 자동 실행의
+# 「돌지 않는 분기」 항목에 `docs` 동작이 있는가 ⑺ 재서술처 셋이 선언 키를 갖는가까지다. 런타임에 그 전제대로 커밋되는가는
+# 프롬프트 절차이고 이 대조의 자리가 아니다. 절 추출 헬퍼는 **파트 가드 밖**에서 정의한다(`rf-60` — 가드 안 정의는 파트 선택에서 끊긴다).
+DC_KEY='docs-commit-paths:'
+DC_SEC='문서 커밋 경로'
+DC_ANCHOR='돌지 않는 분기'
+DC_TOK='`docs`'
+CLAUDE_MD="$ROOT/CLAUDE.md"
+dc_vals() { # [규약 파일] → 선언 값(꼬리를 ASCII 공백 **하나**로 쪼갠 토큰 중 `/`를 담은 것) 한 줄씩 — ps1 사본은 `-split ' '`
+    decl_tail "${1:-$CONV_REL}" "$DC_KEY" | LC_ALL=C awk '{ n = split($0, a, /[ ]/); for (i = 1; i <= n; i++) if (index(a[i], "/") > 0) print a[i] }'
+}
+dc_count() { dc_vals "$@" | grep -c .; }
+dc_form_bad() { # → 형태를 어긴 값의 수(`*`는 끝의 `/*` 하나만 · 절대 경로 · 빈 · `.` · `..` 경로 마디 금지 · `@` 꼬리는 자기 아닌 선언 값 하나 — 비교는 대소문자를 가린다)
+    _dcall=$(dc_vals | LC_ALL=C tr '\n' ' ')
+    dc_vals | LC_ALL=C awk -v all="$_dcall" -v sl="$(dc_slashless)" '
+        BEGIN { n = split(all, A, /[ ]/); for (i = 1; i <= n; i++) if (A[i] != "") S[A[i]] = 1 }
+        {
+            v = $0; p = v; c = ""; k = index(v, "@")
+            if (k > 0) { p = substr(v, 1, k - 1); c = substr(v, k + 1) }
+            bad = 0
+            s = p
+            if (length(s) >= 2 && substr(s, length(s) - 1) == "/*") s = substr(s, 1, length(s) - 2)
+            if (index(s, "*") > 0 || substr(p, 1, 1) == "/" || p == "") bad = 1
+            m = split(s, G, /\//); for (j = 1; j <= m; j++) if (G[j] == "" || G[j] == "." || G[j] == "..") bad = 1
+            if (k > 0 && (c == "" || !(c in S) || index(c, "@") > 0 || c == v)) bad = 1
+            nb += bad
+        }
+        END { print nb + 0 + sl }'
+}
+dc_slashless() { # → 꼬리에서 `/`가 없는 **값 모양** 토큰의 수(공백 · 탭 · CR · VT · FF만으로 된 토큰은 빼고 — 그것은 `S9`의 자리). 값 정의가 `/` 있는 토큰만
+    # 집으므로 ` CHANGELOG.md`를 덧붙여도 값이 되지 않고 조용히 초록이었다(M74 리뷰 라운드 1 권장 4) — 그런 토큰을 형태 위반으로 센다.
+    decl_tail "$CONV_REL" "$DC_KEY" | LC_ALL=C awk '{ n = split($0, a, /[ ]/); for (i = 1; i <= n; i++) if (index(a[i], "/") == 0 && a[i] ~ /[^ \t\r\v\f]/) c++ } END { print c + 0 }'
+}
+# 거부 접두사 — 규칙의 원천(`docs/conventions*` · `docs/commands.md`)과 판정을 가진 사이클 산출물(`docs/milestones` · `docs/reports/M` ·
+# `docs/reports/debug-`). 리뷰 판정을 거쳐 릴리즈 커밋에 실려야 하는 자리다(M74 리뷰 권장 5 — debug 보고서가 빠져 있었다).
+DC_DENY='docs/conventions docs/commands.md docs/milestones docs/reports/M docs/reports/debug-'
+dc_deny_bad() { # → 값이 `docs/` 밖이거나 거부 접두사에 든 수. 글롭 값 `X/*`는 **덮는 범위**로 본다 — 거부 접두사가 `X/`로 시작하면 붉다(`docs/reports/*`)
+    dc_vals | LC_ALL=C awk -v deny="$DC_DENY" '
+        BEGIN { nd = split(deny, D, /[ ]/) }
+        {
+            p = $0; k = index(p, "@"); if (k > 0) p = substr(p, 1, k - 1)
+            g = 0; if (length(p) >= 2 && substr(p, length(p) - 1) == "/*") { g = 1; p = substr(p, 1, length(p) - 1) }
+            bad = (substr(p, 1, 5) != "docs/" || p == "docs/")
+            for (i = 1; i <= nd; i++) {
+                if (substr(p, 1, length(D[i])) == D[i]) bad = 1
+                if (g && substr(D[i], 1, length(p)) == p) bad = 1
+            }
+            nb += bad
+        } END { print nb + 0 }'
+}
+dc_missing() { # → 경로가 실재하지 않는 값의 수(끝이 `/*`이면 그 디렉터리, 아니면 그 파일)
+    dc_vals | { _dcm=0; while IFS= read -r _dcv; do
+        _dcp=${_dcv%%@*}
+        case $_dcp in
+            */\*) [ -d "$ROOT/${_dcp%/\*}" ] || _dcm=$((_dcm + 1)) ;;
+            *) [ -f "$ROOT/$_dcp" ] || _dcm=$((_dcm + 1)) ;;
+        esac
+    done; echo "$_dcm"; }
+}
+dc_sec() { # <파일> → `## ` 제목이 「문서 커밋 경로」를 담은 절의 줄(없으면 빈 출력)
+    LC_ALL=C awk -v anc="$DC_SEC" '{ sub(/\r$/, "") } /^## / { inside = (index($0, anc) > 0); next } inside { print }' "$1"
+}
+dc_dup_in() { # <파일> → 그 파일의 「문서 커밋 경로」 절에 경로가 등장하는 **서로 다른** 선언 값의 수(글롭은 `*` 앞까지)
+    _dcs=$(dc_sec "$1")
+    dc_vals | { _dcn=0; while IFS= read -r _dcv; do
+        _dcp=${_dcv%%@*}; _dcp=${_dcp%\*}
+        [ -n "$_dcp" ] && printf '%s\n' "$_dcs" | grep -qF -- "$_dcp" && _dcn=$((_dcn + 1))
+    done; echo "$_dcn"; }
+}
+dc_dup_fixture() { # → 스킬 사본의 「문서 커밋 경로」 절 제목 바로 뒤에 첫 선언 값의 경로를 심은 것(실제 판정을 사본에 건다)
+    _dcf="$SBX/rel-dc.md"
+    _dcv=$(dc_vals | head -1); _dcv=${_dcv%%@*}
+    LC_ALL=C awk -v anc="$DC_SEC" -v t="zzz $_dcv zzz" '{ print } /^## / && index($0, anc) > 0 { print t }' "$REL_SKILL" > "$_dcf"
+    printf '%s' "$_dcf"
+}
+dc_item_has() { # <파일> → "<앵커 항목 창에 `docs` 토큰 yes|no> <파일의 앵커 줄 수>" — 창은 앵커 첫 줄부터 그보다 깊은 연속 줄까지
+    LC_ALL=C awk -v anc="$DC_ANCHOR" -v tok="$DC_TOK" '
+        function ind(s,   n) { n = 0; while (substr(s, n + 1, 1) == " ") n++; return n }
+        { sub(/\r$/, ""); L[NR] = $0 }
+        END {
+            na = 0; s = 0; hit = 0
+            for (i = 1; i <= NR; i++) if (index(L[i], anc) > 0) { na++; if (!s) s = i }
+            if (s > 0) {
+                d = ind(L[s]); if (index(L[s], tok) > 0) hit = 1
+                for (j = s + 1; j <= NR; j++) { if (L[j] == "" || ind(L[j]) <= d) break; if (index(L[j], tok) > 0) hit = 1 }
+            }
+            printf "%s %d\n", (hit ? "yes" : "no"), na
+        }' "$1"
+}
+dc_item_yes() { dc_item_has "$1" | LC_ALL=C awk '{ print ($1 == "yes") ? 1 : 0 }'; }
+dc_item_fixture() { # → 스킬 사본에서 `docs` 토큰을 지운 것
+    _dcif="$SBX/rel-dci.md"
+    LC_ALL=C sed 's/`docs`/zzz/g' "$REL_SKILL" > "$_dcif"
+    printf '%s' "$_dcif"
+}
+if part_on S; then
+chk "S8: docs-commit-paths 선언 줄 정확히 1개" "$(decl_count "$CONV_REL" "$DC_KEY")" "1"
+chk "S9: docs-commit-paths 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV_REL" "$DC_KEY")" "0"
+# (S10) 추출 positive-control — 값이 비거나 스킬의 절이 사라지면 S11~S13 · S15가 «0»으로 공허하게 통과한다.
+chk "S10: 선언 값과 스킬 절 추출 positive-control" "$([ "$(dc_count)" -ge 1 ] && [ -n "$(dc_sec "$REL_SKILL")" ] && echo ok || echo no)" "ok"
+chk "S11: 본 검사 - 선언 값의 형태(끝의 /* 하나 · @ 조건은 다른 선언 값)" "$(dc_form_bad)" "0"
+chk "S12: 본 검사 - 선언 값이 규칙의 원천 · 사이클 산출물 · docs 밖을 담지 않는다" "$(dc_deny_bad)" "0"
+chk "S13: 본 검사 - 선언 값의 경로가 실재한다" "$(dc_missing)" "0"
+chk "S14: 배선 - release 스킬이 선언 키를 가리킨다" "$(has_token "$REL_SKILL" "$DC_KEY")" "yes"
+chk "S15: 본 검사 - 스킬의 문서 커밋 경로 절이 경로를 다시 열거하지 않는다" "$(dc_dup_in "$REL_SKILL")" "0"
+# (S16) 픽스처 통제 — 판정의 **반응**을 묻는다(`control-reads-delta`): 경로를 하나 심은 사본과 원본의 차이가 1이어야 한다.
+chk "S16: 픽스처 통제 - 절에 심은 경로를 잡는다" "$(( $(dc_dup_in "$(dc_dup_fixture)") - $(dc_dup_in "$REL_SKILL") ))" "1"
+chk "S17: 본 검사 - 회고 자동 실행의 돌지 않는 분기 항목에 docs 동작이 있다(앵커 1줄)" "$(dc_item_has "$REL_SKILL")" "yes 1"
+chk "S18: 픽스처 통제 - 항목에서 docs 토큰이 빠지면 잡는다" "$(( $(dc_item_yes "$REL_SKILL") - $(dc_item_yes "$(dc_item_fixture)") ))" "1"
+chk "S19: 본 검사 - 재서술처 셋(규약 본체 · 카탈로그 · CLAUDE.md)이 선언 키를 갖는다" "$(has_token "$CONV" "${DC_KEY%:}")$(has_token "$CMD_CANON" "${DC_KEY%:}")$(has_token "$CLAUDE_MD" "${DC_KEY%:}")" "yesyesyes"
+fi
+
 # --- Part T: 러너 소스 개행 계약 (M59 리뷰 차단 1 → M60) --------------------
 # `.gitattributes`가 `*.sh`를 `eol=lf`로 못박고 사유까지 적어 두었는데 확인하는 기계가 0개였다.
 # M59에서 `run.sh`가 CRLF가 되자 **dash만** 즉사하고 bash·양 PowerShell은 초록이었다 — 「양 사본
