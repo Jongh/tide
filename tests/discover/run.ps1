@@ -4429,6 +4429,160 @@ try {
     Chk "S7: control -- a missing name is caught" (HasToken (TsFixture) (TsToken)) 'no'
     }
 
+    # (S8-S19, M74) DOCUMENT-COMMIT PATH -- the allowed paths of `/tide:release docs` (epic and retro docs committed outside a
+    # release) live in ONE line of the conventions fragment, `docs-commit-paths:`; the release skill only POINTS at it (same
+    # shape as Part R). Bound: (1) the line is unique, separator-clean, extracts (2) value form (`*` only as one trailing `/*`,
+    # no empty/`.`/`..` segment, an `@` tail names ANOTHER declared value, no value-shaped token without `/`) (3) no value is
+    # outside `docs/` or under a deny prefix -- rule sources (`docs/conventions*`, `docs/commands.md`) and verdict-carrying
+    # cycle artifacts (`docs/milestones`, `docs/reports/M`, `docs/reports/debug-`); a glob `X/*` is judged by what it COVERS
+    # (red when a deny prefix starts with `X/`) (4) every value's path exists (5) the
+    # skill's document-commit section points at the key and does not re-enumerate the paths (6) the retro auto-run
+    # non-firing item carries the `docs` action (7) the three restatement sites carry the key. Whether a run actually commits
+    # under those preconditions is prompt procedure, not this check. Helpers are defined OUTSIDE the part guard (rf-60).
+    $DC_KEY = 'docs-commit-paths:'
+    $DC_SEC = Uni 0xBB38,0xC11C,0x0020,0xCEE4,0xBC0B,0x0020,0xACBD,0xB85C
+    $DC_ANCHOR = Uni 0xB3CC,0xC9C0,0x0020,0xC54A,0xB294,0x0020,0xBD84,0xAE30
+    $DC_TOK = '`docs`'
+    $CLAUDE_MD = Join-Path $ROOT 'CLAUDE.md'
+    function DcVals([string]$conv = $CONV_REL) {
+        # Tokens of the tail split by ONE ASCII space that contain a `/` -- the .sh twin splits on /[ ]/.
+        $tail = DeclTail $conv $DC_KEY
+        if ($null -eq $tail) { return @() }
+        return @($tail -split ' ' | Where-Object { $_.Contains('/') })
+    }
+    function DcFormBad {
+        # Ordinal (case-sensitive) set -- a plain @{} ignores case and split the copies on `@DOCS/...` (M74 review recommendation 6).
+        $vals = @(DcVals); $set = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($v in $vals) { [void]$set.Add($v) }
+        $nb = 0
+        foreach ($v in $vals) {
+            $p = $v; $c = ''; $k = $v.IndexOf('@', [System.StringComparison]::Ordinal)
+            if ($k -ge 0) { $p = $v.Substring(0, $k); $c = $v.Substring($k + 1) }
+            $s = $p
+            if ($s.Length -ge 2 -and $s.EndsWith('/*', [System.StringComparison]::Ordinal)) { $s = $s.Substring(0, $s.Length - 2) }
+            $bad = ($s.Contains('*') -or $p.StartsWith('/', [System.StringComparison]::Ordinal) -or $p -eq '')
+            foreach ($seg in ($s -split '/')) { if ($seg -eq '' -or $seg -eq '.' -or $seg -eq '..') { $bad = $true } }
+            if ($k -ge 0 -and ($c -eq '' -or -not $set.Contains($c) -or $c.Contains('@') -or [string]::Equals($c, $v, [System.StringComparison]::Ordinal))) { $bad = $true }
+            if ($bad) { $nb++ }
+        }
+        return [string]($nb + (DcSlashless))
+    }
+    # Value-shaped tail tokens WITHOUT a `/` -- the value rule only picks `/` tokens, so appending ` CHANGELOG.md` used to be
+    # silently ignored and green (M74 review round 1 rec. 4). Tokens made only of space/tab/CR/VT/FF are skipped (S9's job);
+    # the trim set is spelled out so it matches the .sh twin's [ \t\r\v\f] exactly (.NET Trim() would also eat NBSP).
+    function DcSlashless {
+        $tail = DeclTail $CONV_REL $DC_KEY
+        if ($null -eq $tail) { return 0 }
+        $ws = [char[]]@([char]0x20, [char]0x09, [char]0x0D, [char]0x0B, [char]0x0C)
+        $c = 0
+        foreach ($t in ($tail -split ' ')) { if (-not $t.Contains('/') -and $t.Trim($ws) -ne '') { $c++ } }
+        return $c
+    }
+    function DcPath([string]$v) { $k = $v.IndexOf('@', [System.StringComparison]::Ordinal); if ($k -ge 0) { return $v.Substring(0, $k) } else { return $v } }
+    # Deny prefixes -- rule sources and verdict-carrying cycle artifacts (debug reports were missing: M74 review rec. 5).
+    # A glob value `X/*` is judged by what it COVERS: red when a deny prefix starts with `X/` (e.g. `docs/reports/*`).
+    $DC_DENY = @('docs/conventions', 'docs/commands.md', 'docs/milestones', 'docs/reports/M', 'docs/reports/debug-')
+    function DcDenyBad {
+        $nb = 0
+        $o = [System.StringComparison]::Ordinal
+        foreach ($v in @(DcVals)) {
+            $p = DcPath $v
+            $g = $false
+            if ($p.Length -ge 2 -and $p.EndsWith('/*', $o)) { $g = $true; $p = $p.Substring(0, $p.Length - 1) }
+            $bad = (-not $p.StartsWith('docs/', $o) -or [string]::Equals($p, 'docs/', $o))
+            foreach ($d in $DC_DENY) {
+                if ($p.StartsWith($d, $o)) { $bad = $true }
+                if ($g -and $d.StartsWith($p, $o)) { $bad = $true }
+            }
+            if ($bad) { $nb++ }
+        }
+        return [string]$nb
+    }
+    function DcMissing {
+        $nm = 0
+        foreach ($v in @(DcVals)) {
+            $p = DcPath $v
+            if ($p.EndsWith('/*', [System.StringComparison]::Ordinal)) {
+                if (-not (Test-Path -LiteralPath (Join-Path $ROOT $p.Substring(0, $p.Length - 2)) -PathType Container)) { $nm++ }
+            } else {
+                if (-not (Test-Path -LiteralPath (Join-Path $ROOT $p) -PathType Leaf)) { $nm++ }
+            }
+        }
+        return [string]$nm
+    }
+    function DcSec([string]$path) {
+        $out = New-Object System.Collections.Generic.List[string]
+        $inside = $false
+        foreach ($ln in [System.IO.File]::ReadAllLines($path)) {
+            if ($ln.StartsWith('## ', [System.StringComparison]::Ordinal)) { $inside = $ln.Contains($DC_SEC); continue }
+            if ($inside) { $out.Add($ln) }
+        }
+        return $out
+    }
+    function DcDupIn([string]$path) {
+        $sec = (@(DcSec $path)) -join "`n"
+        $n = 0
+        foreach ($v in @(DcVals)) {
+            $p = DcPath $v
+            if ($p.EndsWith('*', [System.StringComparison]::Ordinal)) { $p = $p.Substring(0, $p.Length - 1) }
+            if ($p -ne '' -and $sec.Contains($p)) { $n++ }
+        }
+        return $n
+    }
+    function DcDupFixture {
+        $f = Join-Path $sbx 'rel-dc.md'
+        $first = @(DcVals) | Select-Object -First 1
+        $v = if ($null -eq $first) { '' } else { DcPath $first }
+        $lines = New-Object System.Collections.ArrayList
+        foreach ($l in [System.IO.File]::ReadAllLines($REL_SKILL)) {
+            [void]$lines.Add($l)
+            if ($l.StartsWith('## ', [System.StringComparison]::Ordinal) -and $l.Contains($DC_SEC)) { [void]$lines.Add('zzz ' + $v + ' zzz') }
+        }
+        [System.IO.File]::WriteAllLines($f, $lines.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    function DcItemHas([string]$path) {
+        $L = [System.IO.File]::ReadAllLines($path)
+        $na = 0; $s = -1; $hit = $false
+        for ($i = 0; $i -lt $L.Count; $i++) { if ($L[$i].Contains($DC_ANCHOR)) { $na++; if ($s -lt 0) { $s = $i } } }
+        if ($s -ge 0) {
+            $d = $L[$s].Length - $L[$s].TrimStart(' ').Length
+            if ($L[$s].Contains($DC_TOK)) { $hit = $true }
+            for ($j = $s + 1; $j -lt $L.Count; $j++) {
+                if ($L[$j] -eq '') { break }
+                if (($L[$j].Length - $L[$j].TrimStart(' ').Length) -le $d) { break }
+                if ($L[$j].Contains($DC_TOK)) { $hit = $true }
+            }
+        }
+        $yn = if ($hit) { 'yes' } else { 'no' }
+        return ('{0} {1}' -f $yn, $na)
+    }
+    function DcItemYes([string]$path) { if ((DcItemHas $path).StartsWith('yes ', [System.StringComparison]::Ordinal)) { return 1 } else { return 0 } }
+    function DcItemFixture {
+        $f = Join-Path $sbx 'rel-dci.md'
+        $lines = New-Object System.Collections.ArrayList
+        foreach ($l in [System.IO.File]::ReadAllLines($REL_SKILL)) { [void]$lines.Add($l.Replace($DC_TOK, 'zzz')) }
+        [System.IO.File]::WriteAllLines($f, $lines.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    $DC_ALIAS = $DC_KEY.TrimEnd(':')
+    if (PartOn 'S') {
+    Chk "S8: exactly one docs-commit-paths declaration line" (DeclCount $CONV_REL $DC_KEY) '1'
+    Chk "S9: no forbidden separator in the docs-commit-paths declaration tail" (BadSeps $CONV_REL $DC_KEY) '0'
+    # (S10) extraction positive-control -- empty values or a vanished skill section would make S11-S13/S15 pass on "0".
+    Chk "S10: declaration values and skill section extract (positive-control)" $(if (@(DcVals).Count -ge 1 -and @(DcSec $REL_SKILL).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "S11: main check -- value form (one trailing /*, @ names another declared value)" (DcFormBad) '0'
+    Chk "S12: main check -- no value is a rule source, a cycle artifact or outside docs" (DcDenyBad) '0'
+    Chk "S13: main check -- every value's path exists" (DcMissing) '0'
+    Chk "S14: wiring -- the release skill points at the declaration key" (HasToken $REL_SKILL $DC_KEY) 'yes'
+    Chk "S15: main check -- the skill's document-commit section does not re-enumerate the paths" ([string](DcDupIn $REL_SKILL)) '0'
+    # (S16) fixture control -- asks the verdict's RESPONSE (control-reads-delta): planting one path must move it by exactly 1.
+    Chk "S16: control -- a path planted in the section is caught" ([string]((DcDupIn (DcDupFixture)) - (DcDupIn $REL_SKILL))) '1'
+    Chk "S17: main check -- the retro non-firing item carries the docs action (anchor on 1 line)" (DcItemHas $REL_SKILL) 'yes 1'
+    Chk "S18: control -- a docs token dropped from the item is caught" ([string]((DcItemYes $REL_SKILL) - (DcItemYes (DcItemFixture)))) '1'
+    Chk "S19: main check -- the three restatement sites (conventions body, catalog, CLAUDE.md) carry the key" ((HasToken $CONV $DC_ALIAS) + (HasToken $CMD_CANON $DC_ALIAS) + (HasToken $CLAUDE_MD $DC_ALIAS)) 'yesyesyes'
+    }
+
     # --- Part T: runner source EOL contract (M59 review blocker 1 -> M60) -------
     # `.gitattributes` pins `*.sh` to `eol=lf` and even writes the reason in a comment
     # ("CRLF breaks sh execution"), yet ZERO machines checked it. In M59 `run.sh` turned CRLF and

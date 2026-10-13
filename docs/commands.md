@@ -27,7 +27,7 @@ tide는 12종의 슬래시 커맨드를 제공합니다. 호출은 모두 `/tide
 | `/tide:impl [M번호]` | 마일스톤대로 구현 + 테스트 | 코드 + `docs/reports/M{N}-impl.md` | ✗ |
 | `/tide:review` | 비판적 리뷰 + 반증 시도(refutation) 후 릴리즈 판정 — **차단 등급은 고치지 않고 `불가` + impl 반환** | `docs/reports/M{N}-review.md` (판정 계측 줄 포함) | ✗ |
 | `/tide:cycle [주제/M번호]` | `milestone→impl→review` 자동 체이닝 (`.tide/autonomy`가 `continuous`면 release의 편집 층까지 — 커밋 앞 정지) | 위 단계들의 산출물 + 릴리즈 안내 | ✗ |
-| `/tide:release vX.Y.Z [pr/release]` | 프리플라이트 → 버전 범프 → CHANGELOG → commit → tag → push. `gh` 있으면 GitHub 릴리즈/PR 게시 택1(옵트인) | 릴리즈 커밋·태그 (+선택 gh 릴리즈/PR) | ✓ |
+| `/tide:release vX.Y.Z [pr/release]` | 프리플라이트 → 버전 범프 → CHANGELOG → commit → tag → push. `gh` 있으면 GitHub 릴리즈/PR 게시 택1(옵트인) · `docs`면 에픽·회고 문서만 버전 없이 커밋 | 릴리즈 커밋·태그 (+선택 gh 릴리즈/PR) | ✓ |
 | `/tide:retro` | 누적 사이클 회고 (읽기 전용 — 아래 예외 한 자리) | `docs/reports/retro.md` (+ `처분` 발생 시 `docs/project-context.md` 이월 원장 한 줄) | ✗ |
 | `/tide:status` | 현재 상태 + 다음 권장 커맨드 (읽기 전용) | (없음 — 보고만) | ✗ |
 | `/tide:debug [증상 / done]` | 발견한 에러를 세션으로 묶어 수정·누적 + 릴리즈 판정 (사이클 밖, 발견 우선) | `docs/reports/debug-{N}.md` | ✗ |
@@ -104,7 +104,8 @@ tide는 12종의 슬래시 커맨드를 제공합니다. 호출은 모두 `/tide
 
 - **역할**: tide에서 **git을 만지는 유일한 단계**입니다. `gh` CLI가 있으면 push 위에 **GitHub
   릴리즈**를 만들거나 **PR**을 여는 게시 모드를 옵트인으로 고를 수 있습니다.
-- **인자**: `vX.Y.Z` — 릴리즈 버전(리뷰가 추천한 값). (선택) 게시 모드 토큰 `pr`/`release`.
+- **인자**: `vX.Y.Z` — 릴리즈 버전(리뷰가 추천한 값). (선택) 게시 모드 토큰 `pr`/`release`. 버전 대신
+  동작 토큰 `docs`를 주면 아래 「문서 커밋」만 돕니다(둘을 함께 주면 중단).
 - **전제조건(프리플라이트)**: ① review 판정 "가능" ② 테스트 통과 ③ 워킹트리 확인.
   통과해야 git 작업을 시작합니다.
 - **마일스톤 릴리즈 표지**(`milestone-release-mark`): 버전 파일·CHANGELOG를 고치는 단계에서, **이번 태그에 실리는
@@ -135,9 +136,15 @@ tide는 12종의 슬래시 커맨드를 제공합니다. 호출은 모두 `/tide
 - **릴리즈 뒤 회고 자동 실행**(`retro-after-release`): **이 실행에서 태그가 달렸으면** `.tide/phase`를
   `idle`로 되돌린 **뒤** `/tide:retro`를 자동으로 실행합니다(도는 분기 = push-only·`release` 모드의 게시
   성공 · 두 모드의 `unpublished-release` 종료 · `pr` 모드의 **마무리**). `pr` 모드의 **생성·대기·중단**
-  에서는 돌지 않습니다 — 태그가 없기 때문입니다. 회고가 실패해도 **릴리즈는 성공으로 끝납니다**(릴리즈가
+  과 아래 **문서 커밋**(`docs` 동작)에서는 돌지 않습니다 — 태그가 없기 때문입니다. 회고가 실패해도 **릴리즈는 성공으로 끝납니다**(릴리즈가
   성립한 뒤 도는 사후 절차 — `unpublished-release`와 같은 층의 판단).
   단일 원본은 `docs/conventions.md`의 "회고 후속 항목의 소비" 절.
+- **문서 커밋**(`/tide:release docs [pr/release]`): 릴리즈가 아닐 때 에픽·회고 문서만 버전 없이 커밋합니다.
+  같은 `release` phase 안의 동작이라 커맨드 수·phase 값·가드 계약은 그대로입니다. 허용 경로는
+  `docs-commit-paths:` 선언이 정하고, phase `idle` · 열린 debug 세션 없음 · 선언 밖 미커밋 변경 0일 때만
+  돕니다(어기면 git 작업 없이 중단). `pr` 모드면 `docs/{날짜}` 브랜치의 PR로, 그 밖에는 기본 브랜치로
+  push합니다. 버전·CHANGELOG·태그·릴리즈 표지·회고는 건드리지 않습니다.
+  단일 원본은 `docs/conventions-release.md`의 "문서 커밋 경로" 절.
 
 ## `/tide:retro`
 
