@@ -4433,8 +4433,8 @@ try {
     # release) live in ONE line of the conventions fragment, `docs-commit-paths:`; the release skill only POINTS at it (same
     # shape as Part R). Bound: (1) the line is unique, separator-clean, extracts (2) value form (`*` only as one trailing `/*`,
     # no empty/`.`/`..` segment, an `@` tail names ANOTHER declared value, no value-shaped token without `/`) (3) no value is
-    # outside `docs/` or under a deny prefix -- rule sources (`docs/conventions*`, `docs/commands.md`) and verdict-carrying
-    # cycle artifacts (`docs/milestones`, `docs/reports/M`, `docs/reports/debug-`); a glob `X/*` is judged by what it COVERS
+    # outside `docs/` or under a deny prefix -- the prefixes are the `docs-commit-deny:` declaration (M75; not re-listed
+    # here); a glob `X/*` is judged by what it COVERS
     # (red when a deny prefix starts with `X/`) (4) every value's path exists (5) the
     # skill's document-commit section points at the key and does not re-enumerate the paths (6) the retro auto-run
     # non-firing item carries the `docs` action (7) the three restatement sites carry the key. Whether a run actually commits
@@ -4479,18 +4479,30 @@ try {
         return $c
     }
     function DcPath([string]$v) { $k = $v.IndexOf('@', [System.StringComparison]::Ordinal); if ($k -ge 0) { return $v.Substring(0, $k) } else { return $v } }
-    # Deny prefixes -- rule sources and verdict-carrying cycle artifacts (debug reports were missing: M74 review rec. 5).
+    # Deny prefixes live in ONE line of the conventions fragment, `docs-commit-deny:` (M75 -- lifted out of runner source, rf-72).
+    # Comparison folds ASCII case only (rf-75 -- `docs/Reports/...` passed); A-Z is folded by hand so it matches the .sh twin's
+    # LC_ALL=C tolower exactly (.NET ToLower/OrdinalIgnoreCase would also fold non-ASCII letters).
     # A glob value `X/*` is judged by what it COVERS: red when a deny prefix starts with `X/` (e.g. `docs/reports/*`).
-    $DC_DENY = @('docs/conventions', 'docs/commands.md', 'docs/milestones', 'docs/reports/M', 'docs/reports/debug-')
+    $DCD_KEY = 'docs-commit-deny:'
+    function AsciiLower([string]$s) { return [regex]::Replace($s, '[A-Z]', { param($m) [string][char]([int][char]$m.Value + 32) }) }
+    function DcDeny {
+        $tail = DeclTail $CONV_REL $DCD_KEY
+        if ($null -eq $tail) { return @() }
+        $ws = [char[]]@([char]0x20, [char]0x09, [char]0x0D, [char]0x0B, [char]0x0C)
+        return @($tail -split ' ' | Where-Object { $_.Trim($ws) -ne '' })
+    }
     function DcDenyBad {
         $nb = 0
         $o = [System.StringComparison]::Ordinal
+        $deny = @(DcDeny | ForEach-Object { AsciiLower $_ })
         foreach ($v in @(DcVals)) {
-            $p = DcPath $v
+            $q = DcPath $v
             $g = $false
-            if ($p.Length -ge 2 -and $p.EndsWith('/*', $o)) { $g = $true; $p = $p.Substring(0, $p.Length - 1) }
-            $bad = (-not $p.StartsWith('docs/', $o) -or [string]::Equals($p, 'docs/', $o))
-            foreach ($d in $DC_DENY) {
+            if ($q.Length -ge 2 -and $q.EndsWith('/*', $o)) { $g = $true; $q = $q.Substring(0, $q.Length - 1) }
+            # "outside docs/" stays case-SENSITIVE (ordinal); folding is for the deny prefixes only (M75 review rec. 2: `Docs/epics/*` passed).
+            $bad = (-not $q.StartsWith('docs/', $o) -or [string]::Equals($q, 'docs/', $o))
+            $p = AsciiLower $q
+            foreach ($d in $deny) {
                 if ($p.StartsWith($d, $o)) { $bad = $true }
                 if ($g -and $d.StartsWith($p, $o)) { $bad = $true }
             }
@@ -4580,6 +4592,10 @@ try {
     Chk "S16: control -- a path planted in the section is caught" ([string]((DcDupIn (DcDupFixture)) - (DcDupIn $REL_SKILL))) '1'
     Chk "S17: main check -- the retro non-firing item carries the docs action (anchor on 1 line)" (DcItemHas $REL_SKILL) 'yes 1'
     Chk "S18: control -- a docs token dropped from the item is caught" ([string]((DcItemYes $REL_SKILL) - (DcItemYes (DcItemFixture)))) '1'
+    Chk "S20: exactly one docs-commit-deny declaration line" (DeclCount $CONV_REL $DCD_KEY) '1'
+    # (S21) extraction positive-control -- with no deny prefix S12 only checks "outside docs/" and a declaration allowing verdict reports goes green.
+    Chk "S21: deny prefixes extract (positive-control, >=1)" $(if (@(DcDeny).Count -ge 1) { 'ok' } else { 'no' }) 'ok'
+    Chk "S22: no forbidden separator in the docs-commit-deny declaration tail" (BadSeps $CONV_REL $DCD_KEY) '0'
     Chk "S19: main check -- the three restatement sites (conventions body, catalog, CLAUDE.md) carry the key" ((HasToken $CONV $DC_ALIAS) + (HasToken $CMD_CANON $DC_ALIAS) + (HasToken $CLAUDE_MD $DC_ALIAS)) 'yesyesyes'
     }
 
@@ -5196,6 +5212,91 @@ try {
     # section. What is bitten: declaration uniqueness, the co-term living in all three seats, and the
     # boundary markers being really used. Whether the DECLARED scope equals the search actually run is
     # not statically decidable, and the convention writes that boundary in the same section.
+    # (M75) Start-point predicate NAMES are read from the declarations -- the block and form verdicts get one name per value from
+    # `start-point-block-predicates:` / `start-point-form-predicates:` and the runner emits `name=value` (names are NOT spelled
+    # in this source -- that would make a second declaration site). Name order = value position. W156/W157 go red when the
+    # declared count differs from the number of values a verdict emits. Helpers live OUTSIDE the part guard (rf-60).
+    $SPB_KEY = 'start-point-block-predicates:'
+    $SPF_KEY = 'start-point-form-predicates:'
+    # Parameter is NOT named `$conv` -- PowerShell variables are case-insensitive, so it would shadow the global `$CONV`.
+    function SpNames([string]$which, [string]$spConv = '') {
+        if ($spConv -eq '') { $spConv = $CONV }
+        $key = if ($which -eq 'B') { $SPB_KEY } else { $SPF_KEY }
+        $tail = DeclTail $spConv $key
+        if ($null -eq $tail) { return @() }
+        $ws = [char[]]@([char]0x20, [char]0x09, [char]0x0D, [char]0x0B, [char]0x0C)
+        return @($tail -split ' ' | Where-Object { $_.Trim($ws) -ne '' })
+    }
+    function SpCount([string]$which) { return [string](@(SpNames $which).Count) }
+    function SpName([string]$which, [string]$vals, [string]$spConv = '') {
+        $n = @(SpNames $which $spConv)
+        $v = @(($vals.Trim(' ')) -split ' +' | Where-Object { $_ -ne '' })
+        $k = [Math]::Max($n.Count, $v.Count)
+        $parts = New-Object System.Collections.Generic.List[string]
+        for ($i = 0; $i -lt $k; $i++) {
+            $nm = if ($i -lt $n.Count) { $n[$i] } else { '?' }
+            $vv = if ($i -lt $v.Count) { $v[$i] } else { '?' }
+            $parts.Add($nm + '=' + $vv)
+        }
+        return ($parts -join ' ')
+    }
+    # Definition ITEM names -- from the block predicate declaration line to the next heading (`#`), the lines whose
+    # space/tab-stripped text starts with "- **`name`**" (M75 review minor 3: item heads only, not any line with the bold name).
+    function SpDefs {
+        $k = '- `' + $SPB_KEY + '`'
+        $ws = [char[]]@([char]0x20, [char]0x09)
+        $on = $false
+        $out = New-Object System.Collections.Generic.List[string]
+        foreach ($ln in [System.IO.File]::ReadAllLines($CONV)) {
+            $t = $ln.TrimStart($ws)
+            if (-not $on) { if ($t.StartsWith($k, [System.StringComparison]::Ordinal)) { $on = $true }; continue }
+            if ($ln.StartsWith('#', [System.StringComparison]::Ordinal)) { break }
+            if ($t.StartsWith('- **`', [System.StringComparison]::Ordinal)) {
+                $r = $t.Substring(5); $j = $r.IndexOf('`**', [System.StringComparison]::Ordinal)
+                if ($j -gt 0) { $out.Add($r.Substring(0, $j)) }
+            }
+        }
+        return $out
+    }
+    function SpDefBad {
+        $defs = @(SpDefs)
+        $bad = 0
+        foreach ($nm in (@(SpNames 'B') + @(SpNames 'F'))) {
+            $c = @($defs | Where-Object { [string]::Equals($_, $nm, [System.StringComparison]::Ordinal) }).Count
+            if ($c -ne 1) { $bad++ }
+        }
+        return [string]$bad
+    }
+    # Reverse direction and uniqueness (M75 review blocker 1 -- an undeclared definition item, or a name written twice in the
+    # declarations, stayed green because W158 only went declaration -> definition).
+    function SpDefOrphan {
+        $names = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($nm in (@(SpNames 'B') + @(SpNames 'F'))) { [void]$names.Add($nm) }
+        return [string]@(@(SpDefs) | Where-Object { -not $names.Contains($_) }).Count
+    }
+    function SpNameDup {
+        $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        $dup = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($nm in (@(SpNames 'B') + @(SpNames 'F'))) { if (-not $seen.Add($nm)) { [void]$dup.Add($nm) } }
+        return [string]$dup.Count
+    }
+    function SpWireFixture {
+        $f = Join-Path $sbx 'conv-spw.md'
+        $first = @(SpNames 'B') | Select-Object -First 1
+        $w = '`' + $SPB_KEY + '`'
+        $lines = New-Object System.Collections.ArrayList
+        foreach ($l in [System.IO.File]::ReadAllLines($CONV)) {
+            $i = $l.IndexOf($w, [System.StringComparison]::Ordinal)
+            if ($null -ne $first -and $i -ge 0) {
+                $head = $l.Substring(0, $i + $w.Length); $t = $l.Substring($i + $w.Length)
+                $j = $t.IndexOf(' ' + $first, [System.StringComparison]::Ordinal)
+                if ($j -ge 0) { $l = $head + $t.Substring(0, $j + 1) + 'zzz-wired' + $t.Substring($j + 1 + $first.Length) }
+            }
+            [void]$lines.Add($l)
+        }
+        [System.IO.File]::WriteAllLines($f, $lines.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
     if (PartOn 'W') {
     $SCOPE_KEY     = 'scope-decl:'
     $SCOPE_LIM_KEY = 'scope-limits:'
@@ -5930,9 +6031,9 @@ try {
     Chk "W128: positive-control for declared pairs (>=3)" $(if ((SpmPairs $CONV) -ge 3) { 'ok' } else { 'no' }) 'ok'
     # (W118-W120) MAIN CHECKS -- is each branch item the one line assembled from the declaration: exactly one
     # item per key, byte-equal to the expected line, no continuation lines ("1 yes no").
-    Chk "W118: the not-possible branch is the line assembled from the declaration" (FormProbe $CYC_SKILL $CYC_SEC_ANCHOR $KEY_FAIL (SpmLine $CONV $VERDICT_FAIL $KEY_FAIL)) '1 yes no'
-    Chk "W119: the possible branch is the line assembled from the declaration" (FormProbe $CYC_SKILL $CYC_SEC_ANCHOR $KEY_OK (SpmLine $CONV $VERDICT_OK $KEY_OK)) '1 yes no'
-    Chk "W120: the unreadable-verdict branch is the line assembled from the declaration" (FormProbe $CYC_SKILL $CYC_SEC_ANCHOR $KEY_UNREAD (SpmLine $CONV $VERDICT_UNREAD $KEY_UNREAD)) '1 yes no'
+    Chk "W118: the not-possible branch is the line assembled from the declaration" (SpName 'F' (FormProbe $CYC_SKILL $CYC_SEC_ANCHOR $KEY_FAIL (SpmLine $CONV $VERDICT_FAIL $KEY_FAIL))) (SpName 'F' '1 yes no')
+    Chk "W119: the possible branch is the line assembled from the declaration" (SpName 'F' (FormProbe $CYC_SKILL $CYC_SEC_ANCHOR $KEY_OK (SpmLine $CONV $VERDICT_OK $KEY_OK))) (SpName 'F' '1 yes no')
+    Chk "W120: the unreadable-verdict branch is the line assembled from the declaration" (SpName 'F' (FormProbe $CYC_SKILL $CYC_SEC_ANCHOR $KEY_UNREAD (SpmLine $CONV $VERDICT_UNREAD $KEY_UNREAD))) (SpName 'F' '1 yes no')
     # (W121) MAIN CHECK -- do the two skills use the same verdict value set. The notation differs, so the
     # VALUES are extracted and sorted ORDINALLY (Sort-Object is culture-aware -- see OrdinalSortUnique).
     function VerdictSet([string]$path) {
@@ -5979,13 +6080,13 @@ try {
     CycFx3 $fxDupe $lineFail $lineFail
     CycFx3 $fxRetro ('    ' + $KEY_FAIL + ' ' + $ARROW + ' it used to be **impl ' + $STEP_WORD + '** but now it stops') ''
     CycFx3 $fxSibling $lineFail ('    - explanation of the branch above -- `' + $VERDICT_FAIL + '` is rework on that milestone')
-    Chk "W132: control -- prose on the tail of a branch line is caught" (FormProbe $fxTail $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail) '1 no no'
-    Chk "W133: control -- a continuation line under a branch is caught" (FormProbe $fxCont $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail) '1 yes yes'
-    Chk "W134: control -- a duplicated branch is caught" (FormProbe $fxDupe $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail) '2 no no'
-    Chk "W135: control -- a retrospective inside the branch (M72 residual) is caught" (FormProbe $fxRetro $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail) '1 no no'
+    Chk "W132: control -- prose on the tail of a branch line is caught" (SpName 'F' (FormProbe $fxTail $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail)) (SpName 'F' '1 no no')
+    Chk "W133: control -- a continuation line under a branch is caught" (SpName 'F' (FormProbe $fxCont $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail)) (SpName 'F' '1 yes yes')
+    Chk "W134: control -- a duplicated branch is caught" (SpName 'F' (FormProbe $fxDupe $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail)) (SpName 'F' '2 no no')
+    Chk "W135: control -- a retrospective inside the branch (M72 residual) is caught" (SpName 'F' (FormProbe $fxRetro $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail)) (SpName 'F' '1 no no')
     # (W136) FALSE-POSITIVE DIRECTION -- a sibling explanation item is not a branch. If it were counted, moving the
     # explanations out of the branch would go falsely red.
-    Chk "W136: false-positive direction -- a sibling explanation item is not counted as a branch" (FormProbe $fxSibling $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail) '1 yes no'
+    Chk "W136: false-positive direction -- a sibling explanation item is not counted as a branch" (SpName 'F' (FormProbe $fxSibling $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail)) (SpName 'F' '1 yes no')
     # (W137-W146 / M73 round 1) BRANCHES STAND AS A BLOCK (`start-point-block`). Round 0 asserted only the single
     # branch LINE, and the review measured four ordinary edits that erase the behaviour without touching that line --
     # a same-indent continuation under a branch, a changed parent condition, a comment/fence wrapped around the
@@ -6045,9 +6146,10 @@ try {
     $cycWantPointer = SptLine $CONV
     $cycWantOk = SpmLine $CONV $VERDICT_OK $KEY_OK
     $cycWantUnread = SpmLine $CONV $VERDICT_UNREAD $KEY_UNREAD
-    function CycBlock([string]$path) { return (BlockProbe $path $CYC_SEC_ANCHOR $cycWantParent $cycWantPointer $cycWantOk $cycWantFail $cycWantUnread) }
+    function CycBlockRaw([string]$path) { return (BlockProbe $path $CYC_SEC_ANCHOR $cycWantParent $cycWantPointer $cycWantOk $cycWantFail $cycWantUnread) }
+    function CycBlock([string]$path) { return (SpName 'B' (CycBlockRaw $path)) }  # the block verdict under the declared names (M75)
     # (W137) MAIN CHECK -- the branch block. Normal is "1 yes yes yes yes yes 3" (seven values from round 2 -- the pointer line is the third).
-    Chk "W137: the start-point branches stand as the block assembled from the declarations" (CycBlock $CYC_SKILL) '1 yes yes yes yes yes 3'
+    Chk "W137: the start-point branches stand as the block assembled from the declarations" (CycBlock $CYC_SKILL) (SpName 'B' '1 yes yes yes yes yes 3')
     # (W138-W140) declaration side -- the parent declaration is unique, and both tails carry no forbidden separator
     # (same shape as the other declaration lines, W26 etc.).
     Chk "W138: no forbidden separator in the start-point-map declaration tail" (BadSeps $CONV $SPM_KEY) '0'
@@ -6082,14 +6184,14 @@ try {
     $fxCmt = BlkFx 'blk-cmt.md' { param($l) $l.Insert(5, '<!-- retired branches:'); $l.Insert(9, '-->') }
     $fxStar = BlkFx 'blk-star.md' { param($l) $l.Insert(9, '    * ' + $VERDICT_WORD + ' `' + $VERDICT_FAIL + '` ' + $ARROW + ' **milestone ' + $STEP_WORD + '**') }
     $fxHead = BlkFx 'blk-head.md' { param($l) $l.Insert(3, '### retired rules') }
-    Chk "W141: control -- a same-indent continuation line after the block is caught" (CycBlock $fxLazy) '1 yes yes yes no yes 3'
-    Chk "W142: control -- a changed parent condition is caught" (CycBlock $fxParent) '1 no yes yes yes yes 3'
-    Chk "W143: control -- a comment wrapped around the branches is caught" (CycBlock $fxCmt) '1 yes yes no yes yes 3'
-    Chk "W144: control -- a conflicting branch under another list marker is caught" (CycBlock $fxStar) '1 yes yes yes yes yes 4'
-    Chk "W145: control -- a sub-heading right before the parent line is caught" (CycBlock $fxHead) '1 yes yes yes yes no 3'
+    Chk "W141: control -- a same-indent continuation line after the block is caught" (CycBlock $fxLazy) (SpName 'B' '1 yes yes yes no yes 3')
+    Chk "W142: control -- a changed parent condition is caught" (CycBlock $fxParent) (SpName 'B' '1 no yes yes yes yes 3')
+    Chk "W143: control -- a comment wrapped around the branches is caught" (CycBlock $fxCmt) (SpName 'B' '1 yes yes no yes yes 3')
+    Chk "W144: control -- a conflicting branch under another list marker is caught" (CycBlock $fxStar) (SpName 'B' '1 yes yes yes yes yes 4')
+    Chk "W145: control -- a sub-heading right before the parent line is caught" (CycBlock $fxHead) (SpName 'B' '1 yes yes yes yes no 3')
     # (W146) FALSE-POSITIVE DIRECTION -- the base fixture (a normal block with a sibling explanation and a next item)
     # must stay green.
-    Chk "W146: false-positive direction -- a normal block with an explanation item and a next item stays green" (CycBlock $fxBlk) '1 yes yes yes yes yes 3'
+    Chk "W146: false-positive direction -- a normal block with an explanation item and a next item stays green" (CycBlock $fxBlk) (SpName 'B' '1 yes yes yes yes yes 3')
     # (W147-W151 / M73 round 2) THE POINTER LINE IS PINNED TOO -- the round 1 review measured that rewriting the prose of
     # the pointer line (inside the block, checked only for its token) flips the parent condition at 141/0 GREEN in both
     # copies. The pointer line must now equal the line assembled from `start-point-pointer:`. Both declaration values get
@@ -6099,7 +6201,23 @@ try {
     Chk "W149: no forbidden separator in the start-point-pointer declaration tail" (BadSeps $CONV $SPT_KEY) '0'
     Chk "W150: positive-control for the start-point-pointer value" $(if ($cycWantPointer -ne '') { 'ok' } else { 'no' }) 'ok'
     $fxPtr = BlkFx 'blk-ptr.md' { param($l) $l[4] = '    -- this condition and the branches below are retired; regardless of the verdict it always goes **milestone ' + $STEP_WORD + '** (how to read the verdict: the `review-report` row)' }
-    Chk "W151: control -- a parent condition flipped by the pointer line's prose is caught" (CycBlock $fxPtr) '1 yes no yes yes yes 3'
+    Chk "W151: control -- a parent condition flipped by the pointer line's prose is caught" (CycBlock $fxPtr) (SpName 'B' '1 yes no yes yes yes 3')
+    # (W152-W159, M75) PREDICATE NAME DECLARATIONS -- the conventions hold the value names of the block and form verdicts and the
+    # runner only reads them. Bound: uniqueness, extraction, forbidden separators, NAME COUNT = number of values the verdict emits,
+    # exactly one definition item per name, and wiring (renaming in the declaration changes the output). The meaning of the
+    # definition prose, and whether the name order matches the value positions, are not asked (the conventions write that boundary).
+    Chk "W152: exactly one start-point-block-predicates declaration line" (DeclCount $CONV $SPB_KEY) '1'
+    Chk "W153: exactly one start-point-form-predicates declaration line" (DeclCount $CONV $SPF_KEY) '1'
+    Chk "W154: both predicate declarations extract names (positive-control, >=1)" $(if (@(SpNames 'B').Count -ge 1 -and @(SpNames 'F').Count -ge 1) { 'ok' } else { 'no' }) 'ok'
+    Chk "W155: no forbidden separator in either predicate declaration tail" ((BadSeps $CONV $SPB_KEY) + (BadSeps $CONV $SPF_KEY)) '00'
+    Chk "W156: main check -- block predicate name count equals the number of values the block verdict emits" (SpCount 'B') ([string]@(((CycBlockRaw $CYC_SKILL).Trim(' ')) -split ' +').Count)
+    Chk "W157: main check -- form predicate name count equals the number of values the form verdict emits" (SpCount 'F') ([string]@(((FormProbe $CYC_SKILL $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail).Trim(' ')) -split ' +').Count)
+    Chk "W158: main check -- exactly one definition item per predicate name" (SpDefBad) '0'
+    # (W160/W161, M75 review blocker 1) REVERSE DIRECTION AND UNIQUENESS -- W158 only went declaration -> definition.
+    Chk "W160: main check -- every definition item has a declared name (orphan definitions 0)" (SpDefOrphan) '0'
+    Chk "W161: main check -- names are unique across both predicate declarations" (SpNameDup) '0'
+    # (W159) wiring control -- feeding a conventions copy whose first block name is renamed must show that new name (delta 1).
+    Chk "W159: control -- renaming in the declaration changes the output" ([string](@((SpName 'B' '1' (SpWireFixture)) -split ' ' | Where-Object { $_.StartsWith('zzz-wired=', [System.StringComparison]::Ordinal) }).Count - @((SpName 'B' '1') -split ' ' | Where-Object { $_.StartsWith('zzz-wired=', [System.StringComparison]::Ordinal) }).Count)) '1'
     }
 
     # (W31-W41 / M64-T04) MEASUREMENT ALLOCATION -- the convention plants two declaration lines that

@@ -4028,16 +4028,19 @@ dc_slashless() { # → 꼬리에서 `/`가 없는 **값 모양** 토큰의 수(�
     # 집으므로 ` CHANGELOG.md`를 덧붙여도 값이 되지 않고 조용히 초록이었다(M74 리뷰 라운드 1 권장 4) — 그런 토큰을 형태 위반으로 센다.
     decl_tail "$CONV_REL" "$DC_KEY" | LC_ALL=C awk '{ n = split($0, a, /[ ]/); for (i = 1; i <= n; i++) if (index(a[i], "/") == 0 && a[i] ~ /[^ \t\r\v\f]/) c++ } END { print c + 0 }'
 }
-# 거부 접두사 — 규칙의 원천(`docs/conventions*` · `docs/commands.md`)과 판정을 가진 사이클 산출물(`docs/milestones` · `docs/reports/M` ·
-# `docs/reports/debug-`). 리뷰 판정을 거쳐 릴리즈 커밋에 실려야 하는 자리다(M74 리뷰 권장 5 — debug 보고서가 빠져 있었다).
-DC_DENY='docs/conventions docs/commands.md docs/milestones docs/reports/M docs/reports/debug-'
+# 거부 접두사는 규약 조각의 `docs-commit-deny:` 한 줄이 든다(M75 — 러너 소스에 있던 목록을 선언으로 올렸다 · `rf-72`). 비교는 **ASCII 대소문자를
+# 무시**한다(`rf-75` — `docs/Reports/…`가 통과했다). `LC_ALL=C`의 `tolower`는 ASCII만 접고, ps1 사본도 A–Z만 접는다.
+DCD_KEY='docs-commit-deny:'
+dc_deny() { decl_tail "$CONV_REL" "$DCD_KEY" | LC_ALL=C awk '{ n = split($0, a, /[ ]/); for (i = 1; i <= n; i++) if (a[i] ~ /[^ \t\r\v\f]/) print a[i] }'; }
 dc_deny_bad() { # → 값이 `docs/` 밖이거나 거부 접두사에 든 수. 글롭 값 `X/*`는 **덮는 범위**로 본다 — 거부 접두사가 `X/`로 시작하면 붉다(`docs/reports/*`)
-    dc_vals | LC_ALL=C awk -v deny="$DC_DENY" '
-        BEGIN { nd = split(deny, D, /[ ]/) }
+    dc_vals | LC_ALL=C awk -v deny="$(dc_deny | LC_ALL=C tr '\n' ' ')" '
+        BEGIN { sub(/ +$/, "", deny); nd = (deny == "") ? 0 : split(tolower(deny), D, / +/) }
         {
-            p = $0; k = index(p, "@"); if (k > 0) p = substr(p, 1, k - 1)
-            g = 0; if (length(p) >= 2 && substr(p, length(p) - 1) == "/*") { g = 1; p = substr(p, 1, length(p) - 1) }
-            bad = (substr(p, 1, 5) != "docs/" || p == "docs/")
+            o = $0; k = index(o, "@"); if (k > 0) o = substr(o, 1, k - 1)
+            g = 0; if (length(o) >= 2 && substr(o, length(o) - 1) == "/*") { g = 1; o = substr(o, 1, length(o) - 1) }
+            # 「`docs/` 밖」은 대소문자를 **가린다**(ordinal) — 접기는 거부 접두사 비교에만 쓴다(M75 리뷰 권장 2: `Docs/epics/*`가 통과했다).
+            bad = (substr(o, 1, 5) != "docs/" || o == "docs/")
+            p = tolower(o)
             for (i = 1; i <= nd; i++) {
                 if (substr(p, 1, length(D[i])) == D[i]) bad = 1
                 if (g && substr(D[i], 1, length(p)) == p) bad = 1
@@ -4104,6 +4107,10 @@ chk "S15: 본 검사 - 스킬의 문서 커밋 경로 절이 경로를 다시 �
 chk "S16: 픽스처 통제 - 절에 심은 경로를 잡는다" "$(( $(dc_dup_in "$(dc_dup_fixture)") - $(dc_dup_in "$REL_SKILL") ))" "1"
 chk "S17: 본 검사 - 회고 자동 실행의 돌지 않는 분기 항목에 docs 동작이 있다(앵커 1줄)" "$(dc_item_has "$REL_SKILL")" "yes 1"
 chk "S18: 픽스처 통제 - 항목에서 docs 토큰이 빠지면 잡는다" "$(( $(dc_item_yes "$REL_SKILL") - $(dc_item_yes "$(dc_item_fixture)") ))" "1"
+chk "S20: docs-commit-deny 선언 줄 정확히 1개" "$(decl_count "$CONV_REL" "$DCD_KEY")" "1"
+# (S21) 추출 positive-control — 거부 접두사가 비면 `S12`가 「`docs/` 밖」만 보고 판정 보고서를 허용하는 선언이 초록이 된다.
+chk "S21: 거부 접두사 추출 positive-control(>=1)" "$([ "$(dc_deny | grep -c .)" -ge 1 ] && echo ok || echo no)" "ok"
+chk "S22: docs-commit-deny 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV_REL" "$DCD_KEY")" "0"
 chk "S19: 본 검사 - 재서술처 셋(규약 본체 · 카탈로그 · CLAUDE.md)이 선언 키를 갖는다" "$(has_token "$CONV" "${DC_KEY%:}")$(has_token "$CMD_CANON" "${DC_KEY%:}")$(has_token "$CLAUDE_MD" "${DC_KEY%:}")" "yesyesyes"
 fi
 
@@ -4760,6 +4767,59 @@ marks_used_in() { # <파일> <선언 키> <표지들> → 그 **선언 줄이 �
     set +f
     echo "$_mn"
 }
+# (M75) **시작점 판정 술어의 이름은 선언에서 읽는다** — 블록 판정과 형태 판정이 내는 값마다 규약의 `start-point-block-predicates:` ·
+# `start-point-form-predicates:`가 이름을 붙이고, 러너는 그 이름을 **읽어** `이름=값` 꼴로 낸다(이름을 소스에 박지 않는다 — 박으면 선언이 두
+# 자리가 된다). 이름의 순서가 값의 위치다. 닫힌 목록을 산문으로 다시 적던 자리(M73의 ①~⑨)가 선언 한 줄이 되고, 선언된 이름 수와 판정이 내는
+# 값 수가 어긋나면 `W156` · `W157`이 붉다. 헬퍼는 파트 가드 **밖**에서 정의한다(`rf-60`).
+SPB_KEY='start-point-block-predicates:'
+SPF_KEY='start-point-form-predicates:'
+sp_names() { # <B|F> [규약 파일] → 선언된 이름 한 줄씩(공백 · 탭 · CR · VT · FF만으로 된 토큰은 빼고 — 그것은 금지 구분자 검사의 자리)
+    case $1 in B) _spk=$SPB_KEY ;; *) _spk=$SPF_KEY ;; esac
+    decl_tail "${2:-$CONV}" "$_spk" | LC_ALL=C awk '{ n = split($0, a, /[ ]/); for (i = 1; i <= n; i++) if (a[i] ~ /[^ \t\r\v\f]/) print a[i] }'
+}
+sp_count() { sp_names "$@" | grep -c .; }
+sp_name() { # <B|F> <값들> [규약 파일] → "이름=값 …"(위치로 짝짓는다 · 이름이 모자라면 `?=값` · 값이 모자라면 `이름=?`)
+    _spn=$(sp_names "$1" "${3:-}" | LC_ALL=C tr '\n' ' ')
+    LC_ALL=C awk -v names="$_spn" -v vals="$2" 'BEGIN {
+        sub(/ +$/, "", names); sub(/^ +/, "", vals); sub(/ +$/, "", vals)
+        n = (names == "") ? 0 : split(names, N, / +/); m = (vals == "") ? 0 : split(vals, V, / +/)
+        k = (n > m) ? n : m; s = ""
+        for (i = 1; i <= k; i++) { s = s (i > 1 ? " " : "") ((i <= n) ? N[i] : "?") "=" ((i <= m) ? V[i] : "?") }
+        print s }'
+}
+sp_defs() { # → 정의 **항목**의 이름 한 줄씩 — 블록 술어 선언 줄부터 다음 제목(`#`) 직전까지, 걷은 문면이 `- **`이름`**`로 시작하는 줄의 이름
+    # (M75 리뷰 사소 3 — 「`**`이름`**`을 담은 아무 줄」이 아니라 항목 머리만 센다).
+    LC_ALL=C awk -v k="- \`$SPB_KEY\`" '
+        { sub(/\r$/, ""); t = $0; sub(/^[ \t]+/, "", t) }
+        !on && substr(t, 1, length(k)) == k { on = 1; next }
+        on && /^#/ { exit }
+        on && substr(t, 1, 5) == "- **`" { r = substr(t, 6); j = index(r, "`**"); if (j > 1) print substr(r, 1, j - 1) }' "$CONV"
+}
+sp_def_bad() { # → 선언된 이름 중 정의 항목이 정확히 하나가 아닌 이름의 수(선언 → 정의)
+    _spdl=$(sp_defs)
+    { sp_names B; sp_names F; } | { _spd=0; while IFS= read -r _spv; do
+        [ "$(printf '%s\n' "$_spdl" | LC_ALL=C grep -cxF -- "$_spv")" = 1 ] || _spd=$((_spd + 1))
+    done; echo "$_spd"; }
+}
+sp_def_orphan() { # → 정의 항목 중 두 선언 어디에도 없는 이름의 수(정의 → 선언 · M75 리뷰 차단 1 — 산문이 선언보다 넓어도 초록이었다)
+    _spnl=$({ sp_names B; sp_names F; })
+    sp_defs | { _spo=0; while IFS= read -r _spv; do
+        printf '%s\n' "$_spnl" | LC_ALL=C grep -qxF -- "$_spv" || _spo=$((_spo + 1))
+    done; echo "$_spo"; }
+}
+sp_name_dup() { # → 두 선언을 통틀어 두 번 이상 나온 이름의 초과 수(같은 이름이 두 값에 붙거나 두 선언에 들면 붉다)
+    { sp_names B; sp_names F; } | LC_ALL=C sort | LC_ALL=C uniq -d | grep -c .
+}
+sp_wire_fixture() { # → 블록 선언의 첫 이름을 바꾼 규약 사본(배선 통제 — 이름을 박지 않았다면 출력이 따라 바뀐다)
+    _spwf="$SBX/conv-spw.md"
+    _spw1=$(sp_names B | head -1)
+    if [ -n "$_spw1" ]; then
+        LC_ALL=C awk -v k="\`$SPB_KEY\`" -v o="$_spw1" '{ i = index($0, k); if (i > 0) { t = substr($0, i + length(k)); j = index(t, " " o); if (j > 0) $0 = substr($0, 1, i + length(k) - 1) substr(t, 1, j) "zzz-wired" substr(t, j + 1 + length(o)) } print }' "$CONV" > "$_spwf"
+    else
+        cat "$CONV" > "$_spwf"
+    fi
+    printf '%s' "$_spwf"
+}
 # 픽스처 — 표지 하나는 선언과 **같은 절**에, 다른 하나는 **다른 절**에 둔다. 절 창이 살아 있으면 1,
 # 창이 파일 전역으로 되돌아가면 2가 되어 아래 `W22`가 붉는다(판정을 망가뜨렸을 때 붉는 통제다).
 if part_on W; then
@@ -5232,9 +5292,9 @@ chk "W127: start-point-map 선언 줄 정확히 1개" "$(decl_count "$CONV" "$SP
 chk "W128: 선언 쌍 추출 positive-control(>=3)" "$([ "$(spm_pairs "$CONV")" -ge 3 ] && echo ok || echo no)" "ok"
 # (W118~W120) **본 검사 — 갈래 항목이 선언에서 조립한 한 줄과 같은가.** 키마다 항목이 정확히 하나이고, 그 줄이 기대
 # 줄과 바이트 같으며, 이어진 줄이 없어야 한다(`1 yes no`).
-chk "W118: 불가 갈래가 선언에서 조립한 한 줄이다" "$(form_probe "$CYC_SKILL" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$(spm_line "$CONV" '불가' "$KEY_FAIL")")" "1 yes no"
-chk "W119: 가능 갈래가 선언에서 조립한 한 줄이다" "$(form_probe "$CYC_SKILL" "$CYC_SEC_ANCHOR" "$KEY_OK" "$(spm_line "$CONV" '가능' "$KEY_OK")")" "1 yes no"
-chk "W120: 읽지 못한 갈래가 선언에서 조립한 한 줄이다" "$(form_probe "$CYC_SKILL" "$CYC_SEC_ANCHOR" "$KEY_UNREAD" "$(spm_line "$CONV" '읽지못함' "$KEY_UNREAD")")" "1 yes no"
+chk "W118: 불가 갈래가 선언에서 조립한 한 줄이다" "$(sp_name F "$(form_probe "$CYC_SKILL" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$(spm_line "$CONV" '불가' "$KEY_FAIL")")")" "$(sp_name F '1 yes no')"
+chk "W119: 가능 갈래가 선언에서 조립한 한 줄이다" "$(sp_name F "$(form_probe "$CYC_SKILL" "$CYC_SEC_ANCHOR" "$KEY_OK" "$(spm_line "$CONV" '가능' "$KEY_OK")")")" "$(sp_name F '1 yes no')"
+chk "W120: 읽지 못한 갈래가 선언에서 조립한 한 줄이다" "$(sp_name F "$(form_probe "$CYC_SKILL" "$CYC_SEC_ANCHOR" "$KEY_UNREAD" "$(spm_line "$CONV" '읽지못함' "$KEY_UNREAD")")")" "$(sp_name F '1 yes no')"
 # (W121) **본 검사 — 두 스킬의 판정 값 집합이 같은가**(M72-T03의 「무는 것」 ③). 표기가 갈려 있으므로
 # (status는 곧은 따옴표 · cycle은 백틱) **값 자체**를 뽑아 **ordinal**로 정렬해 비교한다.
 verdict_set() { # <파일> → 그 파일이 쓰는 판정 값을 ordinal 정렬해 한 줄로
@@ -5273,12 +5333,12 @@ _cyc_fx3 "$SBX/cycfx/cont.md" "$CYC_FX_FAIL" '      (재작업 — 판정이 요
 _cyc_fx3 "$SBX/cycfx/dup.md" "$CYC_FX_FAIL" "$CYC_FX_FAIL"
 _cyc_fx3 "$SBX/cycfx/retro.md" '    - 판정 `불가` → 예전에는 **impl 단계부터**였지만 이제는 멈춘다'
 _cyc_fx3 "$SBX/cycfx/sibling.md" "$CYC_FX_FAIL" '    - 위 갈래의 설명 — `불가`는 그 마일스톤의 재작업이다'
-chk "W132: 통제 - 갈래 줄 꼬리의 산문을 잡는다" "$(form_probe "$SBX/cycfx/tail.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$CYC_WANT_FAIL")" "1 no no"
-chk "W133: 통제 - 갈래에 붙은 이어진 줄을 잡는다" "$(form_probe "$SBX/cycfx/cont.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$CYC_WANT_FAIL")" "1 yes yes"
-chk "W134: 통제 - 복제된 갈래를 잡는다" "$(form_probe "$SBX/cycfx/dup.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$CYC_WANT_FAIL")" "2 no no"
-chk "W135: 통제 - 갈래 안의 회고 문구(M72 잔여)를 잡는다" "$(form_probe "$SBX/cycfx/retro.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$CYC_WANT_FAIL")" "1 no no"
+chk "W132: 통제 - 갈래 줄 꼬리의 산문을 잡는다" "$(sp_name F "$(form_probe "$SBX/cycfx/tail.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$CYC_WANT_FAIL")")" "$(sp_name F '1 no no')"
+chk "W133: 통제 - 갈래에 붙은 이어진 줄을 잡는다" "$(sp_name F "$(form_probe "$SBX/cycfx/cont.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$CYC_WANT_FAIL")")" "$(sp_name F '1 yes yes')"
+chk "W134: 통제 - 복제된 갈래를 잡는다" "$(sp_name F "$(form_probe "$SBX/cycfx/dup.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$CYC_WANT_FAIL")")" "$(sp_name F '2 no no')"
+chk "W135: 통제 - 갈래 안의 회고 문구(M72 잔여)를 잡는다" "$(sp_name F "$(form_probe "$SBX/cycfx/retro.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$CYC_WANT_FAIL")")" "$(sp_name F '1 no no')"
 # (W136) **오탐 방향** — 형제 설명 항목은 갈래가 아니다. 설명 항목이 갈래로 세어지면 설명을 옮긴 자리가 거짓으로 붉는다.
-chk "W136: 오탐 방향 - 형제 설명 항목은 갈래로 세지 않는다" "$(form_probe "$SBX/cycfx/sibling.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$CYC_WANT_FAIL")" "1 yes no"
+chk "W136: 오탐 방향 - 형제 설명 항목은 갈래로 세지 않는다" "$(sp_name F "$(form_probe "$SBX/cycfx/sibling.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$CYC_WANT_FAIL")")" "$(sp_name F '1 yes no')"
 # (W137~W146 · M73 라운드 1) **갈래는 블록으로 선다**(`start-point-block`). 라운드 0은 갈래 **한 줄**만 단언했고, 리뷰가
 # 그 줄을 건드리지 않고 동작을 지우는 정상 편집 넷을 쟀다 — 갈래 아래 같은 깊이의 이어지는 줄 · 부모 조건 문구 교체 · 갈래를
 # 감싼 주석/펜스 · 다른 목록 기호의 상충 갈래(전부 두 사본 131/0 초록). 금지를 하나씩 더하지 않고 **블록 전체**를 단언한다 —
@@ -5322,11 +5382,12 @@ CYC_WANT_PARENT=$(spp_line "$CONV")
 CYC_WANT_POINTER=$(spt_line "$CONV")
 CYC_WANT_OK=$(spm_line "$CONV" '가능' "$KEY_OK")
 CYC_WANT_UNREAD=$(spm_line "$CONV" '읽지못함' "$KEY_UNREAD")
-_cyc_block() { # <파일> <대상 파일> → 블록 판정 한 줄
+_cyc_block_raw() { # <대상 파일> → 블록 판정 한 줄(위치 값)
     block_probe "$1" "$CYC_SEC_ANCHOR" "$CYC_WANT_PARENT" "$CYC_WANT_POINTER" "$CYC_WANT_OK" "$CYC_WANT_FAIL" "$CYC_WANT_UNREAD"
 }
+_cyc_block() { sp_name B "$(_cyc_block_raw "$1")"; } # <대상 파일> → 블록 판정을 선언의 이름으로(M75)
 # (W137) **본 검사 — 갈래 블록.** 정상은 `1 yes yes yes yes yes 3`이다(라운드 2부터 일곱 값 — 포인터 줄이 셋째 값).
-chk "W137: 시작점 갈래가 선언에서 조립한 블록으로 선다" "$(_cyc_block "$CYC_SKILL")" "1 yes yes yes yes yes 3"
+chk "W137: 시작점 갈래가 선언에서 조립한 블록으로 선다" "$(_cyc_block "$CYC_SKILL")" "$(sp_name B '1 yes yes yes yes yes 3')"
 # (W138~W140) 선언 쪽 — 부모 선언 줄의 유일성과, 두 선언 꼬리의 금지 구분자(다른 선언 줄과 같은 형태 · `W26` 등).
 chk "W138: start-point-map 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$SPM_KEY")" "0"
 chk "W139: start-point-parent 선언 줄 정확히 1개" "$(decl_count "$CONV" "$SPP_KEY")" "1"
@@ -5353,13 +5414,13 @@ _fx_ins "$SBX/cycfx/blk.md" "$SBX/cycfx/blk-cmt1.md" 5 '<!-- 폐기된 갈래:'
 _fx_ins "$SBX/cycfx/blk-cmt1.md" "$SBX/cycfx/blk-cmt.md" 9 '-->'
 _fx_ins "$SBX/cycfx/blk.md" "$SBX/cycfx/blk-star.md" 9 '    * 판정 `불가` → **milestone 단계부터**'
 _fx_ins "$SBX/cycfx/blk.md" "$SBX/cycfx/blk-head.md" 3 '### 폐기된 규칙'
-chk "W141: 통제 - 블록 뒤 같은 깊이의 이어지는 줄을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-lazy.md")" "1 yes yes yes no yes 3"
-chk "W142: 통제 - 바뀐 부모 조건을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-parent.md")" "1 no yes yes yes yes 3"
-chk "W143: 통제 - 갈래를 감싼 주석을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-cmt.md")" "1 yes yes no yes yes 3"
-chk "W144: 통제 - 다른 목록 기호의 상충 갈래를 잡는다" "$(_cyc_block "$SBX/cycfx/blk-star.md")" "1 yes yes yes yes yes 4"
-chk "W145: 통제 - 부모 줄 바로 앞의 소제목을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-head.md")" "1 yes yes yes yes no 3"
+chk "W141: 통제 - 블록 뒤 같은 깊이의 이어지는 줄을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-lazy.md")" "$(sp_name B '1 yes yes yes no yes 3')"
+chk "W142: 통제 - 바뀐 부모 조건을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-parent.md")" "$(sp_name B '1 no yes yes yes yes 3')"
+chk "W143: 통제 - 갈래를 감싼 주석을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-cmt.md")" "$(sp_name B '1 yes yes no yes yes 3')"
+chk "W144: 통제 - 다른 목록 기호의 상충 갈래를 잡는다" "$(_cyc_block "$SBX/cycfx/blk-star.md")" "$(sp_name B '1 yes yes yes yes yes 4')"
+chk "W145: 통제 - 부모 줄 바로 앞의 소제목을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-head.md")" "$(sp_name B '1 yes yes yes yes no 3')"
 # (W146) **오탐 방향** — 바탕 픽스처(형제 설명 항목과 다음 항목이 있는 정상 블록)는 초록이어야 한다.
-chk "W146: 오탐 방향 - 설명 항목과 다음 항목이 붙은 정상 블록은 초록이다" "$(_cyc_block "$SBX/cycfx/blk.md")" "1 yes yes yes yes yes 3"
+chk "W146: 오탐 방향 - 설명 항목과 다음 항목이 붙은 정상 블록은 초록이다" "$(_cyc_block "$SBX/cycfx/blk.md")" "$(sp_name B '1 yes yes yes yes yes 3')"
 # (W147~W151 · M73 라운드 2) **포인터 줄까지 못박는다** — 라운드 1 리뷰가 블록 안에서 토큰만 보던 포인터 줄의 산문으로 부모 조건을
 # 뒤집는 편집이 두 사본 141/0 초록임을 쟀다. 포인터 줄도 선언(`start-point-pointer:`)에서 조립한 줄과 줄 전체가 같아야 한다. 두 선언 값에는
 # 추출 positive-control을 둔다(`W128`과 같은 형태 — 값이 비면 기대 줄이 비어 판정이 공허하다).
@@ -5368,7 +5429,23 @@ chk "W148: start-point-pointer 선언 줄 정확히 1개" "$(decl_count "$CONV" 
 chk "W149: start-point-pointer 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$SPT_KEY")" "0"
 chk "W150: start-point-pointer 값 추출 positive-control" "$([ -n "$CYC_WANT_POINTER" ] && echo ok || echo no)" "ok"
 _fx_rep "$SBX/cycfx/blk.md" "$SBX/cycfx/blk-ptr.md" 5 '    — 이 조건과 아래 갈래는 폐기됐다. 판정과 무관하게 언제나 **milestone 단계부터** 간다 (판정을 읽는 법은 `review-report` 행)'
-chk "W151: 통제 - 포인터 줄 산문으로 뒤집은 부모 조건을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-ptr.md")" "1 yes no yes yes yes 3"
+chk "W151: 통제 - 포인터 줄 산문으로 뒤집은 부모 조건을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-ptr.md")" "$(sp_name B '1 yes no yes yes yes 3')"
+# (W152~W159 · M75) **판정 술어의 이름 선언** — 블록 · 형태 판정의 값 이름은 규약의 두 선언이 들고 러너는 읽기만 한다. 무는 것은 선언의 유일성 ·
+# 추출 · 금지 구분자 · **이름 수 = 판정이 내는 값 수** · 이름마다 정의 항목 정확히 하나 · 배선(선언을 바꾸면 출력이 따라 바뀐다)까지다. 정의 문장의
+# 뜻과, 이름 순서가 값의 위치와 맞는가는 묻지 않는다(규약이 적는 경계).
+chk "W152: start-point-block-predicates 선언 줄 정확히 1개" "$(decl_count "$CONV" "$SPB_KEY")" "1"
+chk "W153: start-point-form-predicates 선언 줄 정확히 1개" "$(decl_count "$CONV" "$SPF_KEY")" "1"
+chk "W154: 두 술어 선언의 이름 추출 positive-control(>=1)" "$([ "$(sp_count B)" -ge 1 ] && [ "$(sp_count F)" -ge 1 ] && echo ok || echo no)" "ok"
+chk "W155: 두 술어 선언 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$SPB_KEY")$(bad_seps "$CONV" "$SPF_KEY")" "00"
+chk "W156: 본 검사 - 블록 술어 이름 수가 블록 판정이 내는 값 수와 같다" "$(sp_count B)" "$(_cyc_block_raw "$CYC_SKILL" | LC_ALL=C awk '{ print NF }')"
+chk "W157: 본 검사 - 형태 술어 이름 수가 형태 판정이 내는 값 수와 같다" "$(sp_count F)" "$(form_probe "$CYC_SKILL" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$CYC_WANT_FAIL" | LC_ALL=C awk '{ print NF }')"
+chk "W158: 본 검사 - 술어 이름마다 정의 항목이 정확히 하나" "$(sp_def_bad)" "0"
+# (W160 · W161 · M75 리뷰 차단 1) **역방향과 유일성** — `W158`은 선언 → 정의 한 방향이라, 선언되지 않은 정의 항목을 더하거나 선언에 같은 이름을
+# 두 번 쓰는 편집이 초록이었다(반증 실측). 정의 → 선언(고아 정의 항목)과 두 선언을 통틀은 이름 유일성을 함께 묻는다.
+chk "W160: 본 검사 - 정의 항목마다 선언된 이름이 있다(고아 정의 0)" "$(sp_def_orphan)" "0"
+chk "W161: 본 검사 - 두 술어 선언을 통틀어 이름이 유일하다" "$(sp_name_dup)" "0"
+# (W159) 배선 통제 — 블록 선언의 첫 이름을 바꾼 규약 사본을 같은 헬퍼에 먹이면 출력에 그 바뀐 이름이 나타나야 한다(차이 1). 러너가 이름을 박아 두면 0이다.
+chk "W159: 통제 - 선언의 이름을 바꾸면 출력이 따라 바뀐다" "$(( $(sp_name B '1' "$(sp_wire_fixture)" | LC_ALL=C grep -c 'zzz-wired=') - $(sp_name B '1' | LC_ALL=C grep -c 'zzz-wired=') ))" "1"
 fi
 
 # (W31~W41 · M64-T04) **측정 배당** — 규약이 `sh` 축 판정의 책임처와 보고서 값의 출처를 가르는 선언
