@@ -5242,12 +5242,13 @@ try {
     }
     # Definition ITEM names -- from the block predicate declaration line to the next heading (`#`), the lines whose
     # space/tab-stripped text starts with "- **`name`**" (M75 review minor 3: item heads only, not any line with the bold name).
-    function SpDefs {
+    function SpDefs([string]$spConv = '') {
+        if ($spConv -eq '') { $spConv = $CONV }
         $k = '- `' + $SPB_KEY + '`'
         $ws = [char[]]@([char]0x20, [char]0x09)
         $on = $false
         $out = New-Object System.Collections.Generic.List[string]
-        foreach ($ln in [System.IO.File]::ReadAllLines($CONV)) {
+        foreach ($ln in [System.IO.File]::ReadAllLines($spConv)) {
             $t = $ln.TrimStart($ws)
             if (-not $on) { if ($t.StartsWith($k, [System.StringComparison]::Ordinal)) { $on = $true }; continue }
             if ($ln.StartsWith('#', [System.StringComparison]::Ordinal)) { break }
@@ -5279,6 +5280,33 @@ try {
         $dup = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
         foreach ($nm in (@(SpNames 'B') + @(SpNames 'F'))) { if (-not $seen.Add($nm)) { [void]$dup.Add($nm) } }
         return [string]$dup.Count
+    }
+    # (M76) DEFINITION ITEM ORDER equals the declaration name order (block then form) -- walk the definition items that carry a
+    # declared name in order and count how often the declaration position steps back (normal 0). Reordering only the declaration
+    # or only the definitions goes red; reordering both stays green -- whether a name matches its value position BY MEANING is not
+    # asked here (the conventions boundary item). Undeclared definitions are skipped (that is W160's place).
+    function SpDefOrder([string]$spConv = '') {
+        if ($spConv -eq '') { $spConv = $CONV }
+        $idx = New-Object 'System.Collections.Generic.Dictionary[string,int]'([System.StringComparer]::Ordinal)
+        $i = 0
+        foreach ($nm in (@(SpNames 'B' $spConv) + @(SpNames 'F' $spConv))) { $i++; if (-not $idx.ContainsKey($nm)) { $idx[$nm] = $i } }
+        $p = 0; $c = 0
+        foreach ($d in @(SpDefs $spConv)) {
+            if ($idx.ContainsKey($d)) { $v = $idx[$d]; if ($p -gt 0 -and $v -lt $p) { $c++ }; $p = $v }
+        }
+        return [string]$c
+    }
+    # Order control fixture -- a SYNTHETIC conventions file holding only the two declaration lines and three definition items;
+    # 'swap' reverses the first two definitions. Not a copy of the real conventions: if the real order is already broken, swapping
+    # its first two items can REDUCE the violations and the control would measure the baseline (M76 reversal measurement).
+    function SpOrderFixture([string]$mode) {
+        $f = Join-Path $sbx ('conv-spo-' + $mode + '.md')
+        if ($mode -eq 'swap') { $d1 = 'zz-ob'; $d2 = 'zz-oa' } else { $d1 = 'zz-oa'; $d2 = 'zz-ob' }
+        $bt = [string][char]0x60
+        $lines = @('## fixture', '', ('  - ' + $bt + $SPB_KEY + $bt + ' zz-oa zz-ob'), '', ('  - ' + $bt + $SPF_KEY + $bt + ' zz-oc'), '',
+            ('  - **' + $bt + $d1 + $bt + '** - x'), ('  - **' + $bt + $d2 + $bt + '** - x'), ('  - **' + $bt + 'zz-oc' + $bt + '** - x'))
+        [System.IO.File]::WriteAllLines($f, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
+        return $f
     }
     function SpWireFixture {
         $f = Join-Path $sbx 'conv-spw.md'
@@ -6205,7 +6233,8 @@ try {
     # (W152-W159, M75) PREDICATE NAME DECLARATIONS -- the conventions hold the value names of the block and form verdicts and the
     # runner only reads them. Bound: uniqueness, extraction, forbidden separators, NAME COUNT = number of values the verdict emits,
     # exactly one definition item per name, and wiring (renaming in the declaration changes the output). The meaning of the
-    # definition prose, and whether the name order matches the value positions, are not asked (the conventions write that boundary).
+    # definition prose, and whether a name order changed together with the definitions matches the value positions, are not asked
+    # (the conventions write that boundary -- definition item order = declaration order is W162 below).
     Chk "W152: exactly one start-point-block-predicates declaration line" (DeclCount $CONV $SPB_KEY) '1'
     Chk "W153: exactly one start-point-form-predicates declaration line" (DeclCount $CONV $SPF_KEY) '1'
     Chk "W154: both predicate declarations extract names (positive-control, >=1)" $(if (@(SpNames 'B').Count -ge 1 -and @(SpNames 'F').Count -ge 1) { 'ok' } else { 'no' }) 'ok'
@@ -6216,6 +6245,10 @@ try {
     # (W160/W161, M75 review blocker 1) REVERSE DIRECTION AND UNIQUENESS -- W158 only went declaration -> definition.
     Chk "W160: main check -- every definition item has a declared name (orphan definitions 0)" (SpDefOrphan) '0'
     Chk "W161: main check -- names are unique across both predicate declarations" (SpNameDup) '0'
+    # (W162/W163, M76) DEFINITION ITEM ORDER -- reordering only the declaration or only the definitions turns W162 red. Whether a
+    # name matches its value position by meaning is not asked.
+    Chk "W162: main check -- definition item order equals the declaration name order" (SpDefOrder) '0'
+    Chk "W163: control -- a synthetic conventions file with only its first two definitions swapped adds exactly one order violation" ([string]([int](SpDefOrder (SpOrderFixture 'swap')) - [int](SpDefOrder (SpOrderFixture 'in')))) '1'
     # (W159) wiring control -- feeding a conventions copy whose first block name is renamed must show that new name (delta 1).
     Chk "W159: control -- renaming in the declaration changes the output" ([string](@((SpName 'B' '1' (SpWireFixture)) -split ' ' | Where-Object { $_.StartsWith('zzz-wired=', [System.StringComparison]::Ordinal) }).Count - @((SpName 'B' '1') -split ' ' | Where-Object { $_.StartsWith('zzz-wired=', [System.StringComparison]::Ordinal) }).Count)) '1'
     }

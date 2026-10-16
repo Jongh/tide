@@ -4787,13 +4787,32 @@ sp_name() { # <B|F> <값들> [규약 파일] → "이름=값 …"(위치로 짝�
         for (i = 1; i <= k; i++) { s = s (i > 1 ? " " : "") ((i <= n) ? N[i] : "?") "=" ((i <= m) ? V[i] : "?") }
         print s }'
 }
-sp_defs() { # → 정의 **항목**의 이름 한 줄씩 — 블록 술어 선언 줄부터 다음 제목(`#`) 직전까지, 걷은 문면이 `- **`이름`**`로 시작하는 줄의 이름
+sp_defs() { # [규약 파일] → 정의 **항목**의 이름 한 줄씩(등장 순서) — 블록 술어 선언 줄부터 다음 제목(`#`) 직전까지, 걷은 문면이 `- **`이름`**`로 시작하는 줄의 이름
     # (M75 리뷰 사소 3 — 「`**`이름`**`을 담은 아무 줄」이 아니라 항목 머리만 센다).
     LC_ALL=C awk -v k="- \`$SPB_KEY\`" '
         { sub(/\r$/, ""); t = $0; sub(/^[ \t]+/, "", t) }
         !on && substr(t, 1, length(k)) == k { on = 1; next }
         on && /^#/ { exit }
-        on && substr(t, 1, 5) == "- **`" { r = substr(t, 6); j = index(r, "`**"); if (j > 1) print substr(r, 1, j - 1) }' "$CONV"
+        on && substr(t, 1, 5) == "- **`" { r = substr(t, 6); j = index(r, "`**"); if (j > 1) print substr(r, 1, j - 1) }' "${1:-$CONV}"
+}
+# (M76) **정의 항목의 순서는 선언의 이름 순서(블록 다음 형태)와 같다** — 선언된 이름을 가진 정의 항목을 등장 순서대로 걸으며, 선언에서의 위치가
+# 앞 항목보다 앞으로 되돌아간 횟수를 센다(정상 0). 선언만 또는 정의만 순서를 바꾼 편집이 붉다. 둘을 함께 바꾼 편집은 초록이다 — 이름이 값의
+# 위치와 **뜻으로** 맞는가는 여기서 묻지 않는다(규약의 「기계가 묻는 것과 리뷰의 자리」 항목). 선언되지 않은 정의는 `W160`의 자리라 건너뛴다.
+sp_def_order() { # [규약 파일] → 순서를 거스른 횟수
+    _spof=${1:-$CONV}
+    _spol=$({ sp_names B "$_spof"; sp_names F "$_spof"; } | LC_ALL=C tr '\n' ' ')
+    sp_defs "$_spof" | LC_ALL=C awk -v names="$_spol" '
+        BEGIN { n = split(names, N, / +/); for (i = 1; i <= n; i++) if (N[i] != "" && !(N[i] in I)) I[N[i]] = i }
+        ($0 in I) { if (p && I[$0] < p) c++; p = I[$0] }
+        END { print c + 0 }'
+}
+sp_order_fixture() { # <in|swap> → 선언 두 줄과 정의 항목 셋만 든 합성 규약(순서 통제). `swap`은 정의 첫 둘의 순서만 바꾼다.
+    # 실제 규약을 쓰지 않는다 — 실제 규약의 순서가 이미 어긋나 있으면 맞바꾼 사본이 위반을 **줄여** 통제가 기준선을 재게 된다(M76 되돌림 실측).
+    _spxf="$SBX/conv-spo-$1.md"
+    if [ "$1" = swap ]; then _spx1=zz-ob; _spx2=zz-oa; else _spx1=zz-oa; _spx2=zz-ob; fi
+    printf '%s\n' "## fixture" "" "  - \`$SPB_KEY\` zz-oa zz-ob" "" "  - \`$SPF_KEY\` zz-oc" "" \
+        "  - **\`$_spx1\`** - x" "  - **\`$_spx2\`** - x" "  - **\`zz-oc\`** - x" > "$_spxf"
+    printf '%s' "$_spxf"
 }
 sp_def_bad() { # → 선언된 이름 중 정의 항목이 정확히 하나가 아닌 이름의 수(선언 → 정의)
     _spdl=$(sp_defs)
@@ -5432,7 +5451,7 @@ _fx_rep "$SBX/cycfx/blk.md" "$SBX/cycfx/blk-ptr.md" 5 '    — 이 조건과 아
 chk "W151: 통제 - 포인터 줄 산문으로 뒤집은 부모 조건을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-ptr.md")" "$(sp_name B '1 yes no yes yes yes 3')"
 # (W152~W159 · M75) **판정 술어의 이름 선언** — 블록 · 형태 판정의 값 이름은 규약의 두 선언이 들고 러너는 읽기만 한다. 무는 것은 선언의 유일성 ·
 # 추출 · 금지 구분자 · **이름 수 = 판정이 내는 값 수** · 이름마다 정의 항목 정확히 하나 · 배선(선언을 바꾸면 출력이 따라 바뀐다)까지다. 정의 문장의
-# 뜻과, 이름 순서가 값의 위치와 맞는가는 묻지 않는다(규약이 적는 경계).
+# 뜻과, 선언과 정의를 함께 바꾼 이름 순서가 값의 위치와 맞는가는 묻지 않는다(규약이 적는 경계 — 정의 항목의 순서 = 선언 순서는 아래 `W162`가 문다).
 chk "W152: start-point-block-predicates 선언 줄 정확히 1개" "$(decl_count "$CONV" "$SPB_KEY")" "1"
 chk "W153: start-point-form-predicates 선언 줄 정확히 1개" "$(decl_count "$CONV" "$SPF_KEY")" "1"
 chk "W154: 두 술어 선언의 이름 추출 positive-control(>=1)" "$([ "$(sp_count B)" -ge 1 ] && [ "$(sp_count F)" -ge 1 ] && echo ok || echo no)" "ok"
@@ -5444,6 +5463,9 @@ chk "W158: 본 검사 - 술어 이름마다 정의 항목이 정확히 하나" "
 # 두 번 쓰는 편집이 초록이었다(반증 실측). 정의 → 선언(고아 정의 항목)과 두 선언을 통틀은 이름 유일성을 함께 묻는다.
 chk "W160: 본 검사 - 정의 항목마다 선언된 이름이 있다(고아 정의 0)" "$(sp_def_orphan)" "0"
 chk "W161: 본 검사 - 두 술어 선언을 통틀어 이름이 유일하다" "$(sp_name_dup)" "0"
+# (W162 · W163 · M76) **정의 항목의 순서** — 선언만 또는 정의만 순서를 바꾸면 `W162`가 붉다. 이름이 값의 위치와 뜻으로 맞는가는 묻지 않는다.
+chk "W162: 본 검사 - 정의 항목의 순서가 선언의 이름 순서와 같다" "$(sp_def_order)" "0"
+chk "W163: 통제 - 정의 항목 첫 둘만 맞바꾼 합성 규약에서 순서 위반이 하나 는다" "$(( $(sp_def_order "$(sp_order_fixture swap)") - $(sp_def_order "$(sp_order_fixture in)") ))" "1"
 # (W159) 배선 통제 — 블록 선언의 첫 이름을 바꾼 규약 사본을 같은 헬퍼에 먹이면 출력에 그 바뀐 이름이 나타나야 한다(차이 1). 러너가 이름을 박아 두면 0이다.
 chk "W159: 통제 - 선언의 이름을 바꾸면 출력이 따라 바뀐다" "$(( $(sp_name B '1' "$(sp_wire_fixture)" | LC_ALL=C grep -c 'zzz-wired=') - $(sp_name B '1' | LC_ALL=C grep -c 'zzz-wired=') ))" "1"
 fi
