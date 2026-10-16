@@ -4577,6 +4577,63 @@ try {
         [System.IO.File]::WriteAllLines($f, $lines.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
         return $f
     }
+    # (S23-S30, M77) DOCUMENT-COMMIT PARTS -- the harness parts the docs path runs (one axis) live in ONE line of the conventions
+    # fragment, `docs-commit-parts:`, as `{allowed path}={label}[,{label}...]` tokens. Bound: uniqueness, separators, extraction,
+    # COVERAGE both ways (every docs-commit-paths path has exactly one token; no token for an undeclared path; no token without
+    # `=`), every label is a label this runner's part selection knows (read from PartKnown -- no label list is re-typed here),
+    # and the release skill points at the key. Which parts really read a path is measured by the M77-T01 taint run, not here.
+    $DP_KEY = 'docs-commit-parts:'
+    function DpToks([string]$dpConv = '') {
+        if ($dpConv -eq '') { $dpConv = $CONV_REL }
+        $tail = DeclTail $dpConv $DP_KEY
+        if ($null -eq $tail) { return @() }
+        $ws = [char[]]@([char]0x20, [char]0x09, [char]0x0D, [char]0x0B, [char]0x0C)
+        return @($tail -split ' ' | Where-Object { $_.Trim($ws) -ne '' })
+    }
+    function DpBad([string]$dpConv = '') {
+        if ($dpConv -eq '') { $dpConv = $CONV_REL }
+        $o = [System.StringComparison]::Ordinal
+        $cnt = New-Object 'System.Collections.Generic.Dictionary[string,int]'([System.StringComparer]::Ordinal)
+        foreach ($v in @(DcVals $dpConv)) { $p = DcPath $v; if (-not $cnt.ContainsKey($p)) { $cnt[$p] = 0 } }
+        $nb = 0
+        foreach ($t in @(DpToks $dpConv)) {
+            $k = $t.IndexOf('=', $o)
+            if ($k -lt 0) { $nb++; continue }
+            $p = $t.Substring(0, $k)
+            if ($cnt.ContainsKey($p)) { $cnt[$p] = $cnt[$p] + 1 } else { $nb++ }
+        }
+        foreach ($p in @($cnt.Keys)) { if ($cnt[$p] -ne 1) { $nb++ } }
+        return [string]$nb
+    }
+    function DpLabelBad([string]$dpConv = '') {
+        if ($dpConv -eq '') { $dpConv = $CONV_REL }
+        $nb = 0
+        foreach ($t in @(DpToks $dpConv)) {
+            $k = $t.IndexOf('=', [System.StringComparison]::Ordinal)
+            if ($k -lt 0) { continue }
+            foreach ($lab in ($t.Substring($k + 1) -split ',')) { if ($lab -eq '' -or (PartKnown $lab) -eq 'no') { $nb++ } }
+        }
+        return [string]$nb
+    }
+    # Fixture: a copy of the conventions fragment whose first parts token is dropped ('drop') or gets an unknown label ('label').
+    function DpFixture([string]$mode) {
+        $f = Join-Path $sbx ('conv-dp-' + $mode + '.md')
+        $first = @(DpToks) | Select-Object -First 1
+        $w = '`' + $DP_KEY + '`'
+        $lines = New-Object System.Collections.ArrayList
+        foreach ($l in [System.IO.File]::ReadAllLines($CONV_REL)) {
+            if ($null -ne $first -and $l.TrimStart([char[]]@([char]0x20, [char]0x09)).StartsWith('- ' + $w, [System.StringComparison]::Ordinal)) {
+                $i = $l.IndexOf(' ' + $first, [System.StringComparison]::Ordinal)
+                if ($i -ge 0) {
+                    $j = $i + 1 + $first.Length
+                    if ($mode -eq 'drop') { $l = $l.Substring(0, $i) + $l.Substring($j) } else { $l = $l.Substring(0, $j) + ',zz' + $l.Substring($j) }
+                }
+            }
+            [void]$lines.Add($l)
+        }
+        [System.IO.File]::WriteAllLines($f, $lines.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
     $DC_ALIAS = $DC_KEY.TrimEnd(':')
     if (PartOn 'S') {
     Chk "S8: exactly one docs-commit-paths declaration line" (DeclCount $CONV_REL $DC_KEY) '1'
@@ -4597,6 +4654,16 @@ try {
     Chk "S21: deny prefixes extract (positive-control, >=1)" $(if (@(DcDeny).Count -ge 1) { 'ok' } else { 'no' }) 'ok'
     Chk "S22: no forbidden separator in the docs-commit-deny declaration tail" (BadSeps $CONV_REL $DCD_KEY) '0'
     Chk "S19: main check -- the three restatement sites (conventions body, catalog, CLAUDE.md) carry the key" ((HasToken $CONV $DC_ALIAS) + (HasToken $CMD_CANON $DC_ALIAS) + (HasToken $CLAUDE_MD $DC_ALIAS)) 'yesyesyes'
+    Chk "S23: exactly one docs-commit-parts declaration line" (DeclCount $CONV_REL $DP_KEY) '1'
+    Chk "S24: no forbidden separator in the docs-commit-parts declaration tail" (BadSeps $CONV_REL $DP_KEY) '0'
+    # (S25) extraction positive-control -- with no token S26 would only count missing paths and S27 would pass on "0".
+    Chk "S25: docs-commit-parts tokens extract (positive-control, >=1)" $(if (@(DpToks).Count -ge 1) { 'ok' } else { 'no' }) 'ok'
+    Chk "S26: main check -- every allowed path has exactly one parts token and every token names an allowed path" (DpBad) '0'
+    Chk "S27: main check -- every parts label is a label the part selection knows" (DpLabelBad) '0'
+    Chk "S28: wiring -- the release skill points at the docs-commit-parts key" (HasToken $REL_SKILL $DP_KEY) 'yes'
+    # (S29/S30) fixture controls -- ask the verdicts' RESPONSE (control-reads-delta).
+    Chk "S29: control -- dropping one parts token is caught" ([string]([int](DpBad (DpFixture 'drop')) - [int](DpBad))) '1'
+    Chk "S30: control -- an unknown label is caught" ([string]([int](DpLabelBad (DpFixture 'label')) - [int](DpLabelBad))) '1'
     }
 
     # --- Part T: runner source EOL contract (M59 review blocker 1 -> M60) -------
