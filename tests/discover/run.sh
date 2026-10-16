@@ -4093,6 +4093,39 @@ dc_item_fixture() { # → 스킬 사본에서 `docs` 토큰을 지운 것
     LC_ALL=C sed 's/`docs`/zzz/g' "$REL_SKILL" > "$_dcif"
     printf '%s' "$_dcif"
 }
+# (S23~S30 · M77) **문서 커밋 파트** — 문서 커밋 경로가 한 축으로 돌 하니스 파트는 규약 조각의 `docs-commit-parts:` 한 줄이
+# `{허용 경로}={파트 라벨}[,{파트 라벨}…]` 토큰으로 든다. 무는 것은 선언의 유일성 · 금지 구분자 · 추출 · **양방향 덮음**(허용 경로마다 토큰
+# 정확히 하나 · 선언되지 않은 경로의 토큰 0 · `=` 없는 토큰 0) · 라벨이 이 러너의 파트 선택이 아는 라벨인가(`part_known`을 읽는다 — 라벨
+# 목록을 여기 다시 적지 않는다) · release 스킬이 선언 키를 가리키는가까지다. 어느 파트가 실제로 그 경로를 읽는가는 M77-T01의 오염 실측이 잰다.
+DP_KEY='docs-commit-parts:'
+dp_toks() { # [규약 파일] → 토큰 한 줄씩(꼬리를 ASCII 공백 하나로 쪼갠 것 중 공백류만으로 된 것은 빼고)
+    decl_tail "${1:-$CONV_REL}" "$DP_KEY" | LC_ALL=C awk '{ n = split($0, a, /[ ]/); for (i = 1; i <= n; i++) if (a[i] ~ /[^ \t\r\v\f]/) print a[i] }'
+}
+dp_bad() { # [규약 파일] → 덮음을 어긴 수(경로마다 토큰 수 ≠ 1 · 선언되지 않은 경로의 토큰 · `=` 없는 토큰)
+    _dpc=${1:-$CONV_REL}
+    dp_toks "$_dpc" | LC_ALL=C awk -v paths="$(dc_vals "$_dpc" | LC_ALL=C sed 's/@.*//' | LC_ALL=C tr '\n' ' ')" '
+        BEGIN { n = split(paths, P, /[ ]/); for (i = 1; i <= n; i++) if (P[i] != "") C[P[i]] = 0 }
+        { k = index($0, "="); if (k == 0) { nb++; next }; p = substr($0, 1, k - 1); if (p in C) C[p]++; else nb++ }
+        END { for (p in C) if (C[p] != 1) nb++; print nb + 0 }'
+}
+dp_label_bad() { # [규약 파일] → 파트 선택이 모르는 라벨(빈 라벨 포함)의 수
+    dp_toks "${1:-$CONV_REL}" | LC_ALL=C awk -v known=" $PART_LABELS " '
+        { k = index($0, "="); if (k == 0) next
+          # 빈 라벨 목록(`path=`)은 빈 라벨 하나로 센다 — awk의 split("")은 0을 내고 ps1의 `'' -split ','`은 빈 문자열 하나를 낸다(M77 리뷰 권장 4).
+          if (substr($0, k + 1) == "") { nb++; next }
+          m = split(substr($0, k + 1), L, /,/)
+          for (j = 1; j <= m; j++) if (L[j] == "" || index(known, " " L[j] " ") == 0) nb++ }
+        END { print nb + 0 }'
+}
+dp_fixture() { # <drop|label> → 규약 조각 사본에서 첫 파트 토큰을 지우거나(drop) 모르는 라벨을 붙인 것(label)
+    _dpf="$SBX/conv-dp-$1.md"
+    LC_ALL=C awk -v w="- \`$DP_KEY\`" -v t=" $(dp_toks | head -1)" -v mode="$1" '
+        { r = $0; s = r; sub(/^[ \t]+/, "", s)
+          if (t != " " && substr(s, 1, length(w)) == w) { i = index(r, t)
+              if (i > 0) { j = i + length(t); r = (mode == "drop") ? substr(r, 1, i - 1) substr(r, j) : substr(r, 1, j - 1) ",zz" substr(r, j) } }
+          print r }' "$CONV_REL" > "$_dpf"
+    printf '%s' "$_dpf"
+}
 if part_on S; then
 chk "S8: docs-commit-paths 선언 줄 정확히 1개" "$(decl_count "$CONV_REL" "$DC_KEY")" "1"
 chk "S9: docs-commit-paths 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV_REL" "$DC_KEY")" "0"
@@ -4112,6 +4145,16 @@ chk "S20: docs-commit-deny 선언 줄 정확히 1개" "$(decl_count "$CONV_REL" 
 chk "S21: 거부 접두사 추출 positive-control(>=1)" "$([ "$(dc_deny | grep -c .)" -ge 1 ] && echo ok || echo no)" "ok"
 chk "S22: docs-commit-deny 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV_REL" "$DCD_KEY")" "0"
 chk "S19: 본 검사 - 재서술처 셋(규약 본체 · 카탈로그 · CLAUDE.md)이 선언 키를 갖는다" "$(has_token "$CONV" "${DC_KEY%:}")$(has_token "$CMD_CANON" "${DC_KEY%:}")$(has_token "$CLAUDE_MD" "${DC_KEY%:}")" "yesyesyes"
+chk "S23: docs-commit-parts 선언 줄 정확히 1개" "$(decl_count "$CONV_REL" "$DP_KEY")" "1"
+chk "S24: docs-commit-parts 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV_REL" "$DP_KEY")" "0"
+# (S25) 추출 positive-control — 토큰이 비면 `S26`은 빠진 경로만 세고 `S27`은 «0»으로 공허하게 통과한다.
+chk "S25: docs-commit-parts 토큰 추출 positive-control(>=1)" "$([ "$(dp_toks | grep -c .)" -ge 1 ] && echo ok || echo no)" "ok"
+chk "S26: 본 검사 - 허용 경로마다 파트 토큰이 정확히 하나이고 토큰마다 허용 경로를 가리킨다" "$(dp_bad)" "0"
+chk "S27: 본 검사 - 파트 라벨이 파트 선택이 아는 라벨이다" "$(dp_label_bad)" "0"
+chk "S28: 배선 - release 스킬이 docs-commit-parts 키를 가리킨다" "$(has_token "$REL_SKILL" "$DP_KEY")" "yes"
+# (S29 · S30) 픽스처 통제 — 판정의 **반응**을 묻는다(`control-reads-delta`).
+chk "S29: 픽스처 통제 - 파트 토큰 하나를 지우면 잡는다" "$(( $(dp_bad "$(dp_fixture drop)") - $(dp_bad) ))" "1"
+chk "S30: 픽스처 통제 - 모르는 라벨을 잡는다" "$(( $(dp_label_bad "$(dp_fixture label)") - $(dp_label_bad) ))" "1"
 fi
 
 # --- Part T: 러너 소스 개행 계약 (M59 리뷰 차단 1 → M60) --------------------

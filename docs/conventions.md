@@ -2190,7 +2190,7 @@ release 프리플라이트에서 사이트를 빌드한 **산출물 기준**으�
 | fleet-verify | git commit/tag/push / release / 어떤 레포 phase=release 쓰기 (verification-only) | 프롬프트 + hook(git) |
 | retro | 회고 문서(`docs/reports/retro.md`) 외 파일 생성·수정 / `.tide/phase` 변경 / git 작업 | 프롬프트 |
 | cycle | git commit / git tag / git push (release 단계는 체이닝에서 제외) | 프롬프트 + hook(git) |
-| release | (없음 — 유일하게 git 조작 허용 · 문서 커밋 경로(`/tide:release docs` · `docs-commit-paths:`)도 이 단계 안) | 프리플라이트 통과 필요(문서 커밋 경로는 전제 셋 — phase `idle` · debug 세션 없음 · 선언 밖 미커밋 변경 0) |
+| release | (없음 — 유일하게 git 조작 허용 · 문서 커밋 경로(`/tide:release docs` · `docs-commit-paths:`)도 이 단계 안) | 프리플라이트 통과 필요(문서 커밋 경로는 전제 — phase `idle` · debug 세션 없음 · 선언 밖 미커밋 변경 0) |
 
 ## 규약 ↔ 실행/인프라 동기화
 
