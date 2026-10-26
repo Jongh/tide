@@ -2728,8 +2728,9 @@ chk "N9: 소비자에 옛 열거의 흔적이 없다 (status/fleet)" \
     "0/0"
 
 # --- 자율 배선 선언 정합 (M52 리뷰 차단 1) ---------------------------------
-# 안전 바닥의 **열거 자체**는 Part L이 물지만, **스킬 쪽에서 바닥 게이트에 자율 조건을 다는 편집**은
-# 그 열거를 건드리지 않아 통과했다 — M52 리뷰가 사본 트리에서 실측했다(PR CI 확인 게이트에 한 문장을
+# 안전 바닥의 **목록 자체**는 규약의 이름 선언(`floor-items:` — M78 전에는 Part L이 수만 무는 산문 열거였다)을 아래 바닥
+# 이름 축이 물지만, **스킬 쪽에서 바닥 게이트에 자율 조건을 다는 편집**은
+# 그 목록을 건드리지 않아 통과했다 — M52 리뷰가 사본 트리에서 실측했다(PR CI 확인 게이트에 한 문장을
 # 더하고 목록은 그대로 두니 221/0 초록). 그래서 **자율이 어디에 걸리는가**를 규약이
 # `autonomy-lines:`로 선언하고 실측과 대조한다. 적용 범위를 바꾸려면 선언을 함께 고쳐야 하고,
 # 그 편집이 리뷰의 눈에 걸리는 것이 이 자리의 방어다(규약이 그 한계를 함께 적는다).
@@ -2819,8 +2820,8 @@ fi
 # **옮기면 수가 보존돼 초록**이었다(리뷰 실측: 프리플라이트 3의 조건을 PR CI 게이트로 옮기고 229/0).
 # 그래서 «자율이 **바닥 게이트에 붙었는가**»를 직접 묻는다 — 규약이 선언한 `floor-marks:`가 자율
 # 토큰과 **같은 항목 창**에 있으면 붉는다. 창은 목록 항목(또는 빈 줄)에서 끊는다.
-floor_marks() { # 선언 줄의 백틱 구획 토큰(공백을 포함할 수 있어 공백 분해를 쓰지 않는다)
-    decl_tail "$CONV" 'floor-marks:' | LC_ALL=C awk -v q="\`" '{
+floor_marks() { # [규약 파일] → 선언 줄의 백틱 구획 토큰(공백을 포함할 수 있어 공백 분해를 쓰지 않는다 · M78부터 파일 인자를 받는다)
+    decl_tail "${1:-$CONV}" 'floor-marks:' | LC_ALL=C awk -v q="\`" '{
         n = split($0, a, q)
         for (i = 2; i <= n; i += 2) if (a[i] != "") print a[i]
     }'
@@ -2887,6 +2888,110 @@ floor_fixture() { # <모드> → 사본 skills 루트 (clean | attach | nest)
         printf -- '- 프리플라이트 3 — 무관 변경 확인. `.tide/autonomy`가 `continuous`면 확인 없이 진행한다.\n'
     } > "$_ff/rel/SKILL.md"
     printf '%s' "$_ff"
+}
+# (M78) **안전 바닥의 목록은 이름 선언이 든다** — 규약의 `floor-items:`가 바닥의 이름을, `floor-mark-map:` · `floor-unmarked:` ·
+# `floor-excluded:`가 이름마다의 칸(표지가 덮는다 · 표지가 없다 · 일부러 뺐다)을 든다. 러너는 이름을 **읽기만** 하고 소스에 박지
+# 않는다. 무는 것은 선언 · 정의 항목 · 칸 · 표지 집합이 서로 맞는가까지이고, 정의 문장의 뜻과 대응이 스킬의 실제 창과 맞는가는
+# 묻지 않는다(규약의 「기계가 묻는 것」 항목). 헬퍼는 파트 가드 **밖**에서 정의한다(`rf-60`).
+FLI_KEY='floor-items:'
+FLM_KEY='floor-mark-map:'
+FLU_KEY='floor-unmarked:'
+FLX_KEY='floor-excluded:'
+fl_names() { # <키> [규약 파일] → 공백으로 가른 이름 한 줄씩(공백 · 탭 · CR · VT · FF만으로 된 토큰은 빼고 — 금지 구분자 검사의 자리)
+    decl_tail "${2:-$CONV}" "$1" | LC_ALL=C awk '{ n = split($0, a, /[ ]/); for (i = 1; i <= n; i++) if (a[i] ~ /[^ \t\r\v\f]/) print a[i] }'
+}
+fl_pairs() { # [규약 파일] → `floor-mark-map:`의 백틱 구획마다 「이름=표지」 한 줄(첫 `=`로 가른다 · `=`가 없는 구획은 버린다)
+    decl_tail "${1:-$CONV}" "$FLM_KEY" | LC_ALL=C awk -v q="\`" '{
+        n = split($0, a, q)
+        for (i = 2; i <= n; i += 2) { j = index(a[i], "="); if (j > 1 && j < length(a[i])) print a[i] }
+    }'
+}
+fl_defs() { # [규약 파일] → 정의 **항목**의 이름 한 줄씩(등장 순서) — `floor-items:` 선언 줄부터, 그 줄보다 얕게 들여쓴 비어 있지 않은
+    # 줄(또는 제목) 직전까지에서 걷은 문면이 `- **`이름`**`로 시작하는 줄의 이름. 들여쓰기는 공백만 센다(ps1 사본과 같다).
+    LC_ALL=C awk -v k="- \`$FLI_KEY\`" '
+        function ind(s,   n) { n = 0; while (substr(s, n + 1, 1) == " ") n++; return n }
+        { sub(/\r$/, ""); t = $0; sub(/^[ \t]+/, "", t) }
+        !on { if (substr(t, 1, length(k)) == k) { on = 1; d = ind($0) } ; next }
+        /^#/ { exit }
+        t == "" { next }
+        ind($0) < d { exit }
+        substr(t, 1, 5) == "- **`" { r = substr(t, 6); j = index(r, "`**"); if (j > 1) print substr(r, 1, j - 1) }' "${1:-$CONV}"
+}
+fl_name_dup() { # [규약 파일] → `floor-items:`에서 두 번 이상 나온 이름의 수
+    fl_names "$FLI_KEY" "${1:-}" | LC_ALL=C sort | LC_ALL=C uniq -d | grep -c .
+}
+fl_def_bad() { # [규약 파일] → 선언된 이름 중 정의 항목이 정확히 하나가 아닌 이름의 수(선언 → 정의)
+    _fldl=$(fl_defs "${1:-}")
+    fl_names "$FLI_KEY" "${1:-}" | { _fld=0; while IFS= read -r _flv; do
+        [ "$(printf '%s\n' "$_fldl" | LC_ALL=C grep -cxF -- "$_flv")" = 1 ] || _fld=$((_fld + 1))
+    done; echo "$_fld"; }
+}
+fl_def_orphan() { # [규약 파일] → 정의 항목 중 `floor-items:`에 없는 이름의 수(정의 → 선언)
+    _flnl=$(fl_names "$FLI_KEY" "${1:-}")
+    fl_defs "${1:-}" | { _flo=0; while IFS= read -r _flv; do
+        printf '%s\n' "$_flnl" | LC_ALL=C grep -qxF -- "$_flv" || _flo=$((_flo + 1))
+    done; echo "$_flo"; }
+}
+fl_def_order() { # [규약 파일] → 정의 항목이 선언의 이름 순서를 거스른 횟수(선언되지 않은 정의는 `N38`의 자리라 건너뛴다)
+    _flof=${1:-$CONV}
+    _flol=$(fl_names "$FLI_KEY" "$_flof" | LC_ALL=C tr '\n' ' ')
+    fl_defs "$_flof" | LC_ALL=C awk -v names="$_flol" '
+        BEGIN { n = split(names, N, / +/); for (i = 1; i <= n; i++) if (N[i] != "" && !(N[i] in I)) I[N[i]] = i }
+        ($0 in I) { if (p && I[$0] < p) c++; p = I[$0] }
+        END { print c + 0 }'
+}
+fl_class() { # [규약 파일] → `floor-items:`의 이름마다 「이름=속한 칸의 수」(정상 1 — 대응에 한 번 이상 · 표지 없음 · 일부러 뺌 중 정확히 하나)
+    _flcf=${1:-$CONV}
+    _flcm=$(fl_pairs "$_flcf" | LC_ALL=C awk '{ print substr($0, 1, index($0, "=") - 1) }')
+    _flcu=$(fl_names "$FLU_KEY" "$_flcf")
+    _flcx=$(fl_names "$FLX_KEY" "$_flcf")
+    fl_names "$FLI_KEY" "$_flcf" | while IFS= read -r _flv; do
+        _flk=0
+        printf '%s\n' "$_flcm" | LC_ALL=C grep -qxF -- "$_flv" && _flk=$((_flk + 1))
+        printf '%s\n' "$_flcu" | LC_ALL=C grep -qxF -- "$_flv" && _flk=$((_flk + 1))
+        printf '%s\n' "$_flcx" | LC_ALL=C grep -qxF -- "$_flv" && _flk=$((_flk + 1))
+        printf '%s=%s\n' "$_flv" "$_flk"
+    done
+}
+fl_class_bad() { # [규약 파일] → 정확히 한 칸에 속하지 않는 이름의 수
+    fl_class "${1:-}" | LC_ALL=C grep -vc '=1$'
+}
+fl_stray() { # [규약 파일] → 세 칸 선언에 들었지만 `floor-items:`에 없는 이름의 수(서로 다른 이름으로 센다)
+    _flsf=${1:-$CONV}
+    _flsn=$(fl_names "$FLI_KEY" "$_flsf")
+    { fl_pairs "$_flsf" | LC_ALL=C awk '{ print substr($0, 1, index($0, "=") - 1) }'; fl_names "$FLU_KEY" "$_flsf"; fl_names "$FLX_KEY" "$_flsf"; } |
+        LC_ALL=C sort -u | { _fls=0; while IFS= read -r _flv; do
+            printf '%s\n' "$_flsn" | LC_ALL=C grep -qxF -- "$_flv" || _fls=$((_fls + 1))
+        done; echo "$_fls"; }
+}
+fl_mark_missing() { # [규약 파일] → `floor-marks:`의 표지 중 대응에 없는 것의 수
+    _flmm=$(fl_pairs "${1:-}" | LC_ALL=C awk '{ print substr($0, index($0, "=") + 1) }')
+    floor_marks "${1:-}" | LC_ALL=C sort -u | { _flm=0; while IFS= read -r _flv; do
+        printf '%s\n' "$_flmm" | LC_ALL=C grep -qxF -- "$_flv" || _flm=$((_flm + 1))
+    done; echo "$_flm"; }
+}
+fl_mark_extra() { # [규약 파일] → 대응의 표지 중 `floor-marks:`에 없는 것의 수(서로 다른 표지로 센다)
+    _flme=$(floor_marks "${1:-}")
+    fl_pairs "${1:-}" | LC_ALL=C awk '{ print substr($0, index($0, "=") + 1) }' | LC_ALL=C sort -u | { _flx=0; while IFS= read -r _flv; do
+        printf '%s\n' "$_flme" | LC_ALL=C grep -qxF -- "$_flv" || _flx=$((_flx + 1))
+    done; echo "$_flx"; }
+}
+fl_order_fixture() { # <in|swap> → 이름 선언과 정의 항목 셋만 든 합성 규약(순서 통제). `swap`은 정의 첫 둘의 순서만 바꾼다(`sp_order_fixture`와 같은 까닭으로 실제 규약을 쓰지 않는다).
+    _flxf="$SBX/conv-flo-$1.md"
+    if [ "$1" = swap ]; then _flx1=zz-fb; _flx2=zz-fa; else _flx1=zz-fa; _flx2=zz-fb; fi
+    printf '%s\n' "## fixture" "" "  - \`$FLI_KEY\` zz-fa zz-fb zz-fc" "" \
+        "  - **\`$_flx1\`** - x" "  - **\`$_flx2\`** - x" "  - **\`zz-fc\`** - x" > "$_flxf"
+    printf '%s' "$_flxf"
+}
+fl_wire_fixture() { # → `floor-items:`의 첫 이름만 바꾼 규약 사본(배선 통제 — 이름을 박지 않았다면 `fl_class` 출력이 따라 바뀐다)
+    _flwf="$SBX/conv-flw.md"
+    _flw1=$(fl_names "$FLI_KEY" | head -1)
+    if [ -n "$_flw1" ]; then
+        LC_ALL=C awk -v k="\`$FLI_KEY\`" -v o="$_flw1" '{ i = index($0, k); if (i > 0) { t = substr($0, i + length(k)); j = index(t, " " o); if (j > 0) $0 = substr($0, 1, i + length(k) - 1) substr(t, 1, j) "zzz-wired" substr(t, j + 1 + length(o)) } print }' "$CONV" > "$_flwf"
+    else
+        cat "$CONV" > "$_flwf"
+    fi
+    printf '%s' "$_flwf"
 }
 # (N18)(N19) 선언 줄 유일성과 **추출 positive-control** — 표지 추출이 비면 아래 본 검사가 «항상 0»으로
 # 공허해진다. 백틱 구획 파싱이 망가지는 것이 그 경로라 수를 직접 단언한다.
@@ -2960,6 +3065,25 @@ chk "N28: 음성 통제 - 손대지 않은 사본은 붉지 않는다" "$(axis_m
 # (실측: 창 좁히기를 되돌린 변이가 240/0 초록이었다). 규약의 「성립한 적대 변이는 픽스처로 승격한다」가
 # 이 자리를 가리킨다.
 chk "N29: 적대 통제 - 서술을 절 밖으로 옮기면 잡는다" "$(axis_missing "$(axis_fixture moved)")" "1"
+# (N30~N45 · M78) **안전 바닥의 이름 선언** — 바닥 목록이 산문 열거(옛 「열이다」 ⑴~⑽ — Part L이 수만 물었다)에서 선언으로 올라왔다.
+# 이름을 지우면 정의 · 칸 대조가, 칸에서 빼면 칸 대조가, 표지를 대응에서 빼면 표지 대조가 붉다. 바닥 선언 · 정의 · `floor-marks:`를 모두 함께 고친 편집은 초록이다(규약의 ⒝).
+# `floor-unmarked:` · `floor-excluded:`의 추출에는 따로 positive-control이 없다 — 둘 중 하나가 비면 이름이 칸을 잃어 `N41`이 붉다.
+chk "N30: floor-items 선언 줄 정확히 1개" "$(decl_count "$CONV" "$FLI_KEY")" "1"
+chk "N31: floor-mark-map 선언 줄 정확히 1개" "$(decl_count "$CONV" "$FLM_KEY")" "1"
+chk "N32: floor-unmarked 선언 줄 정확히 1개" "$(decl_count "$CONV" "$FLU_KEY")" "1"
+chk "N33: floor-excluded 선언 줄 정확히 1개" "$(decl_count "$CONV" "$FLX_KEY")" "1"
+chk "N34: 바닥 이름 · 대응 추출 positive-control(>=1)" "$([ "$(fl_names "$FLI_KEY" | grep -c .)" -ge 1 ] && [ "$(fl_pairs | grep -c .)" -ge 1 ] && echo ok || echo no)" "ok"
+chk "N35: 바닥 선언 네 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$FLI_KEY")$(bad_seps "$CONV" "$FLM_KEY")$(bad_seps "$CONV" "$FLU_KEY")$(bad_seps "$CONV" "$FLX_KEY")" "0000"
+chk "N36: 본 검사 - floor-items 이름이 유일하다" "$(fl_name_dup)" "0"
+chk "N37: 본 검사 - 바닥 이름마다 정의 항목이 정확히 하나" "$(fl_def_bad)" "0"
+chk "N38: 본 검사 - 바닥 정의 항목마다 선언된 이름이 있다(고아 정의 0)" "$(fl_def_orphan)" "0"
+chk "N39: 본 검사 - 바닥 정의 항목의 순서가 선언의 이름 순서와 같다" "$(fl_def_order)" "0"
+chk "N40: 통제 - 정의 항목 첫 둘만 맞바꾼 합성 규약에서 순서 위반이 하나 는다" "$(( $(fl_def_order "$(fl_order_fixture swap)") - $(fl_def_order "$(fl_order_fixture in)") ))" "1"
+chk "N41: 본 검사 - 바닥 이름마다 정확히 한 칸에 속한다" "$(fl_class_bad)" "0"
+chk "N42: 본 검사 - 칸에 든 이름이 floor-items에 있다" "$(fl_stray)" "0"
+chk "N43: 본 검사 - floor-marks 표지가 전부 대응에 있다" "$(fl_mark_missing)" "0"
+chk "N44: 본 검사 - 대응의 표지가 전부 floor-marks에 있다" "$(fl_mark_extra)" "0"
+chk "N45: 통제 - floor-items의 이름을 바꾸면 출력이 따라 바뀐다" "$(( $(fl_class "$(fl_wire_fixture)" | LC_ALL=C grep -c '^zzz-wired=') - $(fl_class | LC_ALL=C grep -c '^zzz-wired=') ))" "1"
 fi
 
 # `scope_tok`은 Part O(M69)와 Part W(M66~M68) **둘이 부른다** — 정의를 앞으로 올려 판정을 사본당

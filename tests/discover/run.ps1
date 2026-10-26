@@ -2953,8 +2953,9 @@ try {
         ("{0}/{1}" -f $siOldS, $siOldF) '0/0'
 
     # --- autonomy wiring declaration consistency (M52 review blocker 1) -------
-    # Part L bites the safety-floor ENUMERATION itself, but an edit that makes a floor gate
-    # autonomy-conditional IN THE SKILL leaves that enumeration untouched -- the M52 review measured it
+    # The safety-floor LIST itself is bitten by the floor name axis below (the `floor-items:` declaration --
+    # before M78 it was a prose enumeration whose count alone Part L bit), but an edit that makes a floor gate
+    # autonomy-conditional IN THE SKILL leaves that list untouched -- the M52 review measured it
     # on a tree copy (one sentence added to the PR-CI gate, list untouched: 221/0 green). So the
     # convention now declares WHERE autonomy may attach (`autonomy-lines:`) and this compares it with
     # the measured tree. Changing the scope requires editing the declaration, and that edit being
@@ -3065,8 +3066,10 @@ try {
     # PR-CI gate -> 229/0). So this asks the question directly: is autonomy attached TO A FLOOR GATE?
     # A declared `floor-marks:` token in the SAME ITEM WINDOW as an autonomy token is a hit. Windows
     # break at list items (and blank lines).
-    function FloorMarks() {
-        $t = DeclTail $CONV 'floor-marks:'
+    # Accepts an optional conventions file (M78 -- the floor name helpers pass theirs through; empty means $CONV).
+    function FloorMarks([string]$flConv = '') {
+        if ($flConv -eq '') { $flConv = $CONV }
+        $t = DeclTail $flConv 'floor-marks:'
         $out = New-Object System.Collections.Generic.List[string]
         if ($null -eq $t) { return @() }
         $parts = $t.Split([char]0x60)
@@ -3141,6 +3144,155 @@ try {
         [void]$ln.Add('')
         [void]$ln.Add('- preflight 3 -- unrelated changes. If `.tide/autonomy` is `continuous`, proceed without asking.')
         [System.IO.File]::WriteAllLines((Join-Path $f 'rel/SKILL.md'), $ln.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    # (M78) THE SAFETY FLOOR LIST IS A NAME DECLARATION -- `floor-items:` holds the floor names; `floor-mark-map:`, `floor-unmarked:`
+    # and `floor-excluded:` hold each name's slot (covered by a mark / no mark / deliberately excluded). The runner only READS the
+    # names and never spells them in source. What is asked is whether declaration, definition items, slots and the mark set agree;
+    # the meaning of a definition sentence and whether the map matches the real skill window are not asked (the conventions item).
+    # Helpers live OUTSIDE the part guard (rf-60). Parameters are NOT named `$conv` (case-insensitive shadowing of `$CONV`).
+    $FLI_KEY = 'floor-items:'
+    $FLM_KEY = 'floor-mark-map:'
+    $FLU_KEY = 'floor-unmarked:'
+    $FLX_KEY = 'floor-excluded:'
+    function FlNames([string]$key, [string]$flConv = '') {
+        if ($flConv -eq '') { $flConv = $CONV }
+        $tail = DeclTail $flConv $key
+        if ($null -eq $tail) { return @() }
+        $ws = [char[]]@([char]0x20, [char]0x09, [char]0x0D, [char]0x0B, [char]0x0C)
+        return @($tail -split ' ' | Where-Object { $_.Trim($ws) -ne '' })
+    }
+    # Backtick spans of `floor-mark-map:`, one "name=mark" each (split at the FIRST `=`; spans without one are dropped).
+    function FlPairs([string]$flConv = '') {
+        if ($flConv -eq '') { $flConv = $CONV }
+        $t = DeclTail $flConv $FLM_KEY
+        $out = New-Object System.Collections.Generic.List[string]
+        if ($null -eq $t) { return @() }
+        $parts = $t.Split([char]0x60)
+        for ($i = 1; $i -lt $parts.Count; $i += 2) {
+            $j = $parts[$i].IndexOf('=', [System.StringComparison]::Ordinal)
+            if ($j -gt 0 -and $j -lt ($parts[$i].Length - 1)) { [void]$out.Add($parts[$i]) }
+        }
+        return @($out)
+    }
+    function FlPairName([string]$p) { return $p.Substring(0, $p.IndexOf('=', [System.StringComparison]::Ordinal)) }
+    function FlPairMark([string]$p) { return $p.Substring($p.IndexOf('=', [System.StringComparison]::Ordinal) + 1) }
+    # Definition ITEM names in order -- from the `floor-items:` declaration line up to (not including) the first non-blank line
+    # indented LESS than it (or a heading), the lines whose space/tab-stripped text starts with "- **`name`**". Indentation counts
+    # spaces only (same as the .sh twin).
+    function FlDefs([string]$flConv = '') {
+        if ($flConv -eq '') { $flConv = $CONV }
+        $k = '- `' + $FLI_KEY + '`'
+        $ws = [char[]]@([char]0x20, [char]0x09)
+        $on = $false; $d = 0
+        $out = New-Object System.Collections.Generic.List[string]
+        foreach ($ln in [System.IO.File]::ReadAllLines($flConv)) {
+            $t = $ln.TrimStart($ws)
+            $ind = $ln.Length - $ln.TrimStart([char]0x20).Length
+            if (-not $on) { if ($t.StartsWith($k, [System.StringComparison]::Ordinal)) { $on = $true; $d = $ind }; continue }
+            if ($ln.StartsWith('#', [System.StringComparison]::Ordinal)) { break }
+            if ($t -eq '') { continue }
+            if ($ind -lt $d) { break }
+            if ($t.StartsWith('- **`', [System.StringComparison]::Ordinal)) {
+                $r = $t.Substring(5); $j = $r.IndexOf('`**', [System.StringComparison]::Ordinal)
+                if ($j -gt 0) { $out.Add($r.Substring(0, $j)) }
+            }
+        }
+        return $out
+    }
+    function OrdSet($items) {
+        $s = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($x in @($items)) { if ($null -ne $x) { [void]$s.Add([string]$x) } }
+        return ,$s
+    }
+    function FlNameDup([string]$flConv = '') {
+        $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        $dup = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($nm in @(FlNames $FLI_KEY $flConv)) { if (-not $seen.Add($nm)) { [void]$dup.Add($nm) } }
+        return [string]$dup.Count
+    }
+    function FlDefBad([string]$flConv = '') {
+        $defs = @(FlDefs $flConv)
+        $bad = 0
+        foreach ($nm in @(FlNames $FLI_KEY $flConv)) {
+            $c = @($defs | Where-Object { [string]::Equals($_, $nm, [System.StringComparison]::Ordinal) }).Count
+            if ($c -ne 1) { $bad++ }
+        }
+        return [string]$bad
+    }
+    function FlDefOrphan([string]$flConv = '') {
+        $names = OrdSet @(FlNames $FLI_KEY $flConv)
+        return [string]@(@(FlDefs $flConv) | Where-Object { -not $names.Contains($_) }).Count
+    }
+    # Definition order equals declaration name order -- count how often the declaration position steps back (normal 0).
+    # Undeclared definitions are skipped (that is N38's place).
+    function FlDefOrder([string]$flConv = '') {
+        $idx = New-Object 'System.Collections.Generic.Dictionary[string,int]'([System.StringComparer]::Ordinal)
+        $i = 0
+        foreach ($nm in @(FlNames $FLI_KEY $flConv)) { $i++; if (-not $idx.ContainsKey($nm)) { $idx[$nm] = $i } }
+        $p = 0; $c = 0
+        foreach ($d in @(FlDefs $flConv)) {
+            if ($idx.ContainsKey($d)) { $v = $idx[$d]; if ($p -gt 0 -and $v -lt $p) { $c++ }; $p = $v }
+        }
+        return [string]$c
+    }
+    # Per `floor-items:` name, "name=<number of slots it sits in>" (normal 1 -- in the map at least once / unmarked / excluded).
+    function FlClass([string]$flConv = '') {
+        $m = OrdSet @(@(FlPairs $flConv) | ForEach-Object { FlPairName $_ })
+        $u = OrdSet @(FlNames $FLU_KEY $flConv)
+        $x = OrdSet @(FlNames $FLX_KEY $flConv)
+        $out = New-Object System.Collections.Generic.List[string]
+        foreach ($nm in @(FlNames $FLI_KEY $flConv)) {
+            $k = 0
+            if ($m.Contains($nm)) { $k++ }
+            if ($u.Contains($nm)) { $k++ }
+            if ($x.Contains($nm)) { $k++ }
+            $out.Add($nm + '=' + $k)
+        }
+        return $out
+    }
+    function FlClassBad([string]$flConv = '') {
+        return [string]@(@(FlClass $flConv) | Where-Object { -not $_.EndsWith('=1', [System.StringComparison]::Ordinal) }).Count
+    }
+    function FlStray([string]$flConv = '') {
+        $names = OrdSet @(FlNames $FLI_KEY $flConv)
+        $all = OrdSet (@(@(FlPairs $flConv) | ForEach-Object { FlPairName $_ }) + @(FlNames $FLU_KEY $flConv) + @(FlNames $FLX_KEY $flConv))
+        return [string]@($all | Where-Object { -not $names.Contains($_) }).Count
+    }
+    function FlMarkMissing([string]$flConv = '') {
+        $mapped = OrdSet @(@(FlPairs $flConv) | ForEach-Object { FlPairMark $_ })
+        return [string]@((OrdSet @(FloorMarks $flConv)) | Where-Object { -not $mapped.Contains($_) }).Count
+    }
+    function FlMarkExtra([string]$flConv = '') {
+        $marks = OrdSet @(FloorMarks $flConv)
+        return [string]@((OrdSet @(@(FlPairs $flConv) | ForEach-Object { FlPairMark $_ })) | Where-Object { -not $marks.Contains($_) }).Count
+    }
+    # Order control fixture -- SYNTHETIC (same reason as SpOrderFixture); 'swap' reverses only the first two definitions.
+    function FlOrderFixture([string]$mode) {
+        $f = Join-Path $sbx ('conv-flo-' + $mode + '.md')
+        if ($mode -eq 'swap') { $d1 = 'zz-fb'; $d2 = 'zz-fa' } else { $d1 = 'zz-fa'; $d2 = 'zz-fb' }
+        $bt = [string][char]0x60
+        $lines = @('## fixture', '', ('  - ' + $bt + $FLI_KEY + $bt + ' zz-fa zz-fb zz-fc'), '',
+            ('  - **' + $bt + $d1 + $bt + '** - x'), ('  - **' + $bt + $d2 + $bt + '** - x'), ('  - **' + $bt + 'zz-fc' + $bt + '** - x'))
+        [System.IO.File]::WriteAllLines($f, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    # Wiring control -- a conventions copy with ONLY the first `floor-items:` name renamed; FlClass output must follow.
+    function FlWireFixture {
+        $f = Join-Path $sbx 'conv-flw.md'
+        $first = @(FlNames $FLI_KEY) | Select-Object -First 1
+        $w = '`' + $FLI_KEY + '`'
+        $lines = New-Object System.Collections.ArrayList
+        foreach ($l in [System.IO.File]::ReadAllLines($CONV)) {
+            $i = $l.IndexOf($w, [System.StringComparison]::Ordinal)
+            if ($null -ne $first -and $i -ge 0) {
+                $head = $l.Substring(0, $i + $w.Length); $t = $l.Substring($i + $w.Length)
+                $j = $t.IndexOf(' ' + $first, [System.StringComparison]::Ordinal)
+                if ($j -ge 0) { $l = $head + $t.Substring(0, $j + 1) + 'zzz-wired' + $t.Substring($j + 1 + $first.Length) }
+            }
+            [void]$lines.Add($l)
+        }
+        [System.IO.File]::WriteAllLines($f, $lines.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
         return $f
     }
     # (N18)(N19) Declaration uniqueness and the EXTRACTION positive-control -- if extraction comes back
@@ -3226,6 +3378,27 @@ try {
     # the window to the section. Without this case, REVERTING that narrowing reddens nothing (measured:
     # 240/0 green). The convention's "a landed adversarial mutation is promoted to a fixture" points here.
     Chk "N29: adversarial control -- moving the description out of the section is caught" ([string](AxisMissing (AxisFixture 'moved'))) '1'
+    # (N30~N45, M78) THE SAFETY FLOOR NAME DECLARATION -- the floor list moved from a prose enumeration (Part L only counted it)
+    # to declarations. Dropping a name reddens the definition / slot checks, dropping it from a slot reddens the slot check, and
+    # dropping a mark from the map reddens the mark check. Editing every floor declaration, definition and `floor-marks:`
+    # together stays green (item (b)). Extraction of `floor-unmarked:` / `floor-excluded:` has no positive-control of its own:
+    # emptying either leaves names with no slot, which N41 reddens.
+    Chk "N30: floor-items declaration line is exactly 1" (DeclCount $CONV $FLI_KEY) '1'
+    Chk "N31: floor-mark-map declaration line is exactly 1" (DeclCount $CONV $FLM_KEY) '1'
+    Chk "N32: floor-unmarked declaration line is exactly 1" (DeclCount $CONV $FLU_KEY) '1'
+    Chk "N33: floor-excluded declaration line is exactly 1" (DeclCount $CONV $FLX_KEY) '1'
+    Chk "N34: floor names and map extract (positive-control, >=1)" $(if (@(FlNames $FLI_KEY).Count -ge 1 -and @(FlPairs).Count -ge 1) { 'ok' } else { 'no' }) 'ok'
+    Chk "N35: no forbidden separator in the four floor declaration tails" ((BadSeps $CONV $FLI_KEY) + (BadSeps $CONV $FLM_KEY) + (BadSeps $CONV $FLU_KEY) + (BadSeps $CONV $FLX_KEY)) '0000'
+    Chk "N36: main check -- floor-items names are unique" (FlNameDup) '0'
+    Chk "N37: main check -- each floor name has exactly one definition item" (FlDefBad) '0'
+    Chk "N38: main check -- each floor definition item has a declared name (no orphan)" (FlDefOrphan) '0'
+    Chk "N39: main check -- floor definition item order equals declaration name order" (FlDefOrder) '0'
+    Chk "N40: control -- a synthetic conventions file with only its first two definitions swapped adds exactly one order violation" ([string]([int](FlDefOrder (FlOrderFixture 'swap')) - [int](FlDefOrder (FlOrderFixture 'in')))) '1'
+    Chk "N41: main check -- each floor name sits in exactly one slot" (FlClassBad) '0'
+    Chk "N42: main check -- every name in a slot declaration is in floor-items" (FlStray) '0'
+    Chk "N43: main check -- every floor-marks mark is in the map" (FlMarkMissing) '0'
+    Chk "N44: main check -- every map mark is in floor-marks" (FlMarkExtra) '0'
+    Chk "N45: control -- renaming a floor-items name changes the output" ([string](@(FlClass (FlWireFixture) | Where-Object { $_.StartsWith('zzz-wired=', [System.StringComparison]::Ordinal) }).Count - @(FlClass | Where-Object { $_.StartsWith('zzz-wired=', [System.StringComparison]::Ordinal) }).Count)) '1'
     }
 
     # --- Part O: consuming the retro follow-up ledger (M54) ----------------
