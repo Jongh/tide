@@ -255,17 +255,43 @@ tide는 porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴�
   - **집행이 미치는 자리는 셋이다**: ⑴ 바닥의 이름 선언 · 정의 항목 · 표지 대응이 서로 맞는가(아래
     「기계가 묻는 것」) ⑵ 자율 토큰이 붙은 **줄 수**가 위 `autonomy-lines:` 선언과 어긋나면 붉는다
     ⑶ 자율 토큰이 **바닥 표지와 같은 항목 창**에 있으면 붉는다(`floor-marks:`).
-  - **기계가 묻는 것** — 하니스는 네 선언 줄 각각의 유일성과 금지 구분자, 이름 추출(`floor-items:` · `floor-mark-map:`은
-    직접 positive-control하고, `floor-unmarked:` · `floor-excluded:`는 비면 이름이 칸을 잃어 아래 칸 대조가 붉는 간접 집행이다), `floor-items:`의 이름 유일성,
-    정의 항목과 `floor-items:`의 **양방향** 대조(이름마다 항목이 정확히 하나 · 항목마다 선언된 이름이 있다) · 정의 항목의 순서
-    = 선언의 이름 순서, 이름마다 정확히 한 칸에 속하는가 · 칸에 든 이름이 `floor-items:`에 있는가, `floor-mark-map:`의 표지
-    집합 = `floor-marks:`의 표지 집합(양방향), 칸 판정과 순서 판정이 이름을 선언에서 읽는가(배선 — 칸 출력과 합성 규약의 순서 위반으로 잰다)를 묻는다.
-    나머지 판정(이름 유일성 · 정의 대조)에는 따로 배선 통제가 없다 — 러너 소스에 이름을 박는 편집은 기계가 아니라 diff와 리뷰가 본다. **정의 항목**은 `floor-items:`
-    선언 줄부터 그 줄보다 얕게 들여쓴 비어 있지 않은 줄(또는 제목) 직전까지에서 걷은 문면이 `- **`이름`**`로 시작하는 줄이다 —
-    그 범위 밖에 쓴 정의 모양 줄은 항목이 아니다(열린 경계). **정의 문장의 뜻**, 표지 대응이 스킬 문면의 실제 창과 맞는가
-    (대응이 적은 표지가 그 바닥 게이트의 창에 정말 있는가), **이름이 든 칸이 옳은가**(표지 없음 ↔ 일부러 뺌으로 옮기거나, 다른
-    이름이 같은 표지를 대응해 두는 한 대응에서 표지 없음으로 옮겨도 초록이다)는 묻지 않는다 — 리뷰의 자리다. 집행은 `tests/discover` Part N이다
-    (케이스 목록의 단일 선언처는 `tests/discover/README.md`).
+  - **기계가 묻는 것** — 하니스가 이 축에서 묻는 판정은 아래 `floor-asks:`가 이름으로 들고, 이름마다 정의 항목이 하나다. 판정마다 그것을 무는
+    케이스는 `floor-ask-cases:`가 `이름=케이스` 토큰으로 든다(한 이름이 여러 케이스를, 한 케이스가 여러 이름을 가질 수 있다). `floor-ask-from:`은 이 축이
+    시작하는 케이스다 — 두 러너의 Part N 케이스 중 그 번호 이상인 것은 전부 어느 판정에든 대응해야 한다(이 축은 Part N의 꼬리다). 고지 선언도 바닥 선언과
+    같은 판정(선언 줄 유일성 · 구분자 · 추출 · 이름 유일성 · 정의 대조)을 받는다.
+
+    - `floor-asks:` decl-unique extract no-seps name-unique def-each def-orphan def-order slot-one slot-known mark-covered mark-known wiring ask-has-case ask-known case-exists case-mapped
+    - `floor-ask-cases:` decl-unique=N30 decl-unique=N31 decl-unique=N32 decl-unique=N33 extract=N34 no-seps=N35 name-unique=N36 def-each=N37 def-orphan=N38 def-order=N39 def-order=N40 slot-one=N41 slot-known=N42 mark-covered=N43 mark-known=N44 wiring=N45 decl-unique=N46 decl-unique=N47 decl-unique=N48 extract=N49 no-seps=N50 name-unique=N51 def-each=N52 def-orphan=N53 def-order=N54 ask-has-case=N55 ask-known=N56 case-exists=N57 case-mapped=N58 wiring=N59 wiring=N60 wiring=N61 case-exists=N62
+    - `floor-ask-from:` N30
+
+    - **`decl-unique`** — 바닥 선언과 고지 선언의 선언 줄이 키마다 정확히 하나다.
+    - **`extract`** — 이름 추출이 비지 않는다. `floor-items:` · `floor-mark-map:` · `floor-asks:` · `floor-ask-cases:`는 직접 positive-control하고,
+      `floor-unmarked:` · `floor-excluded:`는 비면 이름이 칸을 잃어 `slot-one`이 붉는 간접 집행이다. `floor-ask-from:`은 `N`+숫자 꼴로 읽히는지를 같은 자리에서 묻는다(읽히지 않으면 `case-mapped`의 경계가 Part N 전체로 미끄러진다).
+    - **`no-seps`** — 바닥 선언과 고지 선언의 꼬리에 금지 구분자가 없다(선언 줄마다 따로 본다).
+    - **`name-unique`** — `floor-items:`와 `floor-asks:`의 이름이 각각 유일하다.
+    - **`def-each`** — 선언된 이름마다 정의 항목이 정확히 하나다(바닥 · 고지).
+    - **`def-orphan`** — 정의 항목마다 선언된 이름이 있다(바닥 · 고지).
+    - **`def-order`** — 정의 항목의 순서가 선언의 이름 순서와 같다(바닥 · 고지 — 합성 규약의 순서 위반으로 통제한다).
+    - **`slot-one`** — 바닥 이름마다 정확히 한 칸에 속한다.
+    - **`slot-known`** — 칸에 든 이름이 `floor-items:`에 있다.
+    - **`mark-covered`** — `floor-marks:`의 표지가 전부 대응에 있다.
+    - **`mark-known`** — 대응의 표지가 전부 `floor-marks:`에 있다.
+    - **`wiring`** — 칸 판정 · 이름 유일성 · 정의 대조가 이름을 선언에서 읽는다(바닥 키 `floor-items:`에서, 이름 하나만 바꾸거나 복제한 규약 사본에서 출력이 따라 바뀌는가로 잰다 — 고지 키는 같은 함수를 쓴다는 사실로만 덮인다).
+    - **`ask-has-case`** — 고지 이름마다 대응하는 케이스가 하나 이상이다.
+    - **`ask-known`** — 대응의 이름이 전부 `floor-asks:`에 있다.
+    - **`case-exists`** — 대응의 케이스가 두 러너 모두에 케이스 줄로 있다. 케이스 줄은 공백을 벗긴 문면이 케이스 호출과 `"{케이스}:`로 시작하는 줄이고,
+      주석 줄은 세지 않는다(합성 러너로 통제한다). 케이스 ID는 `N`+숫자에 소문자 접미가 붙을 수 있다(`F1b` · `G8a` 꼴). 작은따옴표나 공백 둘로 쓴 호출,
+      대문자 · 기호 접미(`N63B` · `N63-a` 꼴)는 케이스 줄이 아니다(열린 경계 — 두 러너의 케이스 호출은 전부 큰따옴표 · 공백 한 칸 꼴이고 접미는 소문자뿐이다).
+    - **`case-mapped`** — 두 러너의 Part N 케이스 중 `floor-ask-from:` 이상인 것(접미 ID는 숫자 부분으로 견준다)이 전부 대응에 있다.
+
+    **정의 항목**은 선언 줄부터 그 줄보다 얕게 들여쓴 비어 있지 않은 줄(또는 제목) 직전까지에서, **선언 줄과 같은 깊이**로 쓴 줄 중 문면이
+    `- **`이름`**`로 시작하는 줄이다 — 깊이가 다르거나 범위 밖에 쓴 정의 모양 줄은 항목이 아니다(열린 경계 — 바닥 정의 범위 안에 고지 정의가 더 깊이 놓여도
+    서로 섞이지 않는 까닭이다). 대응이 묻는 것은 「이 판정에 이 케이스가 있다」까지다 — **케이스가 그 판정을 얼마나 넓게 무는가**(예: 구분자 판정이 선언 줄
+    하나를 빠뜨리는 것)는 묻지 않고 되돌림 실측이 잰다. 고지 선언에 쓰는 판정 호출이 이름을 박는 편집(배선)은 바닥 쪽 통제와 같은 함수를 쓰는 것으로만
+    덮인다. **정의 문장의 뜻**, 표지 대응이 스킬 문면의 실제 창과 맞는가(대응이 적은 표지가 그 바닥 게이트의 창에 정말 있는가), **이름이 든 칸이 옳은가**
+    (표지 없음 ↔ 일부러 뺌으로 옮기거나, 다른 이름이 같은 표지를 대응해 두는 한 대응에서 표지 없음으로 옮겨도 초록이다)는 묻지 않는다 — 리뷰의 자리다.
+    러너 소스에 이름을 박는 편집은 `wiring`이 재는 판정 밖에서는 기계가 아니라 diff와 리뷰가 본다. 집행은 `tests/discover` Part N이다(케이스 목록의 단일
+    선언처는 `tests/discover/README.md`).
   - **기계가 막지 못하는 것을 함께 적는다.** ⒜ `floor-unmarked:`의 바닥에 조건을 다는 편집 ⒝ 바닥 선언 넷과
     정의 항목, `autonomy-lines:` · `floor-marks:`를 **모두 함께 고치면서** 바닥을 자율 아래로 옮기는 편집(이름을 모든 선언과 정의에서 함께
     지우고, 그 바닥에만 대응하던 표지를 `floor-marks:`에서도 지우면 대조가 맞는다) ⒞ 조건을 **게이트의 창 밖**(목록 뒤 최상위 문단 등)에 두고 그 게이트를
