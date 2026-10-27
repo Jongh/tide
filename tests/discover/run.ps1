@@ -3151,21 +3151,26 @@ try {
     # names and never spells them in source. What is asked is whether declaration, definition items, slots and the mark set agree;
     # the meaning of a definition sentence and whether the map matches the real skill window are not asked (the conventions item).
     # Helpers live OUTSIDE the part guard (rf-60). Parameters are NOT named `$conv` (case-insensitive shadowing of `$CONV`).
+    # (M79) The name-declaration helpers (Dn*) take a key and a conventions file -- floor names (`floor-items:`) and notice names
+    # (`floor-asks:`) are read by the same functions.
     $FLI_KEY = 'floor-items:'
     $FLM_KEY = 'floor-mark-map:'
     $FLU_KEY = 'floor-unmarked:'
     $FLX_KEY = 'floor-excluded:'
-    function FlNames([string]$key, [string]$flConv = '') {
+    $FAS_KEY = 'floor-asks:'
+    $FAC_KEY = 'floor-ask-cases:'
+    $FAF_KEY = 'floor-ask-from:'
+    function DnNames([string]$key, [string]$flConv = '') {
         if ($flConv -eq '') { $flConv = $CONV }
         $tail = DeclTail $flConv $key
         if ($null -eq $tail) { return @() }
         $ws = [char[]]@([char]0x20, [char]0x09, [char]0x0D, [char]0x0B, [char]0x0C)
         return @($tail -split ' ' | Where-Object { $_.Trim($ws) -ne '' })
     }
-    # Backtick spans of `floor-mark-map:`, one "name=mark" each (split at the FIRST `=`; spans without one are dropped).
-    function FlPairs([string]$flConv = '') {
+    # Backtick spans of a declaration, one "name=value" each (split at the FIRST `=`; spans without one are dropped).
+    function DnPairs([string]$key, [string]$flConv = '') {
         if ($flConv -eq '') { $flConv = $CONV }
-        $t = DeclTail $flConv $FLM_KEY
+        $t = DeclTail $flConv $key
         $out = New-Object System.Collections.Generic.List[string]
         if ($null -eq $t) { return @() }
         $parts = $t.Split([char]0x60)
@@ -3177,12 +3182,13 @@ try {
     }
     function FlPairName([string]$p) { return $p.Substring(0, $p.IndexOf('=', [System.StringComparison]::Ordinal)) }
     function FlPairMark([string]$p) { return $p.Substring($p.IndexOf('=', [System.StringComparison]::Ordinal) + 1) }
-    # Definition ITEM names in order -- from the `floor-items:` declaration line up to (not including) the first non-blank line
-    # indented LESS than it (or a heading), the lines whose space/tab-stripped text starts with "- **`name`**". Indentation counts
-    # spaces only (same as the .sh twin).
-    function FlDefs([string]$flConv = '') {
+    # Definition ITEM names in order -- from the declaration line up to (not including) the first non-blank line indented LESS
+    # than it (or a heading), the lines at the SAME depth as the declaration line whose space/tab-stripped text starts with
+    # "- **`name`**" (M79 -- deeper lines are not items, so notice definitions nested inside the floor range do not mix in).
+    # Indentation counts spaces only (same as the .sh twin).
+    function DnDefs([string]$key, [string]$flConv = '') {
         if ($flConv -eq '') { $flConv = $CONV }
-        $k = '- `' + $FLI_KEY + '`'
+        $k = '- `' + $key + '`'
         $ws = [char[]]@([char]0x20, [char]0x09)
         $on = $false; $d = 0
         $out = New-Object System.Collections.Generic.List[string]
@@ -3193,7 +3199,7 @@ try {
             if ($ln.StartsWith('#', [System.StringComparison]::Ordinal)) { break }
             if ($t -eq '') { continue }
             if ($ind -lt $d) { break }
-            if ($t.StartsWith('- **`', [System.StringComparison]::Ordinal)) {
+            if ($ind -eq $d -and $t.StartsWith('- **`', [System.StringComparison]::Ordinal)) {
                 $r = $t.Substring(5); $j = $r.IndexOf('`**', [System.StringComparison]::Ordinal)
                 if ($j -gt 0) { $out.Add($r.Substring(0, $j)) }
             }
@@ -3205,44 +3211,44 @@ try {
         foreach ($x in @($items)) { if ($null -ne $x) { [void]$s.Add([string]$x) } }
         return ,$s
     }
-    function FlNameDup([string]$flConv = '') {
+    function DnDup([string]$key, [string]$flConv = '') {
         $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
         $dup = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
-        foreach ($nm in @(FlNames $FLI_KEY $flConv)) { if (-not $seen.Add($nm)) { [void]$dup.Add($nm) } }
+        foreach ($nm in @(DnNames $key $flConv)) { if (-not $seen.Add($nm)) { [void]$dup.Add($nm) } }
         return [string]$dup.Count
     }
-    function FlDefBad([string]$flConv = '') {
-        $defs = @(FlDefs $flConv)
+    function DnDefBad([string]$key, [string]$flConv = '') {
+        $defs = @(DnDefs $key $flConv)
         $bad = 0
-        foreach ($nm in @(FlNames $FLI_KEY $flConv)) {
+        foreach ($nm in @(DnNames $key $flConv)) {
             $c = @($defs | Where-Object { [string]::Equals($_, $nm, [System.StringComparison]::Ordinal) }).Count
             if ($c -ne 1) { $bad++ }
         }
         return [string]$bad
     }
-    function FlDefOrphan([string]$flConv = '') {
-        $names = OrdSet @(FlNames $FLI_KEY $flConv)
-        return [string]@(@(FlDefs $flConv) | Where-Object { -not $names.Contains($_) }).Count
+    function DnDefOrphan([string]$key, [string]$flConv = '') {
+        $names = OrdSet @(DnNames $key $flConv)
+        return [string]@(@(DnDefs $key $flConv) | Where-Object { -not $names.Contains($_) }).Count
     }
     # Definition order equals declaration name order -- count how often the declaration position steps back (normal 0).
-    # Undeclared definitions are skipped (that is N38's place).
-    function FlDefOrder([string]$flConv = '') {
+    # Undeclared definitions are skipped (that is the orphan check's place).
+    function DnDefOrder([string]$key, [string]$flConv = '') {
         $idx = New-Object 'System.Collections.Generic.Dictionary[string,int]'([System.StringComparer]::Ordinal)
         $i = 0
-        foreach ($nm in @(FlNames $FLI_KEY $flConv)) { $i++; if (-not $idx.ContainsKey($nm)) { $idx[$nm] = $i } }
+        foreach ($nm in @(DnNames $key $flConv)) { $i++; if (-not $idx.ContainsKey($nm)) { $idx[$nm] = $i } }
         $p = 0; $c = 0
-        foreach ($d in @(FlDefs $flConv)) {
+        foreach ($d in @(DnDefs $key $flConv)) {
             if ($idx.ContainsKey($d)) { $v = $idx[$d]; if ($p -gt 0 -and $v -lt $p) { $c++ }; $p = $v }
         }
         return [string]$c
     }
     # Per `floor-items:` name, "name=<number of slots it sits in>" (normal 1 -- in the map at least once / unmarked / excluded).
     function FlClass([string]$flConv = '') {
-        $m = OrdSet @(@(FlPairs $flConv) | ForEach-Object { FlPairName $_ })
-        $u = OrdSet @(FlNames $FLU_KEY $flConv)
-        $x = OrdSet @(FlNames $FLX_KEY $flConv)
+        $m = OrdSet @(@(DnPairs $FLM_KEY $flConv) | ForEach-Object { FlPairName $_ })
+        $u = OrdSet @(DnNames $FLU_KEY $flConv)
+        $x = OrdSet @(DnNames $FLX_KEY $flConv)
         $out = New-Object System.Collections.Generic.List[string]
-        foreach ($nm in @(FlNames $FLI_KEY $flConv)) {
+        foreach ($nm in @(DnNames $FLI_KEY $flConv)) {
             $k = 0
             if ($m.Contains($nm)) { $k++ }
             if ($u.Contains($nm)) { $k++ }
@@ -3255,17 +3261,76 @@ try {
         return [string]@(@(FlClass $flConv) | Where-Object { -not $_.EndsWith('=1', [System.StringComparison]::Ordinal) }).Count
     }
     function FlStray([string]$flConv = '') {
-        $names = OrdSet @(FlNames $FLI_KEY $flConv)
-        $all = OrdSet (@(@(FlPairs $flConv) | ForEach-Object { FlPairName $_ }) + @(FlNames $FLU_KEY $flConv) + @(FlNames $FLX_KEY $flConv))
+        $names = OrdSet @(DnNames $FLI_KEY $flConv)
+        $all = OrdSet (@(@(DnPairs $FLM_KEY $flConv) | ForEach-Object { FlPairName $_ }) + @(DnNames $FLU_KEY $flConv) + @(DnNames $FLX_KEY $flConv))
         return [string]@($all | Where-Object { -not $names.Contains($_) }).Count
     }
     function FlMarkMissing([string]$flConv = '') {
-        $mapped = OrdSet @(@(FlPairs $flConv) | ForEach-Object { FlPairMark $_ })
+        $mapped = OrdSet @(@(DnPairs $FLM_KEY $flConv) | ForEach-Object { FlPairMark $_ })
         return [string]@((OrdSet @(FloorMarks $flConv)) | Where-Object { -not $mapped.Contains($_) }).Count
     }
     function FlMarkExtra([string]$flConv = '') {
         $marks = OrdSet @(FloorMarks $flConv)
-        return [string]@((OrdSet @(@(FlPairs $flConv) | ForEach-Object { FlPairMark $_ })) | Where-Object { -not $marks.Contains($_) }).Count
+        return [string]@((OrdSet @(@(DnPairs $FLM_KEY $flConv) | ForEach-Object { FlPairMark $_ })) | Where-Object { -not $marks.Contains($_) }).Count
+    }
+    # (M79) NOTICE JUDGMENTS AND THEIR CASES -- `floor-asks:` holds the judgment names, `floor-ask-cases:` the "name=case" tokens and
+    # `floor-ask-from:` the first case of this axis. Case lines are read from BOTH runners' source -- a line whose space/tab-stripped
+    # text starts with a case call (`chk "` / `Chk "`); comment lines start with `#` and are not counted. The mapping asks only
+    # "this judgment has this case", not how wide the case bites.
+    $RUN_SH = Join-Path $ROOT 'tests/discover/run.sh'
+    $RUN_PS1 = Join-Path $ROOT 'tests/discover/run.ps1'
+    function FaPairs([string]$flConv = '') {
+        return @(@(DnNames $FAC_KEY $flConv) | Where-Object { $j = $_.IndexOf('=', [System.StringComparison]::Ordinal); $j -gt 0 -and $j -lt ($_.Length - 1) })
+    }
+    function FaFrom([string]$flConv = '') {
+        $t = @(DnNames $FAF_KEY $flConv) | Select-Object -First 1
+        if ($null -ne $t -and [regex]::IsMatch($t, '^N[0-9]+$')) { return [string][int]$t.Substring(1) }
+        return ''
+    }
+    function CaseIds([string]$path) {
+        $q = [string][char]0x22
+        $ws = [char[]]@([char]0x20, [char]0x09)
+        $out = New-Object System.Collections.Generic.List[string]
+        foreach ($ln in [System.IO.File]::ReadAllLines($path)) {
+            $t = $ln.TrimStart($ws)
+            if ($t.StartsWith('chk ' + $q, [System.StringComparison]::Ordinal) -or $t.StartsWith('Chk ' + $q, [System.StringComparison]::Ordinal)) {
+                $r = $t.Substring(5); $j = $r.IndexOf(':', [System.StringComparison]::Ordinal)
+                # An ID is N + digits with an optional lowercase suffix (this harness uses F1b / G8a forms -- M79 review blocker 1).
+                if ($j -gt 0) { $id = $r.Substring(0, $j); if ([regex]::IsMatch($id, '^N[0-9]+[a-z]*$')) { $out.Add($id) } }
+            }
+        }
+        return $out
+    }
+    function FaAskNoCase([string]$flConv = '') {
+        $mapped = OrdSet @(@(FaPairs $flConv) | ForEach-Object { FlPairName $_ })
+        return [string]@(@(DnNames $FAS_KEY $flConv) | Where-Object { -not $mapped.Contains($_) }).Count
+    }
+    function FaAskUnknown([string]$flConv = '') {
+        $names = OrdSet @(DnNames $FAS_KEY $flConv)
+        return [string]@((OrdSet @(@(FaPairs $flConv) | ForEach-Object { FlPairName $_ })) | Where-Object { -not $names.Contains($_) }).Count
+    }
+    function FaCaseMissing([string]$flConv = '', [string]$shRun = '', [string]$psRun = '') {
+        if ($shRun -eq '') { $shRun = $RUN_SH }
+        if ($psRun -eq '') { $psRun = $RUN_PS1 }
+        $s = OrdSet @(CaseIds $shRun); $p = OrdSet @(CaseIds $psRun)
+        return [string]@((OrdSet @(@(FaPairs $flConv) | ForEach-Object { FlPairMark $_ })) | Where-Object { -not ($s.Contains($_) -and $p.Contains($_)) }).Count
+    }
+    function FaCaseUnmapped([string]$flConv = '', [string]$shRun = '', [string]$psRun = '') {
+        if ($shRun -eq '') { $shRun = $RUN_SH }
+        if ($psRun -eq '') { $psRun = $RUN_PS1 }
+        $f = FaFrom $flConv
+        if ($f -eq '') { $f = '0' }
+        $mapped = OrdSet @(@(FaPairs $flConv) | ForEach-Object { FlPairMark $_ })
+        $all = OrdSet (@(CaseIds $shRun) + @(CaseIds $psRun))
+        return [string]@($all | Where-Object { [int]([regex]::Match($_, '^N([0-9]+)').Groups[1].Value) -ge [int]$f -and -not $mapped.Contains($_) }).Count
+    }
+    # Case-line control -- a synthetic runner with one commented case, one indented case, one case outside Part N and one suffixed ID.
+    function FaRunnerFixture {
+        $f = Join-Path $sbx 'runner-fa.txt'
+        $q = [string][char]0x22
+        $lines = @(('# chk ' + $q + 'N30: commented' + $q), ('    chk ' + $q + 'N99: indented' + $q), ('chk ' + $q + 'O1: other part' + $q), ('    # Chk ' + $q + 'N31: commented' + $q), ('chk ' + $q + 'N98b: suffixed' + $q))
+        [System.IO.File]::WriteAllLines($f, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
+        return $f
     }
     # Order control fixture -- SYNTHETIC (same reason as SpOrderFixture); 'swap' reverses only the first two definitions.
     function FlOrderFixture([string]$mode) {
@@ -3277,10 +3342,10 @@ try {
         [System.IO.File]::WriteAllLines($f, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
         return $f
     }
-    # Wiring control -- a conventions copy with ONLY the first `floor-items:` name renamed; FlClass output must follow.
+    # Wiring control -- a conventions copy with ONLY the first `floor-items:` name renamed; slot and definition outputs must follow.
     function FlWireFixture {
         $f = Join-Path $sbx 'conv-flw.md'
-        $first = @(FlNames $FLI_KEY) | Select-Object -First 1
+        $first = @(DnNames $FLI_KEY) | Select-Object -First 1
         $w = '`' + $FLI_KEY + '`'
         $lines = New-Object System.Collections.ArrayList
         foreach ($l in [System.IO.File]::ReadAllLines($CONV)) {
@@ -3290,6 +3355,21 @@ try {
                 $j = $t.IndexOf(' ' + $first, [System.StringComparison]::Ordinal)
                 if ($j -ge 0) { $l = $head + $t.Substring(0, $j + 1) + 'zzz-wired' + $t.Substring($j + 1 + $first.Length) }
             }
+            [void]$lines.Add($l)
+        }
+        [System.IO.File]::WriteAllLines($f, $lines.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    # Wiring control -- a conventions copy with the first `floor-items:` name appended once more to its declaration line;
+    # the uniqueness check must follow.
+    function FlDupFixture {
+        $f = Join-Path $sbx 'conv-fld.md'
+        $first = @(DnNames $FLI_KEY) | Select-Object -First 1
+        $k = '- `' + $FLI_KEY + '`'
+        $ws = [char[]]@([char]0x20, [char]0x09)
+        $lines = New-Object System.Collections.ArrayList
+        foreach ($l in [System.IO.File]::ReadAllLines($CONV)) {
+            if ($null -ne $first -and $l.TrimStart($ws).StartsWith($k, [System.StringComparison]::Ordinal)) { $l = $l + ' ' + $first }
             [void]$lines.Add($l)
         }
         [System.IO.File]::WriteAllLines($f, $lines.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
@@ -3387,18 +3467,39 @@ try {
     Chk "N31: floor-mark-map declaration line is exactly 1" (DeclCount $CONV $FLM_KEY) '1'
     Chk "N32: floor-unmarked declaration line is exactly 1" (DeclCount $CONV $FLU_KEY) '1'
     Chk "N33: floor-excluded declaration line is exactly 1" (DeclCount $CONV $FLX_KEY) '1'
-    Chk "N34: floor names and map extract (positive-control, >=1)" $(if (@(FlNames $FLI_KEY).Count -ge 1 -and @(FlPairs).Count -ge 1) { 'ok' } else { 'no' }) 'ok'
+    Chk "N34: floor names and map extract (positive-control, >=1)" $(if (@(DnNames $FLI_KEY).Count -ge 1 -and @(DnPairs $FLM_KEY).Count -ge 1) { 'ok' } else { 'no' }) 'ok'
     Chk "N35: no forbidden separator in the four floor declaration tails" ((BadSeps $CONV $FLI_KEY) + (BadSeps $CONV $FLM_KEY) + (BadSeps $CONV $FLU_KEY) + (BadSeps $CONV $FLX_KEY)) '0000'
-    Chk "N36: main check -- floor-items names are unique" (FlNameDup) '0'
-    Chk "N37: main check -- each floor name has exactly one definition item" (FlDefBad) '0'
-    Chk "N38: main check -- each floor definition item has a declared name (no orphan)" (FlDefOrphan) '0'
-    Chk "N39: main check -- floor definition item order equals declaration name order" (FlDefOrder) '0'
-    Chk "N40: control -- a synthetic conventions file with only its first two definitions swapped adds exactly one order violation" ([string]([int](FlDefOrder (FlOrderFixture 'swap')) - [int](FlDefOrder (FlOrderFixture 'in')))) '1'
+    Chk "N36: main check -- floor-items names are unique" (DnDup $FLI_KEY) '0'
+    Chk "N37: main check -- each floor name has exactly one definition item" (DnDefBad $FLI_KEY) '0'
+    Chk "N38: main check -- each floor definition item has a declared name (no orphan)" (DnDefOrphan $FLI_KEY) '0'
+    Chk "N39: main check -- floor definition item order equals declaration name order" (DnDefOrder $FLI_KEY) '0'
+    Chk "N40: control -- a synthetic conventions file with only its first two definitions swapped adds exactly one order violation" ([string]([int](DnDefOrder $FLI_KEY (FlOrderFixture 'swap')) - [int](DnDefOrder $FLI_KEY (FlOrderFixture 'in')))) '1'
     Chk "N41: main check -- each floor name sits in exactly one slot" (FlClassBad) '0'
     Chk "N42: main check -- every name in a slot declaration is in floor-items" (FlStray) '0'
     Chk "N43: main check -- every floor-marks mark is in the map" (FlMarkMissing) '0'
     Chk "N44: main check -- every map mark is in floor-marks" (FlMarkExtra) '0'
     Chk "N45: control -- renaming a floor-items name changes the output" ([string](@(FlClass (FlWireFixture) | Where-Object { $_.StartsWith('zzz-wired=', [System.StringComparison]::Ordinal) }).Count - @(FlClass | Where-Object { $_.StartsWith('zzz-wired=', [System.StringComparison]::Ordinal) }).Count)) '1'
+    # (N46~N62, M79) NOTICE JUDGMENTS AND THEIR CASES -- the conventions item "what the machine asks" is no longer a prose list but
+    # `floor-asks:` / `floor-ask-cases:` / `floor-ask-from:`. Writing one more judgment name without a case, deleting a mapped case from
+    # one runner, or adding an unmapped case to this axis reddens. How wide a case bites is not asked (the conventions item / the
+    # reversal measurement's place). N59~N61 are the wiring controls of N36~N38 (rf-85).
+    Chk "N46: floor-asks declaration line is exactly 1" (DeclCount $CONV $FAS_KEY) '1'
+    Chk "N47: floor-ask-cases declaration line is exactly 1" (DeclCount $CONV $FAC_KEY) '1'
+    Chk "N48: floor-ask-from declaration line is exactly 1" (DeclCount $CONV $FAF_KEY) '1'
+    Chk "N49: notice names, mapping and first case extract (positive-control)" $(if (@(DnNames $FAS_KEY).Count -ge 1 -and @(FaPairs).Count -ge 1 -and (FaFrom) -ne '') { 'ok' } else { 'no' }) 'ok'
+    Chk "N50: no forbidden separator in the three notice declaration tails" ((BadSeps $CONV $FAS_KEY) + (BadSeps $CONV $FAC_KEY) + (BadSeps $CONV $FAF_KEY)) '000'
+    Chk "N51: main check -- floor-asks names are unique" (DnDup $FAS_KEY) '0'
+    Chk "N52: main check -- each notice name has exactly one definition item" (DnDefBad $FAS_KEY) '0'
+    Chk "N53: main check -- each notice definition item has a declared name (no orphan)" (DnDefOrphan $FAS_KEY) '0'
+    Chk "N54: main check -- notice definition item order equals declaration name order" (DnDefOrder $FAS_KEY) '0'
+    Chk "N55: main check -- each notice name has a mapped case" (FaAskNoCase) '0'
+    Chk "N56: main check -- every mapped name is in floor-asks" (FaAskUnknown) '0'
+    Chk "N57: main check -- every mapped case is a case line in both runners" (FaCaseMissing) '0'
+    Chk "N58: main check -- every case of this axis (floor-ask-from and up) is mapped" (FaCaseUnmapped) '0'
+    Chk "N59: control -- duplicating a floor-items name changes the uniqueness output" ([string]([int](DnDup $FLI_KEY (FlDupFixture)) - [int](DnDup $FLI_KEY))) '1'
+    Chk "N60: control -- renaming a floor-items name changes the declaration-to-definition output" ([string]([int](DnDefBad $FLI_KEY (FlWireFixture)) - [int](DnDefBad $FLI_KEY))) '1'
+    Chk "N61: control -- renaming a floor-items name changes the orphan output" ([string]([int](DnDefOrphan $FLI_KEY (FlWireFixture)) - [int](DnDefOrphan $FLI_KEY))) '1'
+    Chk "N62: control -- the case-line check skips comment lines and cases outside Part N and reads suffixed IDs" ((@(CaseIds (FaRunnerFixture)) | ForEach-Object { $_ + ',' }) -join '') 'N99,N98b,'
     }
 
     # --- Part O: consuming the retro follow-up ledger (M54) ----------------
