@@ -18,7 +18,7 @@ tide는 플러그인으로 설치하는 것이 좋습니다. 수동 복사도 �
     hook은 `sh`로 실행되므로 Git for Windows가 필요합니다. 이는 Claude Code의 Bash 도구가
     요구하는 것과 동일한 전제입니다.
 
-### 수동 복사 (비권장 — 가드 hook 미포함)
+### 수동 복사 (비권장, 가드 hook 미포함)
 
 ```bash
 mkdir -p ~/.claude/skills
@@ -55,7 +55,7 @@ cp -r skills/* ~/.claude/skills/
    되돌립니다(권장·사소만 리뷰 중 수정). 이 단계도 git 작업은 하지 않습니다.
 
 5. `/tide:release vX.Y.Z [pr/release]`: 우선 프리플라이트(판정 "가능" + 테스트 통과 + 워킹트리 확인)를
-   검사합니다. 통과하면 버전 범프 → CHANGELOG/README 갱신 → commit → tag → push까지 진행합니다.
+   검사합니다. 통과하면 버전 범프 → CHANGELOG 갱신 → commit → tag → push까지 진행합니다.
    추가로 `gh`(GitHub CLI)가 있으면 GitHub 릴리즈 게시와 릴리즈 PR 생성 중 하나를 옵트인으로 고를 수
    있습니다. 해당 단계는 tide 사이클에서 **git을 만지는 유일한 단계**입니다.
 

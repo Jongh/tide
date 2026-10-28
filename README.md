@@ -76,7 +76,7 @@ git commit/tag/push는 **오직 `release`에서만** 일어납니다.
 > Windows 참고: hook은 `sh`로 실행되므로 Git for Windows가 필요합니다.
 > 이는 Claude Code의 Bash 도구가 요구하는 것과 같은 전제입니다.
 
-### 수동 복사 (비권장 — 가드 hook 미포함)
+### 수동 복사 (비권장, 가드 hook 미포함)
 
 ```bash
 mkdir -p ~/.claude/skills
