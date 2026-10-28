@@ -61,10 +61,11 @@ tide-guard hook은 `.tide/phase` 상태를 보고 git 작업을 기계적으로 
 |---|---|---|
 | `/tide:impl` | 대상 마일스톤 문서 존재 | 구현 없이 `/tide:milestone` 안내 후 중단 |
 | `/tide:review` | `docs/reports/M{N}-impl.md` 존재 | 리뷰 없이 `/tide:impl` 안내 후 중단 |
-| `/tide:release` | ① review 판정 "가능" ② 테스트 통과 ③ 워킹트리 확인 | git 작업 없이 사유 보고 후 중단 |
+| `/tide:release` | ① review 판정 "가능" ② 테스트 통과 ③ 사이트 빌드 출력 제외 용어 0건(사이트가 있는 경우) | git 작업 없이 사유 보고 후 중단 |
 
 추가로 `release`의 ① 검사는 사용자가 버전 인자와 함께 강행 의사를 명시한 경우에만 경고 후
 통과할 수 있습니다.
+워킹트리 확인은 중단 조건이 아닙니다. 이번 사이클과 무관해 보이는 변경이 있으면 목록을 보여드리고 확인을 받은 뒤 진행합니다. `.tide/autonomy`가 `continuous`이면 확인 없이 목록만 보고하고 진행합니다.
 
 ## 프로젝트 컨텍스트
 
