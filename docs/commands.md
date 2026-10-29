@@ -141,7 +141,7 @@ tide는 12종의 슬래시 커맨드를 제공합니다. 호출은 모두 `/tide
   단일 원본은 `docs/conventions.md`의 "회고 후속 항목의 소비" 절.
 - **문서 커밋**(`/tide:release docs`): 릴리즈가 아닐 때 에픽·회고 문서만 버전 없이 커밋합니다.
   같은 `release` phase 안의 동작이라 커맨드 수·phase 값·가드 계약은 그대로입니다. 허용 경로는
-  `docs-commit-paths:` 선언이 정하고, phase `idle` · 열린 debug 세션 없음 · 선언 밖 미커밋 변경 0일 때만
+  `docs-commit-paths:` 선언이 정하고, `docs-commit-preconds:`가 든 전제를 모두 만족할 때만
   돕니다(어기면 git 작업 없이 중단). 테스트는 바뀐 문서를 읽는 하니스 파트만 `pwsh` 한 축으로 돌고(`docs-commit-parts:` — tide 저장소 전용 선언이라 대상 레포에서는 테스트를 건너뛰고 그 사실을 알립니다),
   게시는 `.tide/release-mode`와 무관하게 기본 브랜치에 바로 push합니다(모드 토큰을 함께 주면 중단).
   버전·CHANGELOG·태그·릴리즈 표지·회고는 건드리지 않습니다.
