@@ -3332,6 +3332,14 @@ try {
         [System.IO.File]::WriteAllLines($f, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
         return $f
     }
+    # Boundary-filter control fixture -- a synthetic runner holding ONE suffixed case only (N63 / M82 rf-87).
+    function FaSuffixFixture([string]$mode) {
+        $f = Join-Path $sbx ('runner-fas-' + $mode + '.txt')
+        $q = [string][char]0x22
+        if ($mode -eq 'ps1') { $ln = '    Chk ' + $q + 'N98b: suffixed' + $q } else { $ln = 'chk ' + $q + 'N98b: suffixed' + $q }
+        [System.IO.File]::WriteAllLines($f, [string[]]@($ln), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
     # Order control fixture -- SYNTHETIC (same reason as SpOrderFixture); 'swap' reverses only the first two definitions.
     function FlOrderFixture([string]$mode) {
         $f = Join-Path $sbx ('conv-flo-' + $mode + '.md')
@@ -3500,6 +3508,10 @@ try {
     Chk "N60: control -- renaming a floor-items name changes the declaration-to-definition output" ([string]([int](DnDefBad $FLI_KEY (FlWireFixture)) - [int](DnDefBad $FLI_KEY))) '1'
     Chk "N61: control -- renaming a floor-items name changes the orphan output" ([string]([int](DnDefOrphan $FLI_KEY (FlWireFixture)) - [int](DnDefOrphan $FLI_KEY))) '1'
     Chk "N62: control -- the case-line check skips comment lines and cases outside Part N and reads suffixed IDs" ((@(CaseIds (FaRunnerFixture)) | ForEach-Object { $_ + ',' }) -join '') 'N99,N98b,'
+    # (N63 / M82 rf-87) BOUNDARY-FILTER CONTROL -- N58 compares a suffixed ID's number part with `floor-ask-from:`. Changing
+    # BOTH runners' filters to "suffixed ID -> 0" lets an unmapped suffixed case slip past (M79 review round 1 refutation);
+    # this synthetic runner pair catches that transform.
+    Chk "N63: control -- two synthetic runners holding one unmapped suffixed case give 1 unmapped" (FaCaseUnmapped '' (FaSuffixFixture 'sh') (FaSuffixFixture 'ps1')) '1'
     }
 
     # --- Part O: consuming the retro follow-up ledger (M54) ----------------
@@ -3557,7 +3569,18 @@ try {
         return ''
     }
     function FirstVer([string]$path, [string]$pfx) { return (NthVer $path $pfx 1) }
-    function BackstopVerdict([string]$rv, [string]$c1, [string]$c2, [string]$base) {
+    # (M82) THE ORDER VERDICT'S BRANCHES ARE DECLARED -- `retro-order-branches:` carries the branch names and
+    # `retro-order-verdict:` carries "name=value". The order of the conditions below IS the declaration's name order
+    # (first condition -> first name). Names and values are never spelled here -- if they were, editing the
+    # declaration would not move the verdict and the declaration checks would go vacuous (rf-88: one control per
+    # transform the verdict reads -- O75 name position, O76 value read, O77 pair parsing).
+    $ROB_KEY = 'retro-order-branches:'
+    $ROV_KEY = 'retro-order-verdict:'
+    # THE RUNNER'S CONDITION COUNT LIVES HERE, IN ONE PLACE (M82 review round 0 blocking 1) -- RoBranch's last branch uses it. When
+    # the declaration's name count differs from it, O84 goes red. The position-based branch pins (O70-O74) stay trivially true when
+    # a name is inserted into the declaration, so they cannot stand in for this count.
+    $RO_CONDS = 4
+    function RoBranch([string]$rv, [string]$c1, [string]$c2, [string]$base, [string]$roConv = '') {
         # THE RELEASE COMMIT IS NORMAL (M69 review round 1 blocking 1, round 2 blocking 1): release bumps
         # CHANGELOG and commits, the auto retro runs only AFTER the tag, so a release commit always carries
         # "retro == CHANGELOG second". Equality with the SECOND is accepted UNLESS the highest-numbered
@@ -3566,9 +3589,90 @@ try {
         # review" and went red on release commits made without one (debug release after a drafted
         # milestone, a forced release); the base version does not depend on reviews. An empty base does
         # not block.
-        if ($rv -ne '' -and [string]::Equals($rv, $c1, [System.StringComparison]::Ordinal)) { return 'ok' }
-        if ($rv -ne '' -and [string]::Equals($rv, $c2, [System.StringComparison]::Ordinal) -and -not [string]::Equals($base, $c1, [System.StringComparison]::Ordinal)) { return 'ok' }
+        $o = [System.StringComparison]::Ordinal
+        if ($rv -ne '' -and [string]::Equals($rv, $c1, $o)) { $k = 1 }
+        elseif ($rv -ne '' -and [string]::Equals($rv, $c2, $o) -and -not [string]::Equals($base, $c1, $o)) { $k = 2 }
+        elseif ($rv -ne '' -and [string]::Equals($rv, $c2, $o)) { $k = 3 }
+        else { $k = $RO_CONDS }
+        $names = @(DnNames $ROB_KEY $roConv)
+        if ($names.Count -lt $k) { return '' }
+        return [string]$names[$k - 1]
+    }
+    # "name=value" tokens of `retro-order-verdict:` only (a token whose `=` is first, last or missing is dropped).
+    function RoPairs([string]$roConv = '') {
+        return @(@(DnNames $ROV_KEY $roConv) | Where-Object { $j = $_.IndexOf('=', [System.StringComparison]::Ordinal); $j -gt 0 -and $j -lt ($_.Length - 1) })
+    }
+    function RoValue([string]$name, [string]$roConv = '') {
+        if ($name -eq '') { return '' }
+        foreach ($p in @(RoPairs $roConv)) {
+            if ([string]::Equals((FlPairName $p), $name, [System.StringComparison]::Ordinal)) { return (FlPairMark $p) }
+        }
+        return ''
+    }
+    # ok only when the branch's value is `ok` -- an empty name (declaration empty / too few names), a missing value or a
+    # value outside `ok` falls to no (it fails toward red).
+    function BackstopVerdict([string]$rv, [string]$c1, [string]$c2, [string]$base, [string]$roConv = '') {
+        if ([string]::Equals((RoValue (RoBranch $rv $c1 $c2 $base $roConv) $roConv), 'ok', [System.StringComparison]::Ordinal)) { return 'ok' }
         return 'no'
+    }
+    # Branch names without exactly one value pair + distinct pair names that are not branch names.
+    function RoPairMismatch([string]$roConv = '') {
+        $names = @(DnNames $ROB_KEY $roConv)
+        $pn = @(@(RoPairs $roConv) | ForEach-Object { FlPairName $_ })
+        $bad = 0
+        foreach ($nm in $names) { if (@($pn | Where-Object { [string]::Equals($_, $nm, [System.StringComparison]::Ordinal) }).Count -ne 1) { $bad++ } }
+        $ns = OrdSet $names
+        foreach ($x in (OrdSet $pn)) { if (-not $ns.Contains($x)) { $bad++ } }
+        return [string]$bad
+    }
+    function RoValueBad([string]$roConv = '') {
+        return [string]@(@(RoPairs $roConv) | Where-Object { $v = FlPairMark $_; -not ([string]::Equals($v, 'ok', [System.StringComparison]::Ordinal) -or [string]::Equals($v, 'no', [System.StringComparison]::Ordinal)) }).Count
+    }
+    # 1 when the declared branch name count differs from the runner's condition count ($RO_CONDS), else 0.
+    function RoCountBad([string]$roConv = '') {
+        if (@(DnNames $ROB_KEY $roConv).Count -eq $RO_CONDS) { return '0' }
+        return '1'
+    }
+    # Distinct backtick `ro-...` tokens in the conventions file that are not declared branch names (a rename that leaves the old
+    # name behind in prose or a table).
+    function RoStray([string]$roConv = '') {
+        if ($roConv -eq '') { $roConv = $CONV }
+        $names = OrdSet @(DnNames $ROB_KEY $roConv)
+        $bt = [string][char]0x60
+        $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($ln in [System.IO.File]::ReadAllLines($roConv)) {
+            $s = $ln
+            while (($i = $s.IndexOf($bt + 'ro-', [System.StringComparison]::Ordinal)) -ge 0) {
+                $s = $s.Substring($i + 1)
+                $j = $s.IndexOf($bt, [System.StringComparison]::Ordinal)
+                if ($j -lt 0) { break }
+                [void]$seen.Add($s.Substring(0, $j))
+                $s = $s.Substring($j + 1)
+            }
+        }
+        return [string]@($seen | Where-Object { $_ -ne '' -and -not $names.Contains($_) }).Count
+    }
+    # A SYNTHETIC conventions file with only the two branch declarations and their definitions (the real file is never touched).
+    function RoFixture([string]$mode) {
+        $f = Join-Path $sbx ('conv-ro-' + $mode + '.md')
+        $rob = 'zz-a zz-b zz-c zz-d'; $rov = 'zz-a=ok zz-b=ok zz-c=no zz-d=no'; $d1 = 'zz-a'; $d2 = 'zz-b'; $ex = ''
+        $bt0 = [string][char]0x60
+        switch ($mode) {
+            'add' { $rob = 'zz-a zz-b zz-c zz-d zz-e'; $rov = 'zz-a=ok zz-b=ok zz-c=no zz-d=no zz-e=no'; $ex = '  - **' + $bt0 + 'zz-e' + $bt0 + '** - x' }
+            'stray' { $ex = '  - see ' + $bt0 + 'ro-gone' + $bt0 }
+            'dup' { $rob = 'zz-a zz-b zz-c zz-d zz-a' }
+            'rename' { $rob = 'zz-q zz-b zz-c zz-d' }
+            'flip' { $rov = 'zz-a=no zz-b=ok zz-c=no zz-d=no' }
+            'swap' { $d1 = 'zz-b'; $d2 = 'zz-a' }
+            'odd' { $rov = 'zz-a=ok =no zz-b= zz-c zz-d=no' }
+            'badval' { $rov = 'zz-a=ok zz-b=ok zz-c=maybe zz-d=no' }
+        }
+        $bt = [string][char]0x60
+        $lines = @('## fixture', '', ('  - ' + $bt + $ROB_KEY + $bt + ' ' + $rob), ('  - ' + $bt + $ROV_KEY + $bt + ' ' + $rov), '',
+            ('  - **' + $bt + $d1 + $bt + '** - x'), ('  - **' + $bt + $d2 + $bt + '** - x'), ('  - **' + $bt + 'zz-c' + $bt + '** - x'), ('  - **' + $bt + 'zz-d' + $bt + '** - x'))
+        if ($ex -ne '') { $lines += $ex }
+        [System.IO.File]::WriteAllLines($f, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
+        return $f
     }
     # The metadata key of `skills/milestone/template.md` ("- " + base-version in Korean + ":"), built
     # from code points because this copy carries no non-ASCII (tests/discover F5).
@@ -4207,6 +4311,51 @@ try {
     Chk "O57: control -- lowest marked number (clean 5, gap 6, no mark empty)" ((MarkSince (Join-Path $GPCL 'm')) + '|' + (MarkSince (Join-Path $GPFX 'm')) + '|' + (MarkSince $nomk)) '5|6|'
     Chk "O58: retro-mark-derive declaration line is exactly 1" (DeclCount $CONV 'retro-mark-derive:') '1'
     Chk "O59: the since-derivation co-term is present at all three restatement sites" ((ScopeTok (Join-Path $ROOT 'skills/release/SKILL.md') $RDERIVE) + (ScopeTok (Join-Path $ROOT 'skills/retro/SKILL.md') $RDERIVE) + (ScopeTok (Join-Path $ROOT 'docs/commands.md') $RDERIVE)) 'yesyesyes'
+    # (O60-O83 / M82) THE ORDER VERDICT'S BRANCH NAMES ARE DECLARED -- the old prose list is `retro-order-branches:` +
+    # `retro-order-verdict:` + one definition item per name. O60-O69 are the same declaration checks as the M78/M79 floor
+    # and notice declarations. O70-O74 PIN each branch: a synthetic input that falls in that branch must yield the name at
+    # that position (reordering the runner's conditions goes red here). O75-O83 are TRANSFORM CONTROLS -- each place the
+    # verdict reads the declaration gets a synthetic conventions file and the output must follow (rf-88). Whether a
+    # definition's meaning matches the runner's condition is not asked (the convention's "what the machine asks").
+    Chk "O60: retro-order-branches declaration line is exactly 1" (DeclCount $CONV $ROB_KEY) '1'
+    Chk "O61: retro-order-verdict declaration line is exactly 1" (DeclCount $CONV $ROV_KEY) '1'
+    Chk "O62: branch name and value pair extraction positive-control (>=1)" $(if (@(DnNames $ROB_KEY).Count -ge 1 -and @(RoPairs).Count -ge 1) { 'ok' } else { 'no' }) 'ok'
+    Chk "O63: no forbidden separator in the tails of the two branch declarations" ((BadSeps $CONV $ROB_KEY) + (BadSeps $CONV $ROV_KEY)) '00'
+    Chk "O64: main check -- branch names are unique" (DnDup $ROB_KEY) '0'
+    Chk "O65: main check -- every branch name has exactly one definition item" (DnDefBad $ROB_KEY) '0'
+    Chk "O66: main check -- every branch definition item has a declared name (0 orphans)" (DnDefOrphan $ROB_KEY) '0'
+    Chk "O67: main check -- branch definition order equals declaration name order" (DnDefOrder $ROB_KEY) '0'
+    Chk "O68: main check -- the value declaration's name set equals the branch name set" (RoPairMismatch) '0'
+    Chk "O69: main check -- every branch value is ok or no" (RoValueBad) '0'
+    function RoPin([int]$pos, [string]$rv, [string]$c1, [string]$c2, [string]$base) {
+        $names = @(DnNames $ROB_KEY)
+        if ($names.Count -lt $pos) { return 'no' }
+        $want = [string]$names[$pos - 1]; $got = RoBranch $rv $c1 $c2 $base
+        if ($want -ne '' -and [string]::Equals($want, $got, [System.StringComparison]::Ordinal)) { return 'yes' }
+        return 'no'
+    }
+    Chk "O70: branch pin -- equal to the first header gives the first branch" (RoPin 1 '2.0.0' '2.0.0' '1.0.0' '1.0.0') 'yes'
+    Chk "O71: branch pin -- equal to the second with a base unlike the first gives the second branch" (RoPin 2 '1.0.0' '2.0.0' '1.0.0' '1.0.0') 'yes'
+    Chk "O72: branch pin -- equal to the second with a base equal to the first gives the third branch" (RoPin 3 '1.0.0' '2.0.0' '1.0.0' '2.0.0') 'yes'
+    Chk "O73: branch pin -- two releases behind gives the fourth branch" (RoPin 4 '0.9.0' '2.0.0' '1.0.0' '1.0.0') 'yes'
+    Chk "O74: branch pin -- an empty retro base version gives the fourth branch (even with empty first and second)" (RoPin 4 '' '' '' '1.0.0') 'yes'
+    Chk "O75: transform control -- renaming the first branch in a synthetic conventions file yields the renamed name" ((RoBranch '2.0.0' '2.0.0' '1.0.0' '1.0.0' (RoFixture 'base')) + '|' + (RoBranch '2.0.0' '2.0.0' '1.0.0' '1.0.0' (RoFixture 'rename'))) 'zz-a|zz-q'
+    Chk "O76: transform control -- flipping the first branch's value in a synthetic conventions file flips the verdict" ((BackstopVerdict '2.0.0' '2.0.0' '1.0.0' '1.0.0' (RoFixture 'base')) + (BackstopVerdict '2.0.0' '2.0.0' '1.0.0' '1.0.0' (RoFixture 'flip'))) 'okno'
+    Chk "O77: transform control -- pair parsing drops tokens whose = is first, last or missing" ((@(RoPairs (RoFixture 'odd')) | ForEach-Object { $_ + ',' }) -join '') 'zz-a=ok,zz-d=no,'
+    $rc1 = NthVer $CHLOG '### [' 1; $rc2 = NthVer $CHLOG '### [' 2
+    Chk "O78: CHANGELOG first and second header extraction positive-control (real CHANGELOG -- both non-empty and different)" $(if ($rc1 -ne '' -and $rc2 -ne '' -and -not [string]::Equals($rc1, $rc2, [System.StringComparison]::Ordinal)) { 'ok' } else { 'no' }) 'ok'
+    Chk "O79: transform control -- duplicating a branch name raises the uniqueness output by one" ([string]([int](DnDup $ROB_KEY (RoFixture 'dup')) - [int](DnDup $ROB_KEY (RoFixture 'base')))) '1'
+    Chk "O80: transform control -- renaming a branch raises the declaration-to-definition and orphan outputs by one each" (([string]([int](DnDefBad $ROB_KEY (RoFixture 'rename')) - [int](DnDefBad $ROB_KEY (RoFixture 'base')))) + ([string]([int](DnDefOrphan $ROB_KEY (RoFixture 'rename')) - [int](DnDefOrphan $ROB_KEY (RoFixture 'base'))))) '11'
+    Chk "O81: transform control -- swapping the first two definitions raises the order violations by one" ([string]([int](DnDefOrder $ROB_KEY (RoFixture 'swap')) - [int](DnDefOrder $ROB_KEY (RoFixture 'base')))) '1'
+    Chk "O82: transform control -- renaming a branch turns the value cross-check red (one name without a pair + one pair without a name)" ((RoPairMismatch (RoFixture 'base')) + '|' + (RoPairMismatch (RoFixture 'rename'))) '0|2'
+    Chk "O83: transform control -- values outside ok and no are counted" ((RoValueBad (RoFixture 'base')) + '|' + (RoValueBad (RoFixture 'badval'))) '0|1'
+    # (O84-O87 / M82 review round 0 blocking 1, recommended 2) BRANCH COUNT AND NAME LEFTOVERS -- the position-based pins stay true
+    # when a name is inserted, so the name COUNT is compared with the runner's condition count ($RO_CONDS -- one place) in O84. A rename
+    # that leaves the old name in prose or a table is caught by O86.
+    Chk "O84: main check -- the branch name count equals the runner's condition count" (RoCountBad) '0'
+    Chk "O85: transform control -- a synthetic conventions file with one extra branch turns the count check red" ((RoCountBad (RoFixture 'base')) + '|' + (RoCountBad (RoFixture 'add'))) '0|1'
+    Chk "O86: main check -- every backtick ro- token in the conventions file is a declared branch name" (RoStray) '0'
+    Chk "O87: transform control -- one undeclared ro- token is counted" ((RoStray (RoFixture 'base')) + '|' + (RoStray (RoFixture 'stray'))) '0|1'
     }
 
     # --- Part P: completion-criteria cross-check (M55) ----------------------

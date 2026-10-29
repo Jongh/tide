@@ -3027,6 +3027,11 @@ fa_runner_fixture() { # → 케이스 줄 판정의 통제용 합성 러너(주�
     printf '%s\n' '# chk "N30: commented"' '    chk "N99: indented"' 'chk "O1: other part"' '    # Chk "N31: commented"' 'chk "N98b: suffixed"' > "$_farf"
     printf '%s' "$_farf"
 }
+fa_suffix_fixture() { # <sh|ps1> → 접미 ID 케이스 하나만 든 합성 러너(경계 비교 필터의 통제 — `N63` · M82 `rf-87`)
+    _fasf="$SBX/runner-fas-$1.txt"
+    if [ "$1" = ps1 ]; then printf '%s\n' '    Chk "N98b: suffixed"' > "$_fasf"; else printf '%s\n' 'chk "N98b: suffixed"' > "$_fasf"; fi
+    printf '%s' "$_fasf"
+}
 fl_order_fixture() { # <in|swap> → 이름 선언과 정의 항목 셋만 든 합성 규약(순서 통제). `swap`은 정의 첫 둘의 순서만 바꾼다(`sp_order_fixture`와 같은 까닭으로 실제 규약을 쓰지 않는다).
     _flxf="$SBX/conv-flo-$1.md"
     if [ "$1" = swap ]; then _flx1=zz-fb; _flx2=zz-fa; else _flx1=zz-fa; _flx2=zz-fb; fi
@@ -3161,6 +3166,9 @@ chk "N59: 통제 - floor-items에 이름을 복제하면 유일성 판정이 따
 chk "N60: 통제 - floor-items의 이름을 바꾸면 정의 판정(선언 → 정의)이 따라 바뀐다" "$(( $(dn_def_bad "$FLI_KEY" "$(fl_wire_fixture)") - $(dn_def_bad "$FLI_KEY") ))" "1"
 chk "N61: 통제 - floor-items의 이름을 바꾸면 고아 판정이 따라 바뀐다" "$(( $(dn_def_orphan "$FLI_KEY" "$(fl_wire_fixture)") - $(dn_def_orphan "$FLI_KEY") ))" "1"
 chk "N62: 통제 - 케이스 줄 판정이 주석 줄 · Part N 밖 케이스를 세지 않고 접미 ID는 읽는다" "$(case_ids "$(fa_runner_fixture)" | LC_ALL=C tr '\n' ',')" "N99,N98b,"
+# (N63 · M82 `rf-87`) **경계 비교 필터의 통제** — `N58`은 접미 ID의 숫자 부분을 `floor-ask-from:`과 견준다. 두 러너의 필터를 함께
+# 「접미 ID → 0」으로 바꾸면 대응 없는 접미 케이스가 판정을 피해 가는데(M79 리뷰 라운드 1 반증 실측), 그 변환을 이 합성 러너가 붙잡는다.
+chk "N63: 통제 - 대응 없는 접미 ID 케이스 하나만 든 두 합성 러너에서 미대응이 1이다" "$(fa_case_unmapped "" "$(fa_suffix_fixture sh)" "$(fa_suffix_fixture ps1)")" "1"
 fi
 
 # `scope_tok`은 Part O(M69)와 Part W(M66~M68) **둘이 부른다** — 정의를 앞으로 올려 판정을 사본당
@@ -3189,16 +3197,77 @@ nth_ver() { # <파일> <줄 접두> <n> → 그 접두로 시작하는 **n번째
         }' "$1"
 }
 first_ver() { nth_ver "$1" "$2" 1; }
-backstop_verdict() { # <회고 버전> <CHANGELOG 첫 버전> <CHANGELOG 둘째 버전> <최대 번호 마일스톤의 기반 버전> → ok|no
+# (M82) **순서 판정의 갈래는 선언이 든다** — `retro-order-branches:`가 갈래 이름을, `retro-order-verdict:`가 `이름=값`을 든다.
+# 아래 조건의 순서가 곧 선언의 이름 순서다(첫째 조건 → 첫째 이름). 이름과 값을 여기 박지 않는다 — 박으면 선언을 바꿔도
+# 판정이 따라오지 않아 선언 대조가 공허해진다(`rf-88` — 판정이 읽는 변환마다 통제를 둔다: `O75` 이름 위치 · `O76` 값 읽기 · `O77` 쌍 파싱).
+ROB_KEY='retro-order-branches:'
+ROV_KEY='retro-order-verdict:'
+# **러너의 조건 수는 여기 한 자리다**(M82 리뷰 라운드 0 차단 1) — 아래 `ro_branch`의 마지막 갈래가 이 값을 쓴다. 선언의 이름 수가 이 값과
+# 다르면 `O84`가 붉다. 이름을 위치로 읽는 갈래 고정(`O70`~`O74`)은 선언에 이름이 끼어들어도 자명하게 참이라 이 수를 대신하지 못한다.
+RO_CONDS=4
+ro_branch() { # <회고 버전> <CHANGELOG 첫 버전> <CHANGELOG 둘째 버전> <최대 번호 마일스톤의 기반 버전> [규약 파일] → 처음 맞는 갈래의 이름
     # **릴리즈 커밋을 정상으로 받는다(M69 리뷰 라운드 1 차단 1 · 라운드 2 차단 1)** — release는 CHANGELOG를
     # 올려 커밋하고 자동 회고는 태그 **뒤**에 돌므로, 릴리즈 커밋의 트리는 언제나 「회고 = CHANGELOG 둘째」다.
     # 둘째와의 같음은 **최대 번호 마일스톤이 CHANGELOG 첫째 위에 서지 않았을 때만** 받는다 — 첫째 위에 섰다면
     # 그 릴리즈 뒤 새 마일스톤이 세워졌는데 회고는 그 릴리즈를 모르는 것, 곧 **회고를 건너뛴 것**이다.
     # 라운드 2는 이 자리를 「최대 번호의 review 보고서 존재」로 물었고, 리뷰 없이 생기는 릴리즈 커밋(마일스톤
     # 초안 뒤 debug 릴리즈 · 강행)에서 붉었다. 기반 버전은 리뷰 유무와 무관하다. 기반 버전이 비면 막지 않는다.
-    if [ -n "$1" ] && [ "$1" = "$2" ]; then echo ok; return; fi
-    if [ -n "$1" ] && [ "$1" = "$3" ] && [ "$4" != "$2" ]; then echo ok; return; fi
-    echo no
+    if [ -n "$1" ] && [ "$1" = "$2" ]; then _rbi=1
+    elif [ -n "$1" ] && [ "$1" = "$3" ] && [ "$4" != "$2" ]; then _rbi=2
+    elif [ -n "$1" ] && [ "$1" = "$3" ]; then _rbi=3
+    else _rbi=$RO_CONDS; fi
+    dn_names "$ROB_KEY" "${5:-}" | LC_ALL=C sed -n "${_rbi}p"
+}
+ro_pairs() { # [규약 파일] → `retro-order-verdict:`의 토큰 중 「이름=값」 꼴만 한 줄씩(`=`가 맨 앞 · 맨 끝이거나 없는 토큰은 버린다)
+    dn_names "$ROV_KEY" "${1:-}" | LC_ALL=C awk '{ j = index($0, "="); if (j > 1 && j < length($0)) print }'
+}
+ro_value() { # <갈래 이름> [규약 파일] → 값 선언에서 그 이름의 첫 값(없으면 빈 출력)
+    [ -n "$1" ] || return 0
+    ro_pairs "${2:-}" | LC_ALL=C awk -v n="$1" '{ j = index($0, "="); if (substr($0, 1, j - 1) == n) { print substr($0, j + 1); exit } }'
+}
+backstop_verdict() { # <회고 버전> <CHANGELOG 첫 버전> <CHANGELOG 둘째 버전> <최대 번호 마일스톤의 기반 버전> [규약 파일] → ok|no
+    # 갈래의 값이 `ok`일 때만 ok다 — 이름이 비거나(선언이 빔 · 이름이 모자람) 값이 없거나 `ok` 밖이면 no(붉는 쪽으로 넘어진다).
+    [ "$(ro_value "$(ro_branch "$1" "$2" "$3" "$4" "${5:-}")" "${5:-}")" = ok ] && echo ok || echo no
+}
+ro_pair_mismatch() { # [규약 파일] → 값 쌍이 정확히 하나가 아닌 갈래 이름의 수 + 갈래 이름에 없는 쌍 이름의 수(서로 다른 이름으로 센다)
+    _ropn=$(dn_names "$ROB_KEY" "${1:-}")
+    _ropp=$(ro_pairs "${1:-}" | LC_ALL=C awk '{ print substr($0, 1, index($0, "=") - 1) }')
+    { printf '%s\n' "$_ropn" | { _rop=0; while IFS= read -r _rov; do [ -n "$_rov" ] || continue
+        [ "$(printf '%s\n' "$_ropp" | LC_ALL=C grep -cxF -- "$_rov")" = 1 ] || _rop=$((_rop + 1)); done; echo "$_rop"; }
+      printf '%s\n' "$_ropp" | LC_ALL=C sort -u | { _rox=0; while IFS= read -r _rov; do [ -n "$_rov" ] || continue
+        printf '%s\n' "$_ropn" | LC_ALL=C grep -qxF -- "$_rov" || _rox=$((_rox + 1)); done; echo "$_rox"; }
+    } | LC_ALL=C awk '{ s += $1 } END { print s + 0 }'
+}
+ro_value_bad() { # [규약 파일] → 값이 `ok` · `no`가 아닌 쌍의 수
+    ro_pairs "${1:-}" | LC_ALL=C awk '{ v = substr($0, index($0, "=") + 1); if (v != "ok" && v != "no") c++ } END { print c + 0 }'
+}
+ro_count_bad() { # [규약 파일] → 선언된 갈래 이름 수가 러너의 조건 수(`RO_CONDS`)와 다르면 1, 같으면 0
+    [ "$(dn_names "$ROB_KEY" "${1:-}" | grep -c .)" = "$RO_CONDS" ] && echo 0 || echo 1
+}
+ro_stray() { # [규약 파일] → 규약 파일 안 백틱 `ro-…` 토큰 중 갈래 선언에 없는 것의 수(서로 다른 토큰으로 센다 — 이름을 바꾸고 산문 · 표에 옛 이름을 남긴 편집)
+    _rosf=${1:-$CONV}
+    _rosn=$(dn_names "$ROB_KEY" "$_rosf")
+    LC_ALL=C awk -v q="\`" '{ s = $0; while ((i = index(s, q "ro-")) > 0) { s = substr(s, i + 1); j = index(s, q); if (j == 0) break; print substr(s, 1, j - 1); s = substr(s, j + 1) } }' "$_rosf" |
+        LC_ALL=C sort -u | { _ros=0; while IFS= read -r _rov; do [ -n "$_rov" ] || continue
+            printf '%s\n' "$_rosn" | LC_ALL=C grep -qxF -- "$_rov" || _ros=$((_ros + 1)); done; echo "$_ros"; }
+}
+ro_fixture() { # <base|dup|rename|flip|swap|odd|badval|add|stray> → 갈래 선언 · 값 선언 · 정의만 든 합성 규약(실제 규약을 건드리지 않는다)
+    _rofx="$SBX/conv-ro-$1.md"
+    _rob='zz-a zz-b zz-c zz-d'; _rov='zz-a=ok zz-b=ok zz-c=no zz-d=no'; _rod1=zz-a; _rod2=zz-b; _roex=''
+    case "$1" in
+        add) _rob='zz-a zz-b zz-c zz-d zz-e'; _rov='zz-a=ok zz-b=ok zz-c=no zz-d=no zz-e=no'; _roex="  - **\`zz-e\`** - x" ;;
+        stray) _roex="  - see \`ro-gone\`" ;;
+        dup) _rob='zz-a zz-b zz-c zz-d zz-a' ;;
+        rename) _rob='zz-q zz-b zz-c zz-d' ;;
+        flip) _rov='zz-a=no zz-b=ok zz-c=no zz-d=no' ;;
+        swap) _rod1=zz-b; _rod2=zz-a ;;
+        odd) _rov='zz-a=ok =no zz-b= zz-c zz-d=no' ;;
+        badval) _rov='zz-a=ok zz-b=ok zz-c=maybe zz-d=no' ;;
+    esac
+    printf '%s\n' "## fixture" "" "  - \`$ROB_KEY\` $_rob" "  - \`$ROV_KEY\` $_rov" "" \
+        "  - **\`$_rod1\`** - x" "  - **\`$_rod2\`** - x" "  - **\`zz-c\`** - x" "  - **\`zz-d\`** - x" > "$_rofx"
+    [ -z "$_roex" ] || printf '%s\n' "$_roex" >> "$_rofx"
+    printf '%s' "$_rofx"
 }
 BASE_KEY='- 기반 버전:'
 doc_base() { # <마일스톤 문서> → 그 문서의 `- 기반 버전:` 값에서 `v` 뒤 숫자·점 토큰(없으면 빈 출력)
@@ -3755,6 +3824,44 @@ printf '%s\n' '# M1' > "$SBX/nomark-milestones/M1.md"
 chk "O57: 통제 - 가장 작은 표지 번호(clean 5 · gap 6 · 표지 없음 빈 값)" "$(mark_since "$GPCL/m")|$(mark_since "$GPFX/m")|$(mark_since "$SBX/nomark-milestones")" "5|6|"
 chk "O58: retro-mark-derive 선언 줄 정확히 1개" "$(decl_count "$CONV" 'retro-mark-derive:')" "1"
 chk "O59: 도입 번호 파생 병기어가 재서술처 셋에 공존" "$(scope_tok "$ROOT/skills/release/SKILL.md" "$RDERIVE")$(scope_tok "$ROOT/skills/retro/SKILL.md" "$RDERIVE")$(scope_tok "$ROOT/docs/commands.md" "$RDERIVE")" "yesyesyes"
+# (O60~O83 · M82) **순서 판정 갈래의 이름 선언** — 옛 산문 ⑴~⑷가 `retro-order-branches:` · `retro-order-verdict:`와 이름별 정의 항목이다.
+# 선언 정합(O60~O69)은 M78 · M79의 바닥 · 고지 선언과 같은 판정이다. 갈래 고정(O70~O74)은 갈래마다 그 갈래로 떨어지는 합성 입력이
+# 그 위치의 이름을 내는지 묻는다 — 러너의 조건 순서를 바꾸면 여기서 붉다. 변환 통제(O75~O83)는 판정이 선언을 읽는 자리마다
+# 합성 규약을 먹여 출력이 따라 바뀌는지 묻는다(`rf-88`). 정의 문장의 뜻과 러너 조건의 같음은 묻지 않는다(규약 「기계가 묻는 것」).
+chk "O60: retro-order-branches 선언 줄 정확히 1개" "$(decl_count "$CONV" "$ROB_KEY")" "1"
+chk "O61: retro-order-verdict 선언 줄 정확히 1개" "$(decl_count "$CONV" "$ROV_KEY")" "1"
+chk "O62: 갈래 이름 · 값 쌍 추출 positive-control(>=1)" "$([ "$(dn_names "$ROB_KEY" | grep -c .)" -ge 1 ] && [ "$(ro_pairs | grep -c .)" -ge 1 ] && echo ok || echo no)" "ok"
+chk "O63: 갈래 선언 두 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$ROB_KEY")$(bad_seps "$CONV" "$ROV_KEY")" "00"
+chk "O64: 본 검사 - 갈래 이름이 유일하다" "$(dn_dup "$ROB_KEY")" "0"
+chk "O65: 본 검사 - 갈래 이름마다 정의 항목이 정확히 하나" "$(dn_def_bad "$ROB_KEY")" "0"
+chk "O66: 본 검사 - 갈래 정의 항목마다 선언된 이름이 있다(고아 정의 0)" "$(dn_def_orphan "$ROB_KEY")" "0"
+chk "O67: 본 검사 - 갈래 정의 항목의 순서가 선언의 이름 순서와 같다" "$(dn_def_order "$ROB_KEY")" "0"
+chk "O68: 본 검사 - 값 선언의 이름 집합이 갈래 이름 집합과 같다" "$(ro_pair_mismatch)" "0"
+chk "O69: 본 검사 - 갈래 값이 ok · no 안에 있다" "$(ro_value_bad)" "0"
+ro_pin() { # <갈래 위치> <회고 버전> <첫째> <둘째> <기반 버전> → 판정이 낸 이름이 선언의 그 위치 이름과 같고 비지 않으면 yes
+    _rpn=$(dn_names "$ROB_KEY" | LC_ALL=C sed -n "$1p"); _rpg=$(ro_branch "$2" "$3" "$4" "$5")
+    [ -n "$_rpn" ] && [ "$_rpn" = "$_rpg" ] && echo yes || echo no
+}
+chk "O70: 갈래 고정 - 첫째와 같으면 첫째 갈래" "$(ro_pin 1 2.0.0 2.0.0 1.0.0 1.0.0)" "yes"
+chk "O71: 갈래 고정 - 둘째와 같고 기반 버전이 첫째와 다르면 둘째 갈래" "$(ro_pin 2 1.0.0 2.0.0 1.0.0 1.0.0)" "yes"
+chk "O72: 갈래 고정 - 둘째와 같고 기반 버전이 첫째와 같으면 셋째 갈래" "$(ro_pin 3 1.0.0 2.0.0 1.0.0 2.0.0)" "yes"
+chk "O73: 갈래 고정 - 두 릴리즈 뒤처지면 넷째 갈래" "$(ro_pin 4 0.9.0 2.0.0 1.0.0 1.0.0)" "yes"
+chk "O74: 갈래 고정 - 회고 기준 버전이 비면 넷째 갈래(첫째 · 둘째가 비어도)" "$(ro_pin 4 '' '' '' 1.0.0)" "yes"
+chk "O75: 변환 통제 - 첫 갈래 이름을 바꾼 합성 규약에서 판정이 바뀐 이름을 낸다" "$(ro_branch 2.0.0 2.0.0 1.0.0 1.0.0 "$(ro_fixture base)")|$(ro_branch 2.0.0 2.0.0 1.0.0 1.0.0 "$(ro_fixture rename)")" "zz-a|zz-q"
+chk "O76: 변환 통제 - 첫 갈래 값을 뒤집은 합성 규약에서 판정이 따라 뒤집힌다" "$(backstop_verdict 2.0.0 2.0.0 1.0.0 1.0.0 "$(ro_fixture base)")$(backstop_verdict 2.0.0 2.0.0 1.0.0 1.0.0 "$(ro_fixture flip)")" "okno"
+chk "O77: 변환 통제 - 값 쌍 파싱이 맨 앞 · 맨 끝 = 와 = 없는 토큰을 버린다" "$(ro_pairs "$(ro_fixture odd)" | LC_ALL=C tr '\n' ',')" "zz-a=ok,zz-d=no,"
+chk "O78: CHANGELOG 첫째 · 둘째 머리 추출 positive-control(실제 CHANGELOG — 둘 다 비지 않고 서로 다르다)" "$(_rc1=$(nth_ver "$CHLOG" '### [' 1); _rc2=$(nth_ver "$CHLOG" '### [' 2); [ -n "$_rc1" ] && [ -n "$_rc2" ] && [ "$_rc1" != "$_rc2" ] && echo ok || echo no)" "ok"
+chk "O79: 변환 통제 - 갈래 이름을 복제하면 유일성 판정이 하나 는다" "$(( $(dn_dup "$ROB_KEY" "$(ro_fixture dup)") - $(dn_dup "$ROB_KEY" "$(ro_fixture base)") ))" "1"
+chk "O80: 변환 통제 - 갈래 이름을 바꾸면 정의 판정(선언 → 정의) · 고아 판정이 하나씩 는다" "$(( $(dn_def_bad "$ROB_KEY" "$(ro_fixture rename)") - $(dn_def_bad "$ROB_KEY" "$(ro_fixture base)") ))$(( $(dn_def_orphan "$ROB_KEY" "$(ro_fixture rename)") - $(dn_def_orphan "$ROB_KEY" "$(ro_fixture base)") ))" "11"
+chk "O81: 변환 통제 - 정의 첫 둘을 맞바꾸면 순서 위반이 하나 는다" "$(( $(dn_def_order "$ROB_KEY" "$(ro_fixture swap)") - $(dn_def_order "$ROB_KEY" "$(ro_fixture base)") ))" "1"
+chk "O82: 변환 통제 - 갈래 이름을 바꾸면 값 대조가 따라 붉다(쌍 없는 이름 1 + 이름 없는 쌍 1)" "$(ro_pair_mismatch "$(ro_fixture base)")|$(ro_pair_mismatch "$(ro_fixture rename)")" "0|2"
+chk "O83: 변환 통제 - ok · no 밖의 값을 센다" "$(ro_value_bad "$(ro_fixture base)")|$(ro_value_bad "$(ro_fixture badval)")" "0|1"
+# (O84~O87 · M82 리뷰 라운드 0 차단 1 · 권장 2) **갈래 수와 이름 잔재** — 이름을 위치로 읽는 갈래 고정은 선언에 이름이 끼어들어도 참이다.
+# 그래서 이름 **수**를 러너의 조건 수(`RO_CONDS` — 한 자리)와 견준다(`O84`). 이름을 바꾸고 산문 · 표에 옛 이름을 남긴 편집은 `O86`이 붙잡는다.
+chk "O84: 본 검사 - 갈래 이름 수가 러너의 조건 수와 같다" "$(ro_count_bad)" "0"
+chk "O85: 변환 통제 - 갈래를 하나 더한 합성 규약에서 수 대조가 붉다" "$(ro_count_bad "$(ro_fixture base)")|$(ro_count_bad "$(ro_fixture add)")" "0|1"
+chk "O86: 본 검사 - 규약 안 백틱 ro- 토큰이 전부 선언된 갈래 이름이다" "$(ro_stray)" "0"
+chk "O87: 변환 통제 - 선언에 없는 ro- 토큰 하나를 센다" "$(ro_stray "$(ro_fixture base)")|$(ro_stray "$(ro_fixture stray)")" "0|1"
 fi
 
 # --- Part P: 완료 기준 대조 (M55) --------------------------------------------
