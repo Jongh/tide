@@ -4434,6 +4434,58 @@ dp_fixture() { # <drop|label> → 규약 조각 사본에서 첫 파트 토큰�
           print r }' "$CONV_REL" > "$_dpf"
     printf '%s' "$_dpf"
 }
+# (S31~S47 · M83) **문서 커밋 전제와 에픽 등재 갈래는 이름 선언이 든다** — 규약 조각의 `docs-commit-preconds:`가 전제 이름을,
+# `docs-commit-epic-cases:`가 에픽 등재 갈래 이름을 든다. 선언 읽기는 M79의 공용 헬퍼(`dn_*`)에 규약 조각을 넘긴다. 이름을 여기 박지 않는다.
+# 수는 손으로 맞춘 상수가 아니라 스킬 절이 가리킨 이름 **집합**과 선언 집합의 대조로 묻는다(M82 회고 `rf-97`). 이름을 바꾸고 옛 이름을
+# 남긴 편집은 잔재 판정이 붙잡는다(M82 리뷰 라운드 0 권장 2와 같은 형태).
+DCP_KEY='docs-commit-preconds:'
+DCE_KEY='docs-commit-epic-cases:'
+DCN_PFX='dc-'
+dcn_toks() { # <파일…> → 파일들 안 백틱 `dc-…` 토큰(서로 다른 것) 한 줄씩
+    LC_ALL=C awk -v q="\`" -v p="$DCN_PFX" '{ s = $0; while ((i = index(s, q p)) > 0) { s = substr(s, i + 1); j = index(s, q); if (j == 0) break; print substr(s, 1, j - 1); s = substr(s, j + 1) } }' "$@" |
+        LC_ALL=C sort -u
+}
+dcn_heads() { # 표준 입력 → 번호 단계 머리(`N. **…**`)의 굵은 구획 한 줄씩 — 단계 본문 · 절 산문의 언급은 덮음으로 치지 않는다(M83 리뷰 라운드 0 차단 1)
+    LC_ALL=C awk '/^[0-9]+\. \*\*/ { s = $0; s = substr(s, index(s, "**") + 2); j = index(s, "**"); if (j > 0) print substr(s, 1, j - 1) }'
+}
+dcn_cover_bad() { # [규약 조각] [스킬] → 스킬 「문서 커밋 경로」 절 단계 머리의 `dc-` 토큰 집합과 전제 이름 집합의 대칭차 크기(정상 0)
+    _dcnc=${1:-$CONV_REL}; _dcns=${2:-$REL_SKILL}
+    _dcnn=$(dn_names "$DCP_KEY" "$_dcnc" | LC_ALL=C sort -u)
+    _dcnt=$(dc_sec "$_dcns" | dcn_heads | dcn_toks -)
+    { printf '%s\n' "$_dcnn" | { _c=0; while IFS= read -r _v; do [ -n "$_v" ] || continue
+        printf '%s\n' "$_dcnt" | LC_ALL=C grep -qxF -- "$_v" || _c=$((_c + 1)); done; echo "$_c"; }
+      printf '%s\n' "$_dcnt" | { _c=0; while IFS= read -r _v; do [ -n "$_v" ] || continue
+        printf '%s\n' "$_dcnn" | LC_ALL=C grep -qxF -- "$_v" || _c=$((_c + 1)); done; echo "$_c"; }
+    } | LC_ALL=C awk '{ s += $1 } END { print s + 0 }'
+}
+dcn_stray() { # [더 볼 파일] → 규약 문서 집합 · release 스킬 · 카탈로그(와 더 볼 파일) 안 `dc-` 토큰 중 두 선언에 없는 것의 수
+    _dcnu=$({ dn_names "$DCP_KEY" "$CONV_REL"; dn_names "$DCE_KEY" "$CONV_REL"; } | LC_ALL=C sort -u)
+    dcn_toks "$ROOT"/docs/conventions*.md "$REL_SKILL" "$CMD_CANON" ${1:+"$1"} | { _c=0; while IFS= read -r _v; do [ -n "$_v" ] || continue
+        printf '%s\n' "$_dcnu" | LC_ALL=C grep -qxF -- "$_v" || _c=$((_c + 1)); done; echo "$_c"; }
+}
+dcn_sum() { # <함수> → 두 키에 대해 그 판정을 돌린 합
+    echo $(( $("$1" "$DCP_KEY" "$CONV_REL") + $("$1" "$DCE_KEY" "$CONV_REL") ))
+}
+dcn_fixture() { # <defdrop|addname|outside|inside|prose|headtail|stray> → 판정의 반응을 묻는 사본(실제 파일을 건드리지 않는다)
+    _dcnf="$SBX/dcn-$1.md"
+    case "$1" in
+        defdrop) # 규약 조각 사본에서 첫 전제의 정의 머리를 굵은 글로만 남긴다(백틱 없음 — 정의가 아니게 된다)
+            _v=$(dn_names "$DCP_KEY" "$CONV_REL" | head -1)
+            LC_ALL=C awk -v h="- **\`$_v\`**" -v r="- **$_v**" '{ i = index($0, h); if (i > 0 && !d) { $0 = substr($0, 1, i - 1) r substr($0, i + length(h)); d = 1 } print }' "$CONV_REL" > "$_dcnf" ;;
+        addname) # 규약 조각 사본에서 전제 선언 끝에 이름 하나를 더한다(스킬은 그대로)
+            LC_ALL=C awk -v w="- \`$DCP_KEY\`" '{ s = $0; sub(/^[ \t]+/, "", s); if (substr(s, 1, length(w)) == w) { sub(/\r$/, ""); $0 = $0 " dc-zz-added" } print }' "$CONV_REL" > "$_dcnf" ;;
+        outside) # 스킬 사본의 「문서 커밋 경로」 절 **앞**에 선언에 없는 `dc-` 토큰을 단 단계 머리를 심는다(절 밖 — 세지 않아야 한다)
+            LC_ALL=C awk -v anc="$DC_SEC" '/^## / && index($0, anc) > 0 && !d { print "9. **zz `dc-zz-planted`** zz"; d = 1 } { print }' "$REL_SKILL" > "$_dcnf" ;;
+        inside) # 같은 단계 머리를 절 제목 바로 **뒤**에 심는다(단계 머리의 굵은 구획 — 하나 늘어야 한다)
+            LC_ALL=C awk -v anc="$DC_SEC" '{ print } /^## / && index($0, anc) > 0 && !d { print "9. **zz `dc-zz-planted`** zz"; d = 1 }' "$REL_SKILL" > "$_dcnf" ;;
+        prose) # 같은 토큰을 절 안 **산문** 줄로 심는다(단계 머리가 아님 — 세지 않아야 한다)
+            LC_ALL=C awk -v anc="$DC_SEC" '{ print } /^## / && index($0, anc) > 0 && !d { print "zz `dc-zz-planted` zz"; d = 1 }' "$REL_SKILL" > "$_dcnf" ;;
+        headtail) # 같은 토큰을 단계 머리의 굵은 구획 **뒤**에 심는다(단계 본문 — 세지 않아야 한다)
+            LC_ALL=C awk -v anc="$DC_SEC" '{ print } /^## / && index($0, anc) > 0 && !d { print "9. **zz** `dc-zz-planted` zz"; d = 1 }' "$REL_SKILL" > "$_dcnf" ;;
+        stray) printf '%s\n' 'see `dc-zz-gone` here' > "$_dcnf" ;;
+    esac
+    printf '%s' "$_dcnf"
+}
 if part_on S; then
 chk "S8: docs-commit-paths 선언 줄 정확히 1개" "$(decl_count "$CONV_REL" "$DC_KEY")" "1"
 chk "S9: docs-commit-paths 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV_REL" "$DC_KEY")" "0"
@@ -4463,6 +4515,27 @@ chk "S28: 배선 - release 스킬이 docs-commit-parts 키를 가리킨다" "$(h
 # (S29 · S30) 픽스처 통제 — 판정의 **반응**을 묻는다(`control-reads-delta`).
 chk "S29: 픽스처 통제 - 파트 토큰 하나를 지우면 잡는다" "$(( $(dp_bad "$(dp_fixture drop)") - $(dp_bad) ))" "1"
 chk "S30: 픽스처 통제 - 모르는 라벨을 잡는다" "$(( $(dp_label_bad "$(dp_fixture label)") - $(dp_label_bad) ))" "1"
+chk "S31: docs-commit-preconds 선언 줄 정확히 1개" "$(decl_count "$CONV_REL" "$DCP_KEY")" "1"
+chk "S32: docs-commit-epic-cases 선언 줄 정확히 1개" "$(decl_count "$CONV_REL" "$DCE_KEY")" "1"
+chk "S33: 두 선언 줄 꼬리에 금지 구분자 0건" "$(( $(bad_seps "$CONV_REL" "$DCP_KEY") + $(bad_seps "$CONV_REL" "$DCE_KEY") ))" "0"
+# (S34) 추출 positive-control — 이름이 비거나 스킬 절 단계 머리에 `dc-` 토큰이 없으면 S35~S40이 «0»으로 공허하게 통과한다.
+chk "S34: 두 선언의 이름과 스킬 절 단계 머리의 dc- 토큰 추출 positive-control" "$([ "$(dn_names "$DCP_KEY" "$CONV_REL" | grep -c .)" -ge 1 ] && [ "$(dn_names "$DCE_KEY" "$CONV_REL" | grep -c .)" -ge 1 ] && [ "$(dc_sec "$REL_SKILL" | dcn_heads | dcn_toks - | grep -c .)" -ge 1 ] && echo ok || echo no)" "ok"
+chk "S35: 본 검사 - 두 선언의 이름이 유일하다" "$(dcn_sum dn_dup)" "0"
+chk "S36: 본 검사 - 이름마다 정의 항목이 정확히 하나다" "$(dcn_sum dn_def_bad)" "0"
+chk "S37: 본 검사 - 선언에 없는 정의 항목이 없다" "$(dcn_sum dn_def_orphan)" "0"
+chk "S38: 본 검사 - 정의 항목의 순서가 선언의 이름 순서와 같다" "$(dcn_sum dn_def_order)" "0"
+chk "S39: 본 검사 - 스킬 문서 커밋 절의 단계 머리가 가리킨 dc- 이름 집합이 전제 선언의 이름 집합과 같다" "$(dcn_cover_bad)" "0"
+chk "S40: 본 검사 - 규약 문서 집합 · release 스킬 · 카탈로그의 dc- 토큰이 전부 선언된 이름이다" "$(dcn_stray)" "0"
+# (S41~S45) 변환 통제(`rf-88`) — 판정의 **반응**을 차이로 묻는다(`control-reads-delta`): 정의 범위 · 헬퍼 배선(규약 조각 인자) · 이름 추출 ·
+# 스킬 절 창 · 백틱 토큰 추출.
+chk "S41: 변환 통제 - 규약 조각 사본에서 정의 하나를 지우면 정의 대조가 하나 늘어난다" "$(( $(dn_def_bad "$DCP_KEY" "$(dcn_fixture defdrop)") - $(dn_def_bad "$DCP_KEY" "$CONV_REL") ))" "1"
+chk "S42: 변환 통제 - 전제 선언에 이름을 하나 더한 사본에서 덮음 대조가 하나 늘어난다" "$(( $(dcn_cover_bad "$(dcn_fixture addname)") - $(dcn_cover_bad) ))" "1"
+chk "S43: 변환 통제 - 스킬 절 앞에 심은 단계 머리의 dc- 토큰은 세지 않는다" "$(( $(dcn_cover_bad "$CONV_REL" "$(dcn_fixture outside)") - $(dcn_cover_bad) ))" "0"
+chk "S44: 변환 통제 - 스킬 절 안에 심은 단계 머리의 dc- 토큰은 센다" "$(( $(dcn_cover_bad "$CONV_REL" "$(dcn_fixture inside)") - $(dcn_cover_bad) ))" "1"
+chk "S45: 변환 통제 - 선언에 없는 dc- 토큰 하나를 센다" "$(( $(dcn_stray "$(dcn_fixture stray)") - $(dcn_stray) ))" "1"
+# (S46 · S47) 단계 머리 창의 통제(M83 리뷰 라운드 0 차단 1) — 절 안이라도 산문 줄과 굵은 구획 뒤의 언급은 덮음으로 치지 않는다.
+chk "S46: 변환 통제 - 스킬 절 안 산문 줄의 dc- 토큰은 세지 않는다" "$(( $(dcn_cover_bad "$CONV_REL" "$(dcn_fixture prose)") - $(dcn_cover_bad) ))" "0"
+chk "S47: 변환 통제 - 단계 머리 굵은 구획 뒤의 dc- 토큰은 세지 않는다" "$(( $(dcn_cover_bad "$CONV_REL" "$(dcn_fixture headtail)") - $(dcn_cover_bad) ))" "0"
 fi
 
 # --- Part T: 러너 소스 개행 계약 (M59 리뷰 차단 1 → M60) --------------------

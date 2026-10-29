@@ -5057,6 +5057,103 @@ try {
         [System.IO.File]::WriteAllLines($f, $lines.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
         return $f
     }
+    # (S31-S47, M83) THE DOCUMENT-COMMIT PRECONDITIONS AND EPIC-REGISTRATION CASES ARE NAME DECLARATIONS -- `docs-commit-preconds:`
+    # carries the precondition names and `docs-commit-epic-cases:` the epic case names, in the conventions fragment. Reading goes
+    # through the M79 shared helpers (Dn*) with the fragment passed in; names are never written here. The count is asked as the
+    # SET the skill section points at versus the declared set, not against a hand-kept constant (M82 retro rf-97). A rename that
+    # leaves the old name behind is caught by the stray check (same shape as the M82 review round 0 recommendation 2).
+    $DCP_KEY = 'docs-commit-preconds:'
+    $DCE_KEY = 'docs-commit-epic-cases:'
+    $DCN_PFX = 'dc-'
+    # Distinct backtick `dc-...` tokens in the given lines.
+    function DcnToks($lines) {
+        $bt = [string][char]0x60
+        $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($ln in @($lines)) {
+            $s = [string]$ln
+            while (($i = $s.IndexOf($bt + $DCN_PFX, [System.StringComparison]::Ordinal)) -ge 0) {
+                $s = $s.Substring($i + 1)
+                $j = $s.IndexOf($bt, [System.StringComparison]::Ordinal)
+                if ($j -lt 0) { break }
+                [void]$seen.Add($s.Substring(0, $j))
+                $s = $s.Substring($j + 1)
+            }
+        }
+        return @($seen | Where-Object { $_ -ne '' })
+    }
+    # Bold span of each numbered step head (`N. **...**`) -- mentions in a step body or section prose do not count as coverage
+    # (M83 review round 0 blocking 1).
+    function DcnHeads($lines) {
+        $out = New-Object System.Collections.Generic.List[string]
+        foreach ($ln in @($lines)) {
+            $s = [string]$ln
+            if (-not [regex]::IsMatch($s, '^[0-9]+\. \*\*')) { continue }
+            $s = $s.Substring($s.IndexOf('**', [System.StringComparison]::Ordinal) + 2)
+            $j = $s.IndexOf('**', [System.StringComparison]::Ordinal)
+            if ($j -ge 0) { $out.Add($s.Substring(0, $j)) }
+        }
+        return $out.ToArray()
+    }
+    # Size of the symmetric difference between the `dc-` tokens of the step heads in the skill's document-commit section and the precondition names (normal 0).
+    function DcnCoverBad([string]$conv = '', [string]$skill = '') {
+        if ($conv -eq '') { $conv = $CONV_REL }
+        if ($skill -eq '') { $skill = $REL_SKILL }
+        $names = OrdSet @(DnNames $DCP_KEY $conv)
+        $toks = OrdSet @(DcnToks @(DcnHeads @(DcSec $skill)))
+        $bad = 0
+        foreach ($n in $names) { if (-not $toks.Contains($n)) { $bad++ } }
+        foreach ($t in $toks) { if (-not $names.Contains($t)) { $bad++ } }
+        return [string]$bad
+    }
+    # `dc-` tokens in the conventions set, the release skill and the catalog (plus an optional extra file) that neither declaration names.
+    function DcnStray([string]$extra = '') {
+        $u = OrdSet @(@(DnNames $DCP_KEY $CONV_REL) + @(DnNames $DCE_KEY $CONV_REL))
+        $files = @(Get-ChildItem -Path (Join-Path $ROOT 'docs') -Filter 'conventions*.md' -File | ForEach-Object { $_.FullName }) + @($REL_SKILL, $CMD_CANON)
+        if ($extra -ne '') { $files += $extra }
+        $lines = New-Object System.Collections.Generic.List[string]
+        foreach ($f in $files) { foreach ($l in [System.IO.File]::ReadAllLines($f)) { $lines.Add($l) } }
+        return [string]@(DcnToks $lines | Where-Object { -not $u.Contains($_) }).Count
+    }
+    function DcnSum([string]$fn) {
+        return [string]([int](& $fn $DCP_KEY $CONV_REL) + [int](& $fn $DCE_KEY $CONV_REL))
+    }
+    # Copies that ask a verdict's RESPONSE (the real files are never touched).
+    function DcnFixture([string]$mode) {
+        $f = Join-Path $sbx ('dcn-' + $mode + '.md')
+        $bt = [string][char]0x60
+        $ptok = $bt + 'dc-zz-planted' + $bt
+        $tok = '9. **zz ' + $ptok + '** zz'
+        if ($mode -eq 'prose') { $tok = 'zz ' + $ptok + ' zz' }
+        if ($mode -eq 'headtail') { $tok = '9. **zz** ' + $ptok + ' zz' }
+        $out = New-Object System.Collections.ArrayList
+        if ($mode -eq 'defdrop') {
+            $v = @(DnNames $DCP_KEY $CONV_REL) | Select-Object -First 1
+            $h = '- **' + $bt + $v + $bt + '**'; $done = $false
+            foreach ($l in [System.IO.File]::ReadAllLines($CONV_REL)) {
+                $i = $l.IndexOf($h, [System.StringComparison]::Ordinal)
+                if ($i -ge 0 -and -not $done) { $l = $l.Substring(0, $i) + '- **' + $v + '**' + $l.Substring($i + $h.Length); $done = $true }
+                [void]$out.Add($l)
+            }
+        } elseif ($mode -eq 'addname') {
+            $w = '- ' + $bt + $DCP_KEY + $bt
+            foreach ($l in [System.IO.File]::ReadAllLines($CONV_REL)) {
+                if ($l.TrimStart([char[]]@([char]0x20, [char]0x09)).StartsWith($w, [System.StringComparison]::Ordinal)) { $l = $l + ' dc-zz-added' }
+                [void]$out.Add($l)
+            }
+        } elseif ($mode -eq 'outside' -or $mode -eq 'inside' -or $mode -eq 'prose' -or $mode -eq 'headtail') {
+            $done = $false
+            foreach ($l in [System.IO.File]::ReadAllLines($REL_SKILL)) {
+                $hit = (-not $done) -and $l.StartsWith('## ', [System.StringComparison]::Ordinal) -and $l.Contains($DC_SEC)
+                if ($hit -and $mode -eq 'outside') { [void]$out.Add($tok); $done = $true }
+                [void]$out.Add($l)
+                if ($hit -and $mode -ne 'outside') { [void]$out.Add($tok); $done = $true }
+            }
+        } else {
+            [void]$out.Add('see ' + $bt + 'dc-zz-gone' + $bt + ' here')
+        }
+        [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
     $DC_ALIAS = $DC_KEY.TrimEnd(':')
     if (PartOn 'S') {
     Chk "S8: exactly one docs-commit-paths declaration line" (DeclCount $CONV_REL $DC_KEY) '1'
@@ -5087,6 +5184,28 @@ try {
     # (S29/S30) fixture controls -- ask the verdicts' RESPONSE (control-reads-delta).
     Chk "S29: control -- dropping one parts token is caught" ([string]([int](DpBad (DpFixture 'drop')) - [int](DpBad))) '1'
     Chk "S30: control -- an unknown label is caught" ([string]([int](DpLabelBad (DpFixture 'label')) - [int](DpLabelBad))) '1'
+    Chk "S31: exactly one docs-commit-preconds declaration line" (DeclCount $CONV_REL $DCP_KEY) '1'
+    Chk "S32: exactly one docs-commit-epic-cases declaration line" (DeclCount $CONV_REL $DCE_KEY) '1'
+    Chk "S33: no forbidden separator in either declaration tail" ([string]([int](BadSeps $CONV_REL $DCP_KEY) + [int](BadSeps $CONV_REL $DCE_KEY))) '0'
+    # (S34) extraction positive-control -- with no names or no `dc-` token in the skill section step heads S35-S40 would pass on "0".
+    Chk "S34: names of both declarations and dc- tokens of the skill section step heads extract (positive-control)" $(if (@(DnNames $DCP_KEY $CONV_REL).Count -ge 1 -and @(DnNames $DCE_KEY $CONV_REL).Count -ge 1 -and @(DcnToks @(DcnHeads @(DcSec $REL_SKILL))).Count -ge 1) { 'ok' } else { 'no' }) 'ok'
+    Chk "S35: main check -- names of both declarations are unique" (DcnSum 'DnDup') '0'
+    Chk "S36: main check -- every name has exactly one definition item" (DcnSum 'DnDefBad') '0'
+    Chk "S37: main check -- no definition item outside the declarations" (DcnSum 'DnDefOrphan') '0'
+    Chk "S38: main check -- definition order equals declaration name order" (DcnSum 'DnDefOrder') '0'
+    Chk "S39: main check -- dc- names pointed at by the step heads of the skill's document-commit section equal the precondition names" (DcnCoverBad) '0'
+    Chk "S40: main check -- every dc- token in the conventions set, the release skill and the catalog is a declared name" (DcnStray) '0'
+    # (S41-S45) transform controls (rf-88) -- ask the verdict's RESPONSE as a delta (control-reads-delta): definition range, helper
+    # wiring (fragment argument), name extraction, skill section window, backtick token extraction.
+    Chk "S41: transform control -- dropping one definition in a fragment copy moves the definition check by one" ([string]([int](DnDefBad $DCP_KEY (DcnFixture 'defdrop')) - [int](DnDefBad $DCP_KEY $CONV_REL))) '1'
+    Chk "S42: transform control -- one more precondition name in a fragment copy moves the coverage check by one" ([string]([int](DcnCoverBad (DcnFixture 'addname')) - [int](DcnCoverBad))) '1'
+    Chk "S43: transform control -- a step-head dc- token planted before the skill section is not counted" ([string]([int](DcnCoverBad $CONV_REL (DcnFixture 'outside')) - [int](DcnCoverBad))) '0'
+    Chk "S44: transform control -- a step-head dc- token planted inside the skill section is counted" ([string]([int](DcnCoverBad $CONV_REL (DcnFixture 'inside')) - [int](DcnCoverBad))) '1'
+    Chk "S45: transform control -- one undeclared dc- token is counted" ([string]([int](DcnStray (DcnFixture 'stray')) - [int](DcnStray))) '1'
+    # (S46, S47) controls of the step-head window (M83 review round 0 blocking 1) -- inside the section, a prose line and a mention after
+    # the bold span do not count as coverage.
+    Chk "S46: transform control -- a dc- token on a prose line inside the skill section is not counted" ([string]([int](DcnCoverBad $CONV_REL (DcnFixture 'prose')) - [int](DcnCoverBad))) '0'
+    Chk "S47: transform control -- a dc- token after the bold span of a step head is not counted" ([string]([int](DcnCoverBad $CONV_REL (DcnFixture 'headtail')) - [int](DcnCoverBad))) '0'
     }
 
     # --- Part T: runner source EOL contract (M59 review blocker 1 -> M60) -------
