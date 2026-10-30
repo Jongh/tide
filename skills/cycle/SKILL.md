@@ -11,7 +11,7 @@ argument-hint: "[마일스톤 주제 또는 M번호 (선택)]"
 
 - **`manual`(기본 — 파일이 없으면 이 값이다)**: 종전 그대로 **release 직전에 멈춘다.** 판정 `가능`이면
   `/tide:release vX.Y.Z`를 안내하고 끝낸다. **선언이 없는 저장소의 동작은 한 글자도 바뀌지 않는다.**
-- **`continuous`**: release의 **되돌릴 수 있는 층까지** 이어간다 — 프리플라이트 1~5 → **게시 모드
+- **`continuous`**: release의 **되돌릴 수 있는 층까지** 이어간다 — 프리플라이트(`docs/conventions.md`의 `release-preflights:`) → **게시 모드
   해석·검증** → 버전 파일 → `CHANGELOG.md`. **`git commit` 앞에서 멈춘다.** 절차는
   `skills/release/SKILL.md`를 그대로 따르고 여기서 다시 적지 않는다. 멈춘 뒤 사용자에게 **남은 것은
   게시뿐**임을 알리고 `/tide:release`를 안내한다.
