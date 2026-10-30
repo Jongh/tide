@@ -54,8 +54,8 @@ cp -r skills/* ~/.claude/skills/
    `docs/reports/M{N}-review.md`를 남깁니다. 차단 등급 결함은 리뷰가 고치지 않고 판정 `불가`로 impl에
    되돌립니다(권장·사소만 리뷰 중 수정). 이 단계도 git 작업은 하지 않습니다.
 
-5. `/tide:release vX.Y.Z [pr/release]`: 우선 프리플라이트(판정 "가능" + 테스트 통과 + 워킹트리 확인)를
-   검사합니다. 통과하면 버전 범프 → CHANGELOG 갱신 → commit → tag → push까지 진행합니다.
+5. `/tide:release vX.Y.Z [pr/release]`: 우선 프리플라이트(판정 "가능" + 테스트 통과 + 사이트가 있으면 빌드 산출물의 제외 용어 0건)를
+   검사합니다. 워킹트리 확인과 커버리지 체크는 작업을 멈추지 않고 목록이나 경고만 보여 드립니다. 통과하면 버전 범프 → CHANGELOG 갱신 → commit → tag → push까지 진행합니다.
    추가로 `gh`(GitHub CLI)가 있으면 GitHub 릴리즈 게시와 릴리즈 PR 생성 중 하나를 옵트인으로 고를 수
    있습니다. 해당 단계는 tide 사이클에서 **git을 만지는 유일한 단계**입니다.
 

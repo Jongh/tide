@@ -1954,6 +1954,25 @@ else
     esac
 fi
 chk "F20: 부분 결과 줄 접두가 전수 결과 줄 접두와 다르다" "$F20R" "distinct"
+# (F21~F23 · M84 · `rf-28`) **README 파트 제목의 「N 케이스」가 머리 `cases:` 줄의 그 파트 수와 같다** — 제목에 수를 든 파트만 묻는다
+# (수가 없는 제목은 경계). 제목에 적힌 파트가 `cases:` 줄에 없어도 붉다.
+part_head_n() { # [README] → 「N 케이스)」로 끝나는 파트 제목 줄 수
+    LC_ALL=C awk '{ sub(/\r$/, "") } /^### Part [A-Z] / && /[0-9]+ 케이스\)$/ { n++ } END { print n + 0 }' "${1:-$DISC_README}"
+}
+part_head_bad() { # [README] → 제목의 수가 `cases:` 줄의 그 파트 수와 다른 파트 제목 줄 수(정상 0)
+    LC_ALL=C awk '{ sub(/\r$/, "") }
+        !got && index($0, "cases:") > 0 { got = 1; s = $0; while (match(s, /Part [A-Z] [0-9]+/)) { t = substr(s, RSTART, RLENGTH); m[substr(t, 6, 1)] = substr(t, 8); s = substr(s, RSTART + RLENGTH) } next }
+        /^### Part [A-Z] / && match($0, /[0-9]+ 케이스\)$/) { v = substr($0, RSTART); sub(/ .*/, "", v); k = substr($0, 10, 1); if (!(k in m) || m[k] != v) b++ }
+        END { print b + 0 }' "${1:-$DISC_README}"
+}
+part_head_fixture() { # README 사본에서 수를 든 첫 파트 제목의 수를 하나 올린다
+    _phf="$SBX/part-head.md"
+    LC_ALL=C awk '{ sub(/\r$/, "") } !d && /^### Part [A-Z] / && match($0, /[0-9]+ 케이스\)$/) { v = substr($0, RSTART); sub(/ .*/, "", v); $0 = substr($0, 1, RSTART - 1) (v + 1) substr($0, RSTART + length(v)); d = 1 } { print }' "$DISC_README" > "$_phf"
+    printf '%s' "$_phf"
+}
+chk "F21: README 파트 제목 수 추출 positive-control" "$([ "$(part_head_n)" -ge 1 ] && echo ok || echo no)" "ok"
+chk "F22: 본 검사 - README 파트 제목의 케이스 수가 cases: 줄의 그 파트 수와 같다" "$(part_head_bad)" "0"
+chk "F23: 픽스처 통제 - 파트 제목 수 하나를 올린 사본에서 하나 늘어난다" "$(( $(part_head_bad "$(part_head_fixture)") - $(part_head_bad) ))" "1"
 fi
 
 
@@ -4147,6 +4166,36 @@ chk "P18: 오탐 방향 - 값 하나만 쓰는 줄은 통과" "$(crit_reenum "$(
 # 줄 단위 창이던 시절 이 형태가 초록으로 통과했다(`adv-enum-split`). 창이 줄로 되돌아가면
 # 여기서 붉는다 — 되돌림이 아니라 **상시로** 무는 자리다.
 chk "P19: 픽스처 통제 - 두 줄에 나눠 적은 열거도 잡는다" "$(crit_reenum "$(crit_skill_fixture split)")" "yes"
+# (P20~P23 · M84 · `rf-44`) **리뷰 보고서 계측 줄의 값이 비지 않는다** — `metrics-filled-since:` 이상의 리뷰 보고서마다 계측 줄이 정확히
+# 하나이고 중괄호가 없으며 숫자 자리 수가 규약 고정 형식 줄의 `{n}` 수와 같다. 그 수는 규약에서 읽는다(손 상수 없음 · `rf-97`).
+MFS_KEY='metrics-filled-since:'
+MFSINCE=$(decl_tail "$CONV" "$MFS_KEY" | LC_ALL=C awk '{ print $1 }' | tr -d 'M')
+meas_slots() { # → 규약 고정 형식 줄(`계측: in-review …`)의 `{n}` 수
+    LC_ALL=C awk '{ sub(/\r$/, "") } !d && index($0, "`계측: in-review") > 0 { s = $0; while ((i = index(s, "{n}")) > 0) { n++; s = substr(s, i + 3) } d = 1 } END { print n + 0 }' "$CONV"
+}
+meas_line_bad() { # <리뷰 보고서> → 계측 줄이 하나가 아니거나 · 중괄호가 남았거나 · 숫자 자리 수가 다르면 1, 아니면 0
+    LC_ALL=C awk -v want="$(meas_slots)" '{ sub(/\r$/, "") } index($0, "계측:") == 1 { c++; l = $0 }
+        END { if (c != 1) { print 1; exit } s = l; k = gsub(/[0-9]+/, "", s); if (index(l, "{") || index(l, "}") || k != want) print 1; else print 0 }' "$1"
+}
+meas_reports() { # → 선언 번호 이상의 리뷰 보고서 경로(한 줄씩)
+    for _mf in "$ROOT"/docs/reports/M*-review.md; do
+        _mn=${_mf##*/M}; _mn=${_mn%%-*}
+        [ -n "$MFSINCE" ] && [ "$_mn" -ge "$MFSINCE" ] 2>/dev/null && printf '%s\n' "$_mf"
+    done
+}
+meas_bad_total() { # → 값이 빈 계측 줄을 가진 보고서 수(정상 0)
+    _mt=0; for _mf in $(meas_reports); do _mt=$((_mt + $(meas_line_bad "$_mf"))); done; echo "$_mt"
+}
+meas_fixture() { # <blank|intact> → 가장 큰 번호 보고서 사본(blank는 rework 값을 비운다)
+    _mff="$SBX/meas-$1.md"; _msrc=$(meas_reports | LC_ALL=C sort -t M -k 2 -n | tail -1)
+    if [ "$1" = blank ]; then LC_ALL=C awk 'index($0, "계측:") == 1 { sub(/\(rework\) [0-9]+/, "(rework) ") } { print }' "$_msrc" > "$_mff"
+    else cp "$_msrc" "$_mff"; fi
+    printf '%s' "$_mff"
+}
+chk "P20: metrics-filled-since 선언 줄 정확히 1개" "$(decl_count "$CONV" "$MFS_KEY")" "1"
+chk "P21: 계측 줄 자리 수와 대상 보고서 추출 positive-control" "$([ "$(meas_slots)" -ge 1 ] && [ "$(meas_reports | grep -c .)" -ge 1 ] && echo ok || echo no)" "ok"
+chk "P22: 본 검사 - 선언 번호 이상 리뷰 보고서의 계측 줄 값이 비지 않는다" "$(meas_bad_total)" "0"
+chk "P23: 픽스처 통제 - 계측 줄 값 하나를 비운 사본에서 하나 늘어난다" "$(( $(meas_line_bad "$(meas_fixture blank)") - $(meas_line_bad "$(meas_fixture intact)") ))" "1"
 fi
 
 # --- Part Q: 판정 비교의 Ordinal 고정 (M57) -----------------------------------
@@ -4368,6 +4417,10 @@ dc_missing() { # → 경로가 실재하지 않는 값의 수(끝이 `/*`이면 
 dc_sec() { # <파일> → `## ` 제목이 「문서 커밋 경로」를 담은 절의 줄(없으면 빈 출력)
     LC_ALL=C awk -v anc="$DC_SEC" '{ sub(/\r$/, "") } /^## / { inside = (index($0, anc) > 0); next } inside { print }' "$1"
 }
+dc_anchor_bad() { # [스킬] → 문서 커밋 절 창 경계의 결함 수 — 그 `## ` 제목이 하나가 아님 · 그 뒤에 창을 닫는 `## ` 제목이 없음(정상 0 · M84 리뷰 라운드 1)
+    LC_ALL=C awk -v anc="$DC_SEC" '{ sub(/\r$/, "") } /^## / { if (index($0, anc) > 0) { n++; s = 1 } else if (s) a = 1 }
+        END { c = 0; if (n != 1) c++; if (!a) c++; print c }' "${1:-$REL_SKILL}"
+}
 dc_dup_in() { # <파일> → 그 파일의 「문서 커밋 경로」 절에 경로가 등장하는 **서로 다른** 선언 값의 수(글롭은 `*` 앞까지)
     _dcs=$(dc_sec "$1")
     dc_vals | { _dcn=0; while IFS= read -r _dcv; do
@@ -4466,7 +4519,7 @@ dcn_stray() { # [더 볼 파일] → 규약 문서 집합 · release 스킬 · �
 dcn_sum() { # <함수> → 두 키에 대해 그 판정을 돌린 합
     echo $(( $("$1" "$DCP_KEY" "$CONV_REL") + $("$1" "$DCE_KEY" "$CONV_REL") ))
 }
-dcn_fixture() { # <defdrop|addname|outside|inside|prose|headtail|stray> → 판정의 반응을 묻는 사본(실제 파일을 건드리지 않는다)
+dcn_fixture() { # <defdrop|addname|outside|inside|prose|headtail|stray|after|anclast|ancdup> → 판정의 반응을 묻는 사본(실제 파일을 건드리지 않는다)
     _dcnf="$SBX/dcn-$1.md"
     case "$1" in
         defdrop) # 규약 조각 사본에서 첫 전제의 정의 머리를 굵은 글로만 남긴다(백틱 없음 — 정의가 아니게 된다)
@@ -4483,8 +4536,86 @@ dcn_fixture() { # <defdrop|addname|outside|inside|prose|headtail|stray> → 판�
         headtail) # 같은 토큰을 단계 머리의 굵은 구획 **뒤**에 심는다(단계 본문 — 세지 않아야 한다)
             LC_ALL=C awk -v anc="$DC_SEC" '{ print } /^## / && index($0, anc) > 0 && !d { print "9. **zz** `dc-zz-planted` zz"; d = 1 }' "$REL_SKILL" > "$_dcnf" ;;
         stray) printf '%s\n' 'see `dc-zz-gone` here' > "$_dcnf" ;;
+        after) # 같은 단계 머리를 절 **다음** `## ` 제목 바로 뒤에 심는다(창 뒤 — 세지 않아야 한다 · M84 · `rf-101`)
+            LC_ALL=C awk -v anc="$DC_SEC" '{ print } /^## / { if (index($0, anc) > 0) s = 1; else if (s && !d) { print "9. **zz `dc-zz-planted`** zz"; d = 1 } }' "$REL_SKILL" > "$_dcnf" ;;
+        anclast) # 절 뒤의 `## ` 제목을 전부 한 단계 내린다(창을 닫는 제목이 없음 — 앵커 판정이 하나 늘어야 한다)
+            LC_ALL=C awk -v anc="$DC_SEC" '/^## / { if (index($0, anc) > 0) s = 1; else if (s) $0 = "#" $0 } { print }' "$REL_SKILL" > "$_dcnf" ;;
+        ancdup) # 앵커를 담은 `## ` 제목을 파일 끝에 하나 더 붙인다(앵커 판정이 하나 늘어야 한다)
+            { cat "$REL_SKILL"; printf '%s\n' "## zz $DC_SEC zz"; } > "$_dcnf" ;;
     esac
     printf '%s' "$_dcnf"
+}
+# (S48~S66 · M84) **release 프리플라이트는 이름 선언이 든다** — `docs/conventions.md`의 `release-preflights:`가 이름과 순서를 든다.
+# release 스킬 프리플라이트 창(「프리플라이트 (」 줄 다음부터 「프리플라이트 통과 후」 줄 앞까지)의 **번호 단계 머리 첫 굵은 구획**이 가리킨
+# 이름의 집합과 차례를 선언과 견준다 — 손 상수 없음(`rf-97`). 창은 안 · 앞 · 뒤를 함께 통제한다(`rf-101`).
+PFS_KEY='release-preflights:'
+PF_PFX='pf-'
+PF_START='프리플라이트 ('
+PF_END='프리플라이트 통과 후'
+pf_sec() { # <파일> → 프리플라이트 창의 줄(시작 · 끝 줄 제외, 없으면 빈 출력)
+    LC_ALL=C awk -v a="$PF_START" -v b="$PF_END" '{ sub(/\r$/, "") } index($0, b) == 1 { inside = 0 } inside { print } index($0, a) == 1 { inside = 1 }' "$1"
+}
+pf_anchor_bad() { # [스킬] → 창 경계 앵커의 결함 수 — 시작 줄이 하나가 아님 · 끝 줄이 하나가 아님 · 끝이 시작보다 앞(정상 0 · M84 리뷰 라운드 0 차단 1)
+    LC_ALL=C awk -v a="$PF_START" -v b="$PF_END" '{ sub(/\r$/, "") } index($0, a) == 1 { na++; if (!sa) sa = NR } index($0, b) == 1 { nb++; if (!sb) sb = NR }
+        END { c = 0; if (na != 1) c++; if (nb != 1) c++; if (na >= 1 && nb >= 1 && sb < sa) c++; print c }' "${1:-$REL_SKILL}"
+}
+pf_toks() { # <파일…|-> → 백틱 `pf-…` 토큰을 나온 차례대로(중복 그대로)
+    LC_ALL=C awk -v q="\`" -v p="$PF_PFX" '{ s = $0; while ((i = index(s, q p)) > 0) { s = substr(s, i + 1); j = index(s, q); if (j == 0) break; print substr(s, 1, j - 1); s = substr(s, j + 1) } }' "$@"
+}
+pf_heads_toks() { # [스킬] → 프리플라이트 창 단계 머리 굵은 구획의 `pf-` 토큰(차례대로)
+    pf_sec "${1:-$REL_SKILL}" | dcn_heads | pf_toks -
+}
+pf_cover_bad() { # [규약] [스킬] → 단계 머리 토큰 집합과 선언 이름 집합의 대칭차 크기(정상 0)
+    _pfc=${1:-$CONV}; _pfs=${2:-$REL_SKILL}
+    _pfn=$(dn_names "$PFS_KEY" "$_pfc" | LC_ALL=C sort -u)
+    _pft=$(pf_heads_toks "$_pfs" | LC_ALL=C sort -u)
+    { printf '%s\n' "$_pfn" | { _c=0; while IFS= read -r _v; do [ -n "$_v" ] || continue
+        printf '%s\n' "$_pft" | LC_ALL=C grep -qxF -- "$_v" || _c=$((_c + 1)); done; echo "$_c"; }
+      printf '%s\n' "$_pft" | { _c=0; while IFS= read -r _v; do [ -n "$_v" ] || continue
+        printf '%s\n' "$_pfn" | LC_ALL=C grep -qxF -- "$_v" || _c=$((_c + 1)); done; echo "$_c"; }
+    } | LC_ALL=C awk '{ s += $1 } END { print s + 0 }'
+}
+pf_order_bad() { # [규약] [스킬] → 양쪽에 다 있는 이름끼리의 차례가 같으면 0, 다르면 1(집합 차이는 pf_cover_bad의 몫 — 판정을 떼어 둔다)
+    _pfn=$(dn_names "$PFS_KEY" "${1:-$CONV}")
+    _pft=$(pf_heads_toks "${2:-$REL_SKILL}")
+    _pfa=$(printf '%s\n' "$_pfn" | while IFS= read -r _v; do [ -n "$_v" ] && printf '%s\n' "$_pft" | LC_ALL=C grep -qxF -- "$_v" && printf '%s ' "$_v"; done)
+    _pfb=$(printf '%s\n' "$_pft" | while IFS= read -r _v; do [ -n "$_v" ] && printf '%s\n' "$_pfn" | LC_ALL=C grep -qxF -- "$_v" && printf '%s ' "$_v"; done)
+    [ "$_pfa" = "$_pfb" ] && echo 0 || echo 1
+}
+pf_stray() { # [더 볼 파일] → 규약 문서 집합 · release · cycle 스킬 · 카탈로그(와 더 볼 파일) 안 `pf-` 토큰 중 선언에 없는 것의 수
+    _pfu=$(dn_names "$PFS_KEY" "$CONV" | LC_ALL=C sort -u)
+    pf_toks "$ROOT"/docs/conventions*.md "$REL_SKILL" "$ROOT/skills/cycle/SKILL.md" "$CMD_CANON" ${1:+"$1"} | LC_ALL=C sort -u | { _c=0; while IFS= read -r _v; do [ -n "$_v" ] || continue
+        printf '%s\n' "$_pfu" | LC_ALL=C grep -qxF -- "$_v" || _c=$((_c + 1)); done; echo "$_c"; }
+}
+pf_fixture() { # <defdrop|addname|before|inside|after|prose|headtail|swap|stray|endrename|endbefore> → 판정의 반응을 묻는 사본(실제 파일을 건드리지 않는다)
+    _pff="$SBX/pf-$1.md"
+    case "$1" in
+        defdrop) # 규약 사본에서 첫 이름의 정의 머리를 굵은 글로만 남긴다
+            _v=$(dn_names "$PFS_KEY" "$CONV" | head -1)
+            LC_ALL=C awk -v h="- **\`$_v\`**" -v r="- **$_v**" '{ i = index($0, h); if (i > 0 && !d) { $0 = substr($0, 1, i - 1) r substr($0, i + length(h)); d = 1 } print }' "$CONV" > "$_pff" ;;
+        addname) # 규약 사본에서 선언 끝에 이름 하나를 더한다(스킬은 그대로)
+            LC_ALL=C awk -v w="- \`$PFS_KEY\`" '{ s = $0; sub(/^[ \t]+/, "", s); if (substr(s, 1, length(w)) == w) { sub(/\r$/, ""); $0 = $0 " pf-zz-added" } print }' "$CONV" > "$_pff" ;;
+        before) # 스킬 사본의 프리플라이트 시작 줄 **앞**에 단계 머리를 심는다(창 앞 — 세지 않아야 한다)
+            LC_ALL=C awk -v a="$PF_START" 'index($0, a) == 1 && !d { print "9. **zz `pf-zz-planted`** zz"; d = 1 } { print }' "$REL_SKILL" > "$_pff" ;;
+        inside) # 시작 줄 바로 **뒤**에 단계 머리를 심는다(창 안 — 하나 늘어야 한다)
+            LC_ALL=C awk -v a="$PF_START" '{ print } index($0, a) == 1 && !d { print "9. **zz `pf-zz-planted`** zz"; d = 1 }' "$REL_SKILL" > "$_pff" ;;
+        after) # 끝 줄 바로 **뒤**에 단계 머리를 심는다(창 뒤 — 세지 않아야 한다)
+            LC_ALL=C awk -v b="$PF_END" '{ print } index($0, b) == 1 && !d { print "9. **zz `pf-zz-planted`** zz"; d = 1 }' "$REL_SKILL" > "$_pff" ;;
+        prose) # 창 안 **산문** 줄로 심는다(단계 머리가 아님 — 세지 않아야 한다)
+            LC_ALL=C awk -v a="$PF_START" '{ print } index($0, a) == 1 && !d { print "zz `pf-zz-planted` zz"; d = 1 }' "$REL_SKILL" > "$_pff" ;;
+        headtail) # 단계 머리의 굵은 구획 **뒤**에 심는다(단계 본문 — 세지 않아야 한다)
+            LC_ALL=C awk -v a="$PF_START" '{ print } index($0, a) == 1 && !d { print "9. **zz** `pf-zz-planted` zz"; d = 1 }' "$REL_SKILL" > "$_pff" ;;
+        swap) # 단계 머리 줄에서 선언의 첫 두 이름을 맞바꾼다(차례 — 하나 늘어야 한다)
+            _v1=$(dn_names "$PFS_KEY" "$CONV" | sed -n 1p); _v2=$(dn_names "$PFS_KEY" "$CONV" | sed -n 2p)
+            LC_ALL=C awk -v x="\`$_v1\`" -v y="\`$_v2\`" '/^[0-9]+\. \*\*/ { if (index($0, x) > 0) { i = index($0, x); $0 = substr($0, 1, i - 1) y substr($0, i + length(x)) } else if (index($0, y) > 0) { i = index($0, y); $0 = substr($0, 1, i - 1) x substr($0, i + length(y)) } } { print }' "$REL_SKILL" > "$_pff" ;;
+        stray) printf '%s\n' 'see `pf-zz-gone` here' > "$_pff" ;;
+        endrename) # 끝 줄의 머리 문구를 바꾼다(앵커를 잃은 창 — 판정이 하나 늘어야 한다)
+            LC_ALL=C awk -v b="$PF_END" '{ if (index($0, b) == 1) $0 = "zz " $0; print }' "$REL_SKILL" > "$_pff" ;;
+        endbefore) # 끝 줄을 시작 줄 바로 앞으로 옮긴다(끝이 시작보다 앞 — 판정이 하나 늘어야 한다)
+            LC_ALL=C awk -v a="$PF_START" -v b="$PF_END" 'NR == FNR { if (index($0, b) == 1 && e == "") e = $0; next }
+                index($0, b) == 1 && !d { d = 1; next } index($0, a) == 1 && !p { print e; p = 1 } { print }' "$REL_SKILL" "$REL_SKILL" > "$_pff" ;;
+    esac
+    printf '%s' "$_pff"
 }
 if part_on S; then
 chk "S8: docs-commit-paths 선언 줄 정확히 1개" "$(decl_count "$CONV_REL" "$DC_KEY")" "1"
@@ -4536,6 +4667,40 @@ chk "S45: 변환 통제 - 선언에 없는 dc- 토큰 하나를 센다" "$(( $(d
 # (S46 · S47) 단계 머리 창의 통제(M83 리뷰 라운드 0 차단 1) — 절 안이라도 산문 줄과 굵은 구획 뒤의 언급은 덮음으로 치지 않는다.
 chk "S46: 변환 통제 - 스킬 절 안 산문 줄의 dc- 토큰은 세지 않는다" "$(( $(dcn_cover_bad "$CONV_REL" "$(dcn_fixture prose)") - $(dcn_cover_bad) ))" "0"
 chk "S47: 변환 통제 - 단계 머리 굵은 구획 뒤의 dc- 토큰은 세지 않는다" "$(( $(dcn_cover_bad "$CONV_REL" "$(dcn_fixture headtail)") - $(dcn_cover_bad) ))" "0"
+chk "S48: release-preflights 선언 줄 정확히 1개" "$(decl_count "$CONV" "$PFS_KEY")" "1"
+chk "S49: release-preflights 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$PFS_KEY")" "0"
+# (S50) 추출 positive-control — 이름이 비거나 프리플라이트 창 단계 머리에 `pf-` 토큰이 없으면 S51~S57이 «0»으로 공허하게 통과한다.
+chk "S50: 프리플라이트 이름과 창 단계 머리의 pf- 토큰 추출 positive-control" "$([ "$(dn_names "$PFS_KEY" "$CONV" | grep -c .)" -ge 1 ] && [ "$(pf_heads_toks | grep -c .)" -ge 1 ] && echo ok || echo no)" "ok"
+chk "S51: 본 검사 - 프리플라이트 이름이 유일하다" "$(dn_dup "$PFS_KEY" "$CONV")" "0"
+chk "S52: 본 검사 - 이름마다 정의 항목이 정확히 하나다" "$(dn_def_bad "$PFS_KEY" "$CONV")" "0"
+chk "S53: 본 검사 - 선언에 없는 정의 항목이 없다" "$(dn_def_orphan "$PFS_KEY" "$CONV")" "0"
+chk "S54: 본 검사 - 정의 항목의 순서가 선언의 이름 순서와 같다" "$(dn_def_order "$PFS_KEY" "$CONV")" "0"
+chk "S55: 본 검사 - 스킬 프리플라이트 창 단계 머리의 pf- 이름 집합이 선언의 이름 집합과 같다" "$(pf_cover_bad)" "0"
+chk "S56: 본 검사 - 스킬 프리플라이트 창 단계 머리의 이름 차례가 선언 순서와 같다" "$(pf_order_bad)" "0"
+chk "S57: 본 검사 - 규약 문서 집합 · release · cycle 스킬 · 카탈로그의 pf- 토큰이 전부 선언된 이름이다" "$(pf_stray)" "0"
+# (S58~S66) 변환 통제(`rf-88`) — 판정의 **반응**을 차이로 묻는다(`control-reads-delta`): 정의 범위 · 헬퍼 배선(규약 인자) · 이름 추출 ·
+# 창의 앞 · 안 · 뒤(`rf-101`) · 단계 머리 창(산문 · 굵은 구획 뒤) · 차례 · 토큰 추출.
+chk "S58: 변환 통제 - 규약 사본에서 정의 하나를 지우면 정의 대조가 하나 늘어난다" "$(( $(dn_def_bad "$PFS_KEY" "$(pf_fixture defdrop)") - $(dn_def_bad "$PFS_KEY" "$CONV") ))" "1"
+chk "S59: 변환 통제 - 선언에 이름을 하나 더한 사본에서 덮음 대조가 하나 늘어난다" "$(( $(pf_cover_bad "$(pf_fixture addname)") - $(pf_cover_bad) ))" "1"
+chk "S60: 창 통제 - 프리플라이트 창 앞에 심은 단계 머리는 세지 않는다" "$(( $(pf_cover_bad "$CONV" "$(pf_fixture before)") - $(pf_cover_bad) ))" "0"
+chk "S61: 창 통제 - 프리플라이트 창 안에 심은 단계 머리는 센다" "$(( $(pf_cover_bad "$CONV" "$(pf_fixture inside)") - $(pf_cover_bad) ))" "1"
+chk "S62: 창 통제 - 프리플라이트 창 뒤에 심은 단계 머리는 세지 않는다" "$(( $(pf_cover_bad "$CONV" "$(pf_fixture after)") - $(pf_cover_bad) ))" "0"
+chk "S63: 창 통제 - 창 안 산문 줄의 pf- 토큰은 세지 않는다" "$(( $(pf_cover_bad "$CONV" "$(pf_fixture prose)") - $(pf_cover_bad) ))" "0"
+chk "S64: 창 통제 - 단계 머리 굵은 구획 뒤의 pf- 토큰은 세지 않는다" "$(( $(pf_cover_bad "$CONV" "$(pf_fixture headtail)") - $(pf_cover_bad) ))" "0"
+chk "S65: 변환 통제 - 단계 머리의 첫 두 이름을 맞바꾼 사본에서 차례 대조가 붉다" "$(( $(pf_order_bad "$CONV" "$(pf_fixture swap)") - $(pf_order_bad) ))" "1"
+chk "S66: 변환 통제 - 선언에 없는 pf- 토큰 하나를 센다" "$(( $(pf_stray "$(pf_fixture stray)") - $(pf_stray) ))" "1"
+# (S67) `dc_sec` 창 뒤 통제(M83 리뷰 라운드 1 경계 기록 · `rf-101`) — 문서 커밋 절 다음 `## ` 제목 뒤에 심은 단계 머리는 세지 않는다.
+chk "S67: 창 통제 - 문서 커밋 절 다음 제목 뒤에 심은 dc- 단계 머리는 세지 않는다" "$(( $(dcn_cover_bad "$CONV_REL" "$(dcn_fixture after)") - $(dcn_cover_bad) ))" "0"
+# (S68~S70) 창 경계 앵커의 실재(M84 리뷰 라운드 0 차단 1) — 끝 앵커를 잃으면 창이 파일 끝까지 넓어지고 S62의 픽스처는 아무것도 심지 못해
+# 차이 0으로 초록이었다. 스킬 문구를 바꾸는 편집과 러너 앵커 상수를 바꾸는 편집이 둘 다 여기서 붉다.
+chk "S68: 본 검사 - 프리플라이트 창의 시작 · 끝 앵커 줄이 각각 정확히 하나이고 끝이 시작 뒤에 있다" "$(pf_anchor_bad)" "0"
+chk "S69: 변환 통제 - 끝 줄 문구를 바꾼 사본에서 앵커 판정이 하나 늘어난다" "$(( $(pf_anchor_bad "$(pf_fixture endrename)") - $(pf_anchor_bad) ))" "1"
+chk "S70: 변환 통제 - 끝 줄을 시작 줄 앞으로 옮긴 사본에서 앵커 판정이 하나 늘어난다" "$(( $(pf_anchor_bad "$(pf_fixture endbefore)") - $(pf_anchor_bad) ))" "1"
+# (S71~S73) 문서 커밋 절 창의 경계(M84 리뷰 라운드 1 · 체크리스트 7번) — 절 뒤에 `## ` 제목이 없으면 S67의 픽스처가 아무것도 심지 못하고,
+# 앵커를 담은 제목이 둘이면 두 절이 한 창으로 합쳐진다.
+chk "S71: 본 검사 - 문서 커밋 절 제목이 정확히 하나이고 그 뒤에 창을 닫는 ## 제목이 있다" "$(dc_anchor_bad)" "0"
+chk "S72: 변환 통제 - 절 뒤 제목을 전부 내린 사본에서 앵커 판정이 하나 늘어난다" "$(( $(dc_anchor_bad "$(dcn_fixture anclast)") - $(dc_anchor_bad) ))" "1"
+chk "S73: 변환 통제 - 앵커를 담은 제목을 하나 더 붙인 사본에서 앵커 판정이 하나 늘어난다" "$(( $(dc_anchor_bad "$(dcn_fixture ancdup)") - $(dc_anchor_bad) ))" "1"
 fi
 
 # --- Part T: 러너 소스 개행 계약 (M59 리뷰 차단 1 → M60) --------------------

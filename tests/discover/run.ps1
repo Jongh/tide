@@ -2061,6 +2061,51 @@ try {
             elseif ($rpPart.StartsWith($rpFull, [System.StringComparison]::Ordinal)) { 'same' }
             else { 'distinct' }
     Chk "F20: the partial result prefix differs from the full one" $f20r 'distinct'
+    # (F21-F23, M84, rf-28) README part headings that end in an N-cases count must equal that part's number in the head `cases:`
+    # line (headings without a count are the boundary). A heading naming a part missing from the cases line is also red.
+    $PH_SUFFIX = ' ' + (Uni 0xCF00,0xC774,0xC2A4) + ')'
+    function PartHeadLines([string]$readme = '') {
+        if ($readme -eq '') { $readme = $DISC_README }
+        $res = New-Object System.Collections.Generic.List[string]
+        foreach ($l in [System.IO.File]::ReadAllLines($readme)) {
+            if ([regex]::IsMatch($l, '^### Part [A-Z] ') -and $l.EndsWith($PH_SUFFIX, [System.StringComparison]::Ordinal) -and [regex]::IsMatch($l.Substring(0, $l.Length - $PH_SUFFIX.Length), '[0-9]+$')) { $res.Add($l) }
+        }
+        return $res.ToArray()
+    }
+    function PartHeadBad([string]$readme = '') {
+        if ($readme -eq '') { $readme = $DISC_README }
+        $m = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([System.StringComparer]::Ordinal)
+        foreach ($l in [System.IO.File]::ReadAllLines($readme)) {
+            if ($l.Contains('cases:')) {
+                foreach ($mt in [regex]::Matches($l, 'Part ([A-Z]) ([0-9]+)')) { $m[$mt.Groups[1].Value] = $mt.Groups[2].Value }
+                break
+            }
+        }
+        $b = 0
+        foreach ($l in @(PartHeadLines $readme)) {
+            $k = $l.Substring(9, 1)
+            $v = [regex]::Match($l.Substring(0, $l.Length - $PH_SUFFIX.Length), '[0-9]+$').Value
+            if (-not $m.ContainsKey($k) -or -not [string]::Equals($m[$k], $v, [System.StringComparison]::Ordinal)) { $b++ }
+        }
+        return [string]$b
+    }
+    function PartHeadFixture() {
+        $f = Join-Path $sbx 'part-head.md'
+        $out = New-Object System.Collections.ArrayList; $done = $false
+        foreach ($l in [System.IO.File]::ReadAllLines($DISC_README)) {
+            if (-not $done -and [regex]::IsMatch($l, '^### Part [A-Z] ') -and $l.EndsWith($PH_SUFFIX, [System.StringComparison]::Ordinal)) {
+                $head = $l.Substring(0, $l.Length - $PH_SUFFIX.Length)
+                $num = [regex]::Match($head, '[0-9]+$')
+                if ($num.Success) { $l = $head.Substring(0, $num.Index) + ([string]([int]$num.Value + 1)) + $PH_SUFFIX; $done = $true }
+            }
+            [void]$out.Add($l)
+        }
+        [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    Chk "F21: README part heading counts extract (positive-control)" $(if (@(PartHeadLines).Count -ge 1) { 'ok' } else { 'no' }) 'ok'
+    Chk "F22: main check -- each README part heading count equals that part's number in the cases: line" (PartHeadBad) '0'
+    Chk "F23: fixture control -- raising one heading count in a copy moves the check by one" ([string]([int](PartHeadBad (PartHeadFixture)) - [int](PartHeadBad))) '1'
     }
 
 
@@ -4684,6 +4729,68 @@ try {
     # still a re-enumeration. Under the per-line window this shape passed green; narrowing the
     # window back to a line reddens here. It bites ALWAYS, not only under reversal.
     Chk "P19: control -- an enumeration split over two lines is caught" (CritReenum (CritSkillFixture 'split')) 'yes'
+    # (P20-P23, M84, rf-44) THE VALUES OF A REVIEW REPORT'S METRICS LINE ARE NOT EMPTY -- every review report at or above
+    # `metrics-filled-since:` has exactly one metrics line, no braces left, and as many digit runs as the `{n}` slots of the fixed
+    # form line in the conventions (read from there -- no hand-kept constant, rf-97).
+    $MFS_KEY = 'metrics-filled-since:'
+    $MEAS_HEAD = (Uni 0xACC4,0xCE21,0x003A)
+    $mfsRaw = [string](DeclTail $CONV $MFS_KEY)
+    $MFSINCE = ''
+    $mfsM = [regex]::Match($mfsRaw.Trim(), '^M?([0-9]+)')
+    if ($mfsM.Success) { $MFSINCE = $mfsM.Groups[1].Value }
+    function MeasSlots() {
+        $bt = [string][char]0x60
+        foreach ($l in [System.IO.File]::ReadAllLines($CONV)) {
+            if ($l.Contains($bt + $MEAS_HEAD + ' in-review')) {
+                $n = 0; $s = $l
+                while (($i = $s.IndexOf('{n}', [System.StringComparison]::Ordinal)) -ge 0) { $n++; $s = $s.Substring($i + 3) }
+                return [string]$n
+            }
+        }
+        return '0'
+    }
+    function MeasLineBad([string]$path) {
+        $want = [int](MeasSlots)
+        $hits = @([System.IO.File]::ReadAllLines($path) | Where-Object { $_.StartsWith($MEAS_HEAD, [System.StringComparison]::Ordinal) })
+        if ($hits.Count -ne 1) { return '1' }
+        $l = [string]$hits[0]
+        $k = [regex]::Matches($l, '[0-9]+').Count
+        if ($l.Contains('{') -or $l.Contains('}') -or $k -ne $want) { return '1' }
+        return '0'
+    }
+    function MeasReports() {
+        $res = New-Object System.Collections.Generic.List[string]
+        if ($MFSINCE -eq '') { return $res.ToArray() }
+        foreach ($f in @(Get-ChildItem -Path (Join-Path $ROOT 'docs\reports') -Filter 'M*-review.md' -File)) {
+            $mm = [regex]::Match($f.Name, '^M([0-9]+)-review\.md$')
+            if ($mm.Success -and [int]$mm.Groups[1].Value -ge [int]$MFSINCE) { $res.Add($f.FullName) }
+        }
+        return $res.ToArray()
+    }
+    function MeasBadTotal() {
+        $t = 0
+        foreach ($f in @(MeasReports)) { $t += [int](MeasLineBad $f) }
+        return [string]$t
+    }
+    function MeasFixture([string]$mode) {
+        $f = Join-Path $sbx ('meas-' + $mode + '.md')
+        $best = $null; $bestN = -1
+        foreach ($p in @(MeasReports)) {
+            $n = [int]([regex]::Match([System.IO.Path]::GetFileName($p), '^M([0-9]+)').Groups[1].Value)
+            if ($n -gt $bestN) { $bestN = $n; $best = $p }
+        }
+        $out = New-Object System.Collections.ArrayList
+        foreach ($l in [System.IO.File]::ReadAllLines($best)) {
+            if ($mode -eq 'blank' -and $l.StartsWith($MEAS_HEAD, [System.StringComparison]::Ordinal)) { $l = [regex]::Replace($l, '\(rework\) [0-9]+', '(rework) ') }
+            [void]$out.Add($l)
+        }
+        [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    Chk "P20: exactly one metrics-filled-since declaration line" (DeclCount $CONV $MFS_KEY) '1'
+    Chk "P21: metrics slots and target reports extract (positive-control)" $(if ([int](MeasSlots) -ge 1 -and @(MeasReports).Count -ge 1) { 'ok' } else { 'no' }) 'ok'
+    Chk "P22: main check -- the metrics line values of review reports at or above the declared number are not empty" (MeasBadTotal) '0'
+    Chk "P23: fixture control -- blanking one metrics value in a copy moves the check by one" ([string]([int](MeasLineBad (MeasFixture 'blank')) - [int](MeasLineBad (MeasFixture 'intact')))) '1'
     }
 
     # --- Part Q: the verdict comparison is pinned to Ordinal (M57) ------------
@@ -4954,6 +5061,20 @@ try {
         }
         return $out
     }
+    # Document-commit window boundary defects -- the anchored `## ` heading is not exactly one, no `## ` heading follows it (normal 0; M84 review round 1).
+    function DcAnchorBad([string]$skill = '') {
+        if ($skill -eq '') { $skill = $REL_SKILL }
+        $dcaN = 0; $dcaSeen = $false; $dcaAfter = $false
+        foreach ($ln in [System.IO.File]::ReadAllLines($skill)) {
+            if ($ln.StartsWith('## ', [System.StringComparison]::Ordinal)) {
+                if ($ln.Contains($DC_SEC)) { $dcaN++; $dcaSeen = $true } elseif ($dcaSeen) { $dcaAfter = $true }
+            }
+        }
+        $c = 0
+        if ($dcaN -ne 1) { $c++ }
+        if (-not $dcaAfter) { $c++ }
+        return [string]$c
+    }
     function DcDupIn([string]$path) {
         $sec = (@(DcSec $path)) -join "`n"
         $n = 0
@@ -5148,8 +5269,182 @@ try {
                 [void]$out.Add($l)
                 if ($hit -and $mode -ne 'outside') { [void]$out.Add($tok); $done = $true }
             }
+        } elseif ($mode -eq 'after') {
+            # after the NEXT `## ` heading that follows the section heading (behind the window -- not counted; M84, rf-101)
+            $seen = $false; $done = $false
+            foreach ($l in [System.IO.File]::ReadAllLines($REL_SKILL)) {
+                [void]$out.Add($l)
+                if ($l.StartsWith('## ', [System.StringComparison]::Ordinal)) {
+                    if ($l.Contains($DC_SEC)) { $seen = $true }
+                    elseif ($seen -and -not $done) { [void]$out.Add($tok); $done = $true }
+                }
+            }
+        } elseif ($mode -eq 'anclast') {
+            # demote every `## ` heading after the section heading (no heading closes the window -- the anchor verdict must grow by one)
+            $seen = $false
+            foreach ($l in [System.IO.File]::ReadAllLines($REL_SKILL)) {
+                if ($l.StartsWith('## ', [System.StringComparison]::Ordinal)) {
+                    if ($l.Contains($DC_SEC)) { $seen = $true } elseif ($seen) { $l = '#' + $l }
+                }
+                [void]$out.Add($l)
+            }
+        } elseif ($mode -eq 'ancdup') {
+            # append a second `## ` heading carrying the section anchor (the anchor verdict must grow by one)
+            foreach ($l in [System.IO.File]::ReadAllLines($REL_SKILL)) { [void]$out.Add($l) }
+            [void]$out.Add('## zz ' + $DC_SEC + ' zz')
         } else {
             [void]$out.Add('see ' + $bt + 'dc-zz-gone' + $bt + ' here')
+        }
+        [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    # (S48-S66, M84) RELEASE PREFLIGHTS ARE A NAME DECLARATION -- `release-preflights:` in docs/conventions.md carries the names
+    # and their order. The bold span of each numbered step head inside the release skill's preflight window (the lines after the
+    # line starting with the preflight-start anchor and before the line starting with the preflight-end anchor) must name the
+    # same SET and in the same ORDER -- no hand-kept constant (rf-97). The window is controlled before, inside and after (rf-101).
+    $PFS_KEY = 'release-preflights:'
+    $PF_PFX = 'pf-'
+    $PF_START = Uni 0xD504,0xB9AC,0xD50C,0xB77C,0xC774,0xD2B8,0x0020,0x0028
+    $PF_END = Uni 0xD504,0xB9AC,0xD50C,0xB77C,0xC774,0xD2B8,0x0020,0xD1B5,0xACFC,0x0020,0xD6C4
+    function PfSec([string]$path) {
+        $out = New-Object System.Collections.Generic.List[string]
+        $inside = $false
+        foreach ($ln in [System.IO.File]::ReadAllLines($path)) {
+            if ($ln.StartsWith($PF_END, [System.StringComparison]::Ordinal)) { $inside = $false }
+            if ($inside) { $out.Add($ln) }
+            if ($ln.StartsWith($PF_START, [System.StringComparison]::Ordinal)) { $inside = $true }
+        }
+        return $out
+    }
+    # Window boundary anchor defects -- start line not exactly one, end line not exactly one, end before start (normal 0; M84 review round 0 blocker 1).
+    function PfAnchorBad([string]$skill = '') {
+        if ($skill -eq '') { $skill = $REL_SKILL }
+        $pfaNa = 0; $pfaNb = 0; $pfaSa = -1; $pfaSb = -1; $pfaI = 0
+        foreach ($ln in [System.IO.File]::ReadAllLines($skill)) {
+            $pfaI++
+            if ($ln.StartsWith($PF_START, [System.StringComparison]::Ordinal)) { $pfaNa++; if ($pfaSa -lt 0) { $pfaSa = $pfaI } }
+            if ($ln.StartsWith($PF_END, [System.StringComparison]::Ordinal)) { $pfaNb++; if ($pfaSb -lt 0) { $pfaSb = $pfaI } }
+        }
+        $c = 0
+        if ($pfaNa -ne 1) { $c++ }
+        if ($pfaNb -ne 1) { $c++ }
+        if ($pfaNa -ge 1 -and $pfaNb -ge 1 -and $pfaSb -lt $pfaSa) { $c++ }
+        return [string]$c
+    }
+    # Backtick `pf-...` tokens in order of appearance (duplicates kept).
+    function PfToks($lines) {
+        $bt = [string][char]0x60
+        $res = New-Object System.Collections.Generic.List[string]
+        foreach ($ln in @($lines)) {
+            $s = [string]$ln
+            while (($i = $s.IndexOf($bt + $PF_PFX, [System.StringComparison]::Ordinal)) -ge 0) {
+                $s = $s.Substring($i + 1)
+                $j = $s.IndexOf($bt, [System.StringComparison]::Ordinal)
+                if ($j -lt 0) { break }
+                $res.Add($s.Substring(0, $j))
+                $s = $s.Substring($j + 1)
+            }
+        }
+        return $res.ToArray()
+    }
+    function PfHeadsToks([string]$skill = '') {
+        if ($skill -eq '') { $skill = $REL_SKILL }
+        return @(PfToks @(DcnHeads @(PfSec $skill)))
+    }
+    function PfCoverBad([string]$cv = '', [string]$skill = '') {
+        if ($cv -eq '') { $cv = $CONV }
+        $names = OrdSet @(DnNames $PFS_KEY $cv)
+        $toks = OrdSet @(PfHeadsToks $skill)
+        $bad = 0
+        foreach ($n in $names) { if (-not $toks.Contains($n)) { $bad++ } }
+        foreach ($t in $toks) { if (-not $names.Contains($t)) { $bad++ } }
+        return [string]$bad
+    }
+    function PfOrderBad([string]$cv = '', [string]$skill = '') {
+        if ($cv -eq '') { $cv = $CONV }
+        # compare the order of the names present on BOTH sides only -- a set difference is PfCoverBad's job (keeps the two checks apart)
+        $nm = @(DnNames $PFS_KEY $cv); $hd = @(PfHeadsToks $skill)
+        $nmSet = OrdSet $nm; $hdSet = OrdSet $hd
+        $a = (@($nm | Where-Object { $hdSet.Contains($_) }) -join ' ')
+        $b = (@($hd | Where-Object { $nmSet.Contains($_) }) -join ' ')
+        if ([string]::Equals($a, $b, [System.StringComparison]::Ordinal)) { return '0' } else { return '1' }
+    }
+    function PfStray([string]$extra = '') {
+        $u = OrdSet @(DnNames $PFS_KEY $CONV)
+        $files = @(Get-ChildItem -Path (Join-Path $ROOT 'docs') -Filter 'conventions*.md' -File | ForEach-Object { $_.FullName }) + @($REL_SKILL, (Join-Path $ROOT 'skills/cycle/SKILL.md'), $CMD_CANON)
+        if ($extra -ne '') { $files += $extra }
+        $lines = New-Object System.Collections.Generic.List[string]
+        foreach ($f in $files) { foreach ($l in [System.IO.File]::ReadAllLines($f)) { $lines.Add($l) } }
+        $ts = OrdSet @(PfToks $lines)
+        $c = 0
+        foreach ($t in $ts) { if (-not $u.Contains($t)) { $c++ } }
+        return [string]$c
+    }
+    function PfFixture([string]$mode) {
+        $f = Join-Path $sbx ('pf-' + $mode + '.md')
+        $bt = [string][char]0x60
+        $ptok = $bt + 'pf-zz-planted' + $bt
+        $head = '9. **zz ' + $ptok + '** zz'
+        $out = New-Object System.Collections.ArrayList
+        if ($mode -eq 'defdrop') {
+            $v = @(DnNames $PFS_KEY $CONV) | Select-Object -First 1
+            $h = '- **' + $bt + $v + $bt + '**'; $done = $false
+            foreach ($l in [System.IO.File]::ReadAllLines($CONV)) {
+                $i = $l.IndexOf($h, [System.StringComparison]::Ordinal)
+                if ($i -ge 0 -and -not $done) { $l = $l.Substring(0, $i) + '- **' + $v + '**' + $l.Substring($i + $h.Length); $done = $true }
+                [void]$out.Add($l)
+            }
+        } elseif ($mode -eq 'addname') {
+            $w = '- ' + $bt + $PFS_KEY + $bt
+            foreach ($l in [System.IO.File]::ReadAllLines($CONV)) {
+                if ($l.TrimStart([char[]]@([char]0x20, [char]0x09)).StartsWith($w, [System.StringComparison]::Ordinal)) { $l = $l + ' pf-zz-added' }
+                [void]$out.Add($l)
+            }
+        } elseif ($mode -eq 'swap') {
+            $nm = @(DnNames $PFS_KEY $CONV)
+            $x = $bt + $nm[0] + $bt; $y = $bt + $nm[1] + $bt
+            foreach ($l in [System.IO.File]::ReadAllLines($REL_SKILL)) {
+                if ([regex]::IsMatch($l, '^[0-9]+\. \*\*')) {
+                    $i = $l.IndexOf($x, [System.StringComparison]::Ordinal)
+                    if ($i -ge 0) { $l = $l.Substring(0, $i) + $y + $l.Substring($i + $x.Length) }
+                    else {
+                        $i = $l.IndexOf($y, [System.StringComparison]::Ordinal)
+                        if ($i -ge 0) { $l = $l.Substring(0, $i) + $x + $l.Substring($i + $y.Length) }
+                    }
+                }
+                [void]$out.Add($l)
+            }
+        } elseif ($mode -eq 'stray') {
+            [void]$out.Add('see ' + $bt + 'pf-zz-gone' + $bt + ' here')
+        } elseif ($mode -eq 'endrename') {
+            # rename the head of the end line (a window that lost its anchor -- the verdict must grow by one)
+            foreach ($l in [System.IO.File]::ReadAllLines($REL_SKILL)) {
+                if ($l.StartsWith($PF_END, [System.StringComparison]::Ordinal)) { $l = 'zz ' + $l }
+                [void]$out.Add($l)
+            }
+        } elseif ($mode -eq 'endbefore') {
+            # move the end line to just before the start line (end before start -- the verdict must grow by one)
+            $all = [System.IO.File]::ReadAllLines($REL_SKILL)
+            $e = @($all | Where-Object { $_.StartsWith($PF_END, [System.StringComparison]::Ordinal) }) | Select-Object -First 1
+            $moved = $false; $put = $false
+            foreach ($l in $all) {
+                if ((-not $moved) -and $l.StartsWith($PF_END, [System.StringComparison]::Ordinal)) { $moved = $true; continue }
+                if ((-not $put) -and $l.StartsWith($PF_START, [System.StringComparison]::Ordinal)) { [void]$out.Add([string]$e); $put = $true }
+                [void]$out.Add($l)
+            }
+        } else {
+            $line = $head
+            if ($mode -eq 'prose') { $line = 'zz ' + $ptok + ' zz' }
+            if ($mode -eq 'headtail') { $line = '9. **zz** ' + $ptok + ' zz' }
+            $done = $false
+            foreach ($l in [System.IO.File]::ReadAllLines($REL_SKILL)) {
+                $isStart = $l.StartsWith($PF_START, [System.StringComparison]::Ordinal)
+                $isEnd = $l.StartsWith($PF_END, [System.StringComparison]::Ordinal)
+                if ((-not $done) -and $mode -eq 'before' -and $isStart) { [void]$out.Add($line); $done = $true }
+                [void]$out.Add($l)
+                if ((-not $done) -and $mode -eq 'after' -and $isEnd) { [void]$out.Add($line); $done = $true }
+                if ((-not $done) -and ($mode -eq 'inside' -or $mode -eq 'prose' -or $mode -eq 'headtail') -and $isStart) { [void]$out.Add($line); $done = $true }
+            }
         }
         [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
         return $f
@@ -5206,6 +5501,40 @@ try {
     # the bold span do not count as coverage.
     Chk "S46: transform control -- a dc- token on a prose line inside the skill section is not counted" ([string]([int](DcnCoverBad $CONV_REL (DcnFixture 'prose')) - [int](DcnCoverBad))) '0'
     Chk "S47: transform control -- a dc- token after the bold span of a step head is not counted" ([string]([int](DcnCoverBad $CONV_REL (DcnFixture 'headtail')) - [int](DcnCoverBad))) '0'
+    Chk "S48: exactly one release-preflights declaration line" (DeclCount $CONV $PFS_KEY) '1'
+    Chk "S49: no forbidden separator in the release-preflights declaration tail" (BadSeps $CONV $PFS_KEY) '0'
+    # (S50) extraction positive-control -- with no names or no `pf-` token in the window's step heads S51-S57 would pass on "0".
+    Chk "S50: preflight names and pf- tokens of the window step heads extract (positive-control)" $(if (@(DnNames $PFS_KEY $CONV).Count -ge 1 -and @(PfHeadsToks).Count -ge 1) { 'ok' } else { 'no' }) 'ok'
+    Chk "S51: main check -- preflight names are unique" (DnDup $PFS_KEY $CONV) '0'
+    Chk "S52: main check -- every name has exactly one definition item" (DnDefBad $PFS_KEY $CONV) '0'
+    Chk "S53: main check -- no definition item outside the declaration" (DnDefOrphan $PFS_KEY $CONV) '0'
+    Chk "S54: main check -- definition order equals declaration name order" (DnDefOrder $PFS_KEY $CONV) '0'
+    Chk "S55: main check -- pf- names in the step heads of the skill's preflight window equal the declared names" (PfCoverBad) '0'
+    Chk "S56: main check -- the order of names in those step heads equals the declaration order" (PfOrderBad) '0'
+    Chk "S57: main check -- every pf- token in the conventions set, the release and cycle skills and the catalog is a declared name" (PfStray) '0'
+    # (S58-S66) transform controls (rf-88) -- ask the verdict's RESPONSE as a delta (control-reads-delta): definition range, helper wiring,
+    # name extraction, the window before / inside / after (rf-101), the step-head window (prose, after the bold span), order, token extraction.
+    Chk "S58: transform control -- dropping one definition in a conventions copy moves the definition check by one" ([string]([int](DnDefBad $PFS_KEY (PfFixture 'defdrop')) - [int](DnDefBad $PFS_KEY $CONV))) '1'
+    Chk "S59: transform control -- one more name in the declaration moves the coverage check by one" ([string]([int](PfCoverBad (PfFixture 'addname')) - [int](PfCoverBad))) '1'
+    Chk "S60: window control -- a step head planted before the preflight window is not counted" ([string]([int](PfCoverBad $CONV (PfFixture 'before')) - [int](PfCoverBad))) '0'
+    Chk "S61: window control -- a step head planted inside the preflight window is counted" ([string]([int](PfCoverBad $CONV (PfFixture 'inside')) - [int](PfCoverBad))) '1'
+    Chk "S62: window control -- a step head planted after the preflight window is not counted" ([string]([int](PfCoverBad $CONV (PfFixture 'after')) - [int](PfCoverBad))) '0'
+    Chk "S63: window control -- a pf- token on a prose line inside the window is not counted" ([string]([int](PfCoverBad $CONV (PfFixture 'prose')) - [int](PfCoverBad))) '0'
+    Chk "S64: window control -- a pf- token after the bold span of a step head is not counted" ([string]([int](PfCoverBad $CONV (PfFixture 'headtail')) - [int](PfCoverBad))) '0'
+    Chk "S65: transform control -- swapping the first two names in the step heads turns the order check red" ([string]([int](PfOrderBad $CONV (PfFixture 'swap')) - [int](PfOrderBad))) '1'
+    Chk "S66: transform control -- one undeclared pf- token is counted" ([string]([int](PfStray (PfFixture 'stray')) - [int](PfStray))) '1'
+    # (S67) the dc_sec window end (M83 review round 1 boundary record, rf-101) -- a step head planted after the next `## ` heading is not counted.
+    Chk "S67: window control -- a dc- step head planted after the heading that follows the document-commit section is not counted" ([string]([int](DcnCoverBad $CONV_REL (DcnFixture 'after')) - [int](DcnCoverBad))) '0'
+    # (S68-S70) window boundary anchors exist (M84 review round 0 blocker 1) -- with the end anchor lost the window ran to EOF and S62's fixture
+    # planted nothing, so its delta was 0 and it stayed green. Rewording the skill line and editing the runner anchor constant both turn red here.
+    Chk "S68: main check -- the preflight window start and end anchor lines are each exactly one and the end follows the start" (PfAnchorBad) '0'
+    Chk "S69: transform control -- a copy with the end line reworded grows the anchor verdict by one" ([string]([int](PfAnchorBad (PfFixture 'endrename')) - [int](PfAnchorBad))) '1'
+    Chk "S70: transform control -- a copy with the end line moved before the start line grows the anchor verdict by one" ([string]([int](PfAnchorBad (PfFixture 'endbefore')) - [int](PfAnchorBad))) '1'
+    # (S71-S73) document-commit window boundary (M84 review round 1, checklist item 7) -- with no `## ` heading after the section S67's fixture
+    # planted nothing, and a second heading carrying the anchor would merge two sections into one window.
+    Chk "S71: main check -- exactly one document-commit section heading and a following ## heading closes the window" (DcAnchorBad) '0'
+    Chk "S72: transform control -- a copy with every heading after the section demoted grows the anchor verdict by one" ([string]([int](DcAnchorBad (DcnFixture 'anclast')) - [int](DcAnchorBad))) '1'
+    Chk "S73: transform control -- a copy with a second anchored heading grows the anchor verdict by one" ([string]([int](DcAnchorBad (DcnFixture 'ancdup')) - [int](DcAnchorBad))) '1'
     }
 
     # --- Part T: runner source EOL contract (M59 review blocker 1 -> M60) -------
