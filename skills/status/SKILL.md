@@ -41,7 +41,11 @@ tide 사이클의 현재 상태를 읽기 전용으로 보고해줘.
 - impl 보고서 없음 → /tide:impl
 - review 보고서 없음 → /tide:review
 - 판정 "가능" → /tide:release v{추천 버전}
-- 판정 "불가" → 보완 후 /tide:impl M{N} 재실행 또는 /tide:milestone 으로 후속 계획
+- 판정 "불가" → 재작업 라운드를 견준다
+  (값이 없는 보고서는 0으로 본다 — 단일 원본은 `docs/conventions.md`의 "리뷰 검증 규율" 절):
+  - impl 보고서 개요의 `재작업 라운드(rework)` 값이 그 리뷰 보고서 계측 줄의 값보다 크면 → 재작업이 이미 끝났다 —
+    /tide:review (impl을 다시 돌리면 라운드가 잘못 오른다)
+  - 아니면 → 보완 후 /tide:impl M{N} 재실행 또는 /tide:milestone 으로 후속 계획
 
 다음은 절대 수행하지 마: 파일 생성·수정 / 파일 삭제(`.tide/debug-session` 포함) / git 작업
 (.tide/phase도 변경하지 않는 읽기 전용 커맨드)

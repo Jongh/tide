@@ -4401,6 +4401,242 @@ try {
     Chk "O85: transform control -- a synthetic conventions file with one extra branch turns the count check red" ((RoCountBad (RoFixture 'base')) + '|' + (RoCountBad (RoFixture 'add'))) '0|1'
     Chk "O86: main check -- every backtick ro- token in the conventions file is a declared branch name" (RoStray) '0'
     Chk "O87: transform control -- one undeclared ro- token is counted" ((RoStray (RoFixture 'base')) + '|' + (RoStray (RoFixture 'stray'))) '0|1'
+    # (O88-O99 / M85) THE WAYS INTO AND OUT OF THE TABLE -- the convention's `retro-flow:` name declaration, the `retro-flow-sites:`
+    # site pairs, the `retro-gate-since:` and `retro-review-after:` values and their shapes. Not a time-based gate -- whether a
+    # review mark was put on IN TIME or whether a next action is RIGHT is not asked. Key numbers are compared AS NUMBERS (`rf-99`
+    # comes before `rf-105`; a string comparison flips them -- the below shape of O97 is that control. The wide shape, ten times the
+    # start key, is at or above it both as a number and as a string; it checks that a large key is counted, not the comparison kind).
+    $RFL_KEY = 'retro-flow:'
+    $RFS_KEY = 'retro-flow-sites:'
+    $RGS_KEY = 'retro-gate-since:'
+    $RRA_KEY = 'retro-review-after:'
+    $rPend = if ($rStatSet.Count -gt 2) { $rStatSet[2] } else { '' }
+    function RtDecl([string]$f = '') {
+        if ($f -eq '') { $f = $CONV }
+        return ((DeclCount $f $RFL_KEY) + (DeclCount $f $RFS_KEY) + (DeclCount $f $RGS_KEY) + (DeclCount $f $RRA_KEY) + '|' +
+            (DnDup $RFL_KEY $f) + '|' + (DnDefBad $RFL_KEY $f) + '|' + (DnDefOrphan $RFL_KEY $f) + '|' + (DnDefOrder $RFL_KEY $f))
+    }
+    function RtSiteBad([string]$f = '', [string]$skRoot = '') {
+        # -> names without exactly one site pair + pair names not declared + unknown sites + site files (of the two) not carrying the backticked name.
+        if ($f -eq '') { $f = $CONV }
+        if ($skRoot -eq '') { $skRoot = $ROOT }
+        $names = @(DnNames $RFL_KEY $f)
+        $pairs = @(DnPairs $RFS_KEY $f)
+        $bad = 0
+        $bt = [string][char]0x60
+        foreach ($n in $names) {
+            $hit = @($pairs | Where-Object { (FlPairName $_) -ceq $n })
+            if ($hit.Count -ne 1) { $bad++; continue }
+            $site = FlPairMark $hit[0]
+            if (-not ($site -ceq 'retro' -or $site -ceq 'milestone')) { $bad++; continue }
+            foreach ($x in @('SKILL.md', 'template.md')) {
+                $p = Join-Path $skRoot ('skills/' + $site + '/' + $x)
+                if (-not (Test-Path -LiteralPath $p) -or -not ([System.IO.File]::ReadAllText($p).Contains($bt + $n + $bt))) { $bad++ }
+            }
+        }
+        $nset = OrdSet $names
+        foreach ($p in $pairs) { if (-not $nset.Contains((FlPairName $p))) { $bad++ } }
+        return [string]$bad
+    }
+    function RtStray([string]$f = '', [string]$skRoot = '') {
+        # -> backtick `rt-...` tokens (the part before `=` for site pairs) in the conventions (the whole conventions set when no argument)
+        #    and the retro / milestone skills and templates that are not declared names (distinct tokens).
+        $conv = if ($f -eq '') { $CONV } else { $f }
+        if ($skRoot -eq '') { $skRoot = $ROOT }
+        $names = OrdSet @(DnNames $RFL_KEY $conv)
+        $files = New-Object System.Collections.Generic.List[string]
+        if ($f -ne '') { [void]$files.Add($f) } else {
+            $cf = @(Get-ChildItem (Join-Path $ROOT 'docs') -File -Force -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name.StartsWith('conventions', [System.StringComparison]::Ordinal) -and $_.Name.EndsWith('.md', [System.StringComparison]::Ordinal) } |
+                ForEach-Object { $_.FullName })
+            foreach ($c in $cf) { [void]$files.Add($c) }
+        }
+        foreach ($s in @('retro', 'milestone')) { foreach ($x in @('SKILL.md', 'template.md')) { [void]$files.Add((Join-Path $skRoot ('skills/' + $s + '/' + $x))) } }
+        $bt = [string][char]0x60
+        $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($p in $files) {
+            if (-not (Test-Path -LiteralPath $p)) { continue }
+            foreach ($ln in [System.IO.File]::ReadAllLines($p)) {
+                $s = $ln
+                while (($i = $s.IndexOf($bt + 'rt-', [System.StringComparison]::Ordinal)) -ge 0) {
+                    $s = $s.Substring($i + 1)
+                    $j = $s.IndexOf($bt, [System.StringComparison]::Ordinal)
+                    if ($j -lt 0) { break }
+                    $t = $s.Substring(0, $j)
+                    $e = $t.IndexOf('=', [System.StringComparison]::Ordinal)
+                    if ($e -ge 0) { $t = $t.Substring(0, $e) }
+                    [void]$seen.Add($t)
+                    $s = $s.Substring($j + 1)
+                }
+            }
+        }
+        return [string]@($seen | Where-Object { $_ -ne '' -and -not $names.Contains($_) }).Count
+    }
+    function RtSinceNum([string]$f = '') {
+        # -> the number when `retro-gate-since:` is ONE token of `rf-` + digits ('' otherwise).
+        if ($f -eq '') { $f = $CONV }
+        $t = DeclTail $f $RGS_KEY
+        if ($null -eq $t) { return '' }
+        $tok = @($t -split '\s+' | Where-Object { $_ -ne '' })
+        if ($tok.Count -eq 1 -and $tok[0] -cmatch '^rf-[0-9]+$') { return $tok[0].Substring(3) }
+        return ''
+    }
+    function RtValuesBad([string]$f = '') {
+        if ($f -eq '') { $f = $CONV }
+        $c = 0
+        if ((RtSinceNum $f) -eq '') { $c++ }
+        $t = DeclTail $f $RRA_KEY
+        $tok = @(if ($null -ne $t) { $t -split '\s+' | Where-Object { $_ -ne '' } })
+        if (-not ($tok.Count -eq 1 -and $tok[0] -cmatch '^[0-9]+$' -and [long]$tok[0] -gt 0)) { $c++ }
+        return [string]$c
+    }
+    function RtRows([string]$path) {
+        # -> one object per data row inside the marker window: key, normalized status, the where-cell, the raw line.
+        $out = New-Object System.Collections.ArrayList
+        if ($rBlk -eq '' -or -not (Test-Path -LiteralPath $path)) { return $out.ToArray() }
+        $inb = $false; $sep = $false
+        foreach ($l in [System.IO.File]::ReadAllLines($path)) {
+            if ($l.Contains('<!-- ' + $rBlk + ':start -->')) { $inb = $true; $sep = $false; continue }
+            if ($l.Contains('<!-- ' + $rBlk + ':end -->')) { $inb = $false; continue }
+            if ($inb -and (-not $sep)) { if ($l.Contains('---')) { $sep = $true }; continue }
+            if ($inb -and $l.StartsWith('|', [System.StringComparison]::Ordinal)) {
+                $fl = $l -split '\|'
+                if ($fl.Count -lt 5) { continue }
+                $a = $fl[1].Split([char]96)
+                if ($a.Count -lt 3 -or $a[1] -eq '') { continue }
+                $v = $fl[3].Replace([string][char]13, '').Replace('*', '').Replace(' ', '')
+                $pp = $v.IndexOf('(', [System.StringComparison]::Ordinal)
+                if ($pp -ge 0) { $v = $v.Substring(0, $pp) }
+                $w = if ($fl.Count -ge 6) { $fl[4] } else { $null }
+                [void]$out.Add([pscustomobject]@{ Key = $a[1]; Stat = $v; Where = $w; Line = $l })
+            }
+        }
+        return $out.ToArray()
+    }
+    function RtGateBad([string]$path = '', [string]$f = '') {
+        if ($path -eq '') { $path = $RETRO }
+        $since = RtSinceNum $f
+        if ($since -eq '') { return '0' }
+        $c = 0
+        foreach ($r in @(RtRows $path)) {
+            if ($null -eq $r.Where -or -not ($r.Key -cmatch '^rf-[0-9]+$')) { continue }
+            if (-not ($r.Stat -ceq $rUndone) -or [long]($r.Key.Substring(3)) -lt [long]$since) { continue }
+            if (-not $r.Where.Contains('next:')) { $c++ }
+            if (-not $r.Where.Contains('kin:')) { $c++ }
+        }
+        return [string]$c
+    }
+    function RtReviewBad([string]$path = '') {
+        if ($path -eq '') { $path = $RETRO }
+        $c = 0
+        # The mark is a BARE token in the where cell -- a `review-due` right after a backtick is a prose mention, not a mark.
+        # Looking at the whole line read a done row's prose as a mark (M85 review; the quoted / item cells of O99 are the control).
+        $bt = [char]0x60
+        foreach ($r in @(RtRows $path)) {
+            if ($null -eq $r.Where) { continue }
+            $hit = $false; $from = 0
+            while (($i = $r.Where.IndexOf('review-due', $from, [System.StringComparison]::Ordinal)) -ge 0) {
+                if ($i -eq 0 -or $r.Where[$i - 1] -ne $bt) { $hit = $true; break }
+                $from = $i + 10
+            }
+            if (-not $hit) { continue }
+            if (-not ($r.Stat -ceq $rUndone -or $r.Stat -ceq $rPend)) { $c++ }
+        }
+        return [string]$c
+    }
+    # A SYNTHETIC conventions file built from the real declaration's names and sites (the real file is never touched).
+    function RtFixture([string]$mode) {
+        $fx = Join-Path $sbx ('conv-rt-' + $mode + '.md')
+        $bt = [string][char]0x60
+        $names = @(DnNames $RFL_KEY)
+        $nl = $names -join ' '
+        $pl = @(DnPairs $RFS_KEY | ForEach-Object { $bt + $_ + $bt })
+        $since = 'rf-105'; $after = '5'; $ex = ''
+        switch ($mode) {
+            'dup' { $nl = $nl + ' ' + $names[0] }
+            'nosite' { $pl = @($pl | Select-Object -Skip 1) }
+            'stray' { $ex = '  - see ' + $bt + 'rt-gone' + $bt }
+            'badsince' { $since = 'M85' }
+            'badafter' { $after = '0' }
+        }
+        $defs = @($names)
+        if ($mode -eq 'nodef') { $defs = @($names | Select-Object -Skip 1) }
+        if ($mode -eq 'swap' -and $names.Count -ge 2) { $defs = @($names[1], $names[0]) + @($names | Select-Object -Skip 2) }
+        $raLine = if ($mode -eq 'noafter') { '  - zz' } else { '  - ' + $bt + $RRA_KEY + $bt + ' ' + $after }
+        $lines = @('## fixture', '', ('  - ' + $bt + $RFL_KEY + $bt + ' ' + $nl), ('  - ' + $bt + $RFS_KEY + $bt + ' ' + ($pl -join ' ')),
+            ('  - ' + $bt + $RGS_KEY + $bt + ' ' + $since), $raLine, '')
+        foreach ($d in $defs) { $lines += ('  - **' + $bt + $d + $bt + '** - x') }
+        if ($ex -ne '') { $lines += $ex }
+        [System.IO.File]::WriteAllLines($fx, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
+        return $fx
+    }
+    function RtSkillsFixture([string]$mode) {
+        # -> the root of a copy of the retro / milestone skills and templates (drop: the first declared name's backtick token is removed from the retro template).
+        $r = Join-Path $sbx ('rtsk-' + $mode)
+        foreach ($s in @('retro', 'milestone')) {
+            $d = Join-Path $r ('skills/' + $s)
+            [void](New-Item -ItemType Directory -Force -Path $d)
+            foreach ($x in @('SKILL.md', 'template.md')) { Copy-Item -LiteralPath (Join-Path $ROOT ('skills/' + $s + '/' + $x)) -Destination (Join-Path $d $x) -Force }
+        }
+        if ($mode -eq 'drop') {
+            $bt = [string][char]0x60
+            $n = @(DnNames $RFL_KEY)[0]
+            $p = Join-Path $r 'skills/retro/template.md'
+            $txt = [System.IO.File]::ReadAllText((Join-Path $ROOT 'skills/retro/template.md'))
+            [System.IO.File]::WriteAllText($p, $txt.Replace($bt + $n + $bt, 'zz-gone'), (New-Object System.Text.UTF8Encoding($false)))
+        }
+        return $r
+    }
+    function RtRetroFixture([string]$mode) {
+        # -> a copy of the retro with one synthetic row added at the end of the top window.
+        $fx = Join-Path $sbx ('retro-rt-' + $mode + '.md')
+        $bt = [string][char]0x60
+        $s = RtSinceNum
+        $below = if ($s.Length -gt 1) { '9' * ($s.Length - 1) } else { [string]([long]$s - 1) }
+        $row = switch ($mode) {
+            'base' { '| ' + $bt + 'rf-' + $s + $bt + ' **zz** | zz | **' + $rUndone + '** | next: zz kin: zz |' }
+            'nonext' { '| ' + $bt + 'rf-' + $s + $bt + ' **zz** | zz | **' + $rUndone + '** | zz kin: zz |' }
+            'nokin' { '| ' + $bt + 'rf-' + $s + $bt + ' **zz** | zz | **' + $rUndone + '** | next: zz |' }
+            'below' { '| ' + $bt + 'rf-' + $below + $bt + ' **zz** | zz | **' + $rUndone + '** | zz |' }
+            'wide' { '| ' + $bt + 'rf-' + $s + '0' + $bt + ' **zz** | zz | **' + $rUndone + '** | zz |' }
+            'revdone' { '| ' + $bt + 'rf-0' + $bt + ' **zz** | zz | **' + $rFirst + '** | zz review-due |' }
+            'revopen' { '| ' + $bt + 'rf-0' + $bt + ' **zz** | zz | **' + $rUndone + '** | zz review-due |' }
+            'revquoted' { '| ' + $bt + 'rf-0' + $bt + ' **zz** | zz | **' + $rFirst + '** | zz ' + $bt + 'review-due' + $bt + ' zz |' }
+            'revitem' { '| ' + $bt + 'rf-0' + $bt + ' **zz review-due** | zz | **' + $rFirst + '** | zz |' }
+        }
+        $src = [System.IO.File]::ReadAllLines($RETRO)
+        $out = New-Object System.Collections.Generic.List[string]
+        $on = $false; $done = $false; $buf = New-Object System.Collections.Generic.List[string]
+        foreach ($l in $src) {
+            if (-not $done -and $l.Contains('<!-- ' + $rBlk + ':end -->')) {
+                $k = $buf.Count
+                while ($k -gt 0 -and $buf[$k - 1].Trim() -eq '') { $k-- }
+                for ($i = 0; $i -lt $k; $i++) { [void]$out.Add($buf[$i]) }
+                [void]$out.Add($row)
+                for ($i = $k; $i -lt $buf.Count; $i++) { [void]$out.Add($buf[$i]) }
+                $buf.Clear(); $done = $true; [void]$out.Add($l); continue
+            }
+            if (-not $done -and $l.Contains('<!-- ' + $rBlk + ':start -->')) { $on = $true; [void]$out.Add($l); continue }
+            if ($on -and -not $done) { [void]$buf.Add($l); continue }
+            [void]$out.Add($l)
+        }
+        [System.IO.File]::WriteAllLines($fx, [string[]]$out, (New-Object System.Text.UTF8Encoding($false)))
+        return $fx
+    }
+    Chk "O88: main check -- the four retro-flow declarations are one line each, names unique, one definition item per name, no orphan, declaration order" (RtDecl) '1111|0|0|0|0'
+    Chk "O89: transform control -- in a synthetic conventions file a duplicated name, a removed definition and the first two definitions swapped each add one" (([string]([int](DnDup $RFL_KEY (RtFixture 'dup')) - [int](DnDup $RFL_KEY (RtFixture 'base')))) + '|' + ([string]([int](DnDefBad $RFL_KEY (RtFixture 'nodef')) - [int](DnDefBad $RFL_KEY (RtFixture 'base')))) + '|' + ([string]([int](DnDefOrder $RFL_KEY (RtFixture 'swap')) - [int](DnDefOrder $RFL_KEY (RtFixture 'base'))))) '1|1|1'
+    Chk "O90: main check -- each declared name has one site pair and that site's skill and template carry the backticked name" (RtSiteBad) '0'
+    Chk "O91: transform control -- a synthetic conventions file without one site pair and a copy whose restatement file lost the name each add one" (([string]([int](RtSiteBad (RtFixture 'nosite')) - [int](RtSiteBad (RtFixture 'base')))) + '|' + ([string]([int](RtSiteBad '' (RtSkillsFixture 'drop')) - [int](RtSiteBad '' (RtSkillsFixture 'clean'))))) '1|1'
+    Chk "O92: main check -- every backtick rt- token in the conventions set and the retro / milestone skills and templates is a declared name" (RtStray) '0'
+    Chk "O93: transform control -- one undeclared rt- token is counted" ([string]([int](RtStray (RtFixture 'stray')) - [int](RtStray (RtFixture 'base')))) '1'
+    Chk "O94: main check -- the start key is one rf-{NN} token and the review threshold is a positive integer" (RtValuesBad) '0'
+    Chk "O95: transform control -- a start key that is not a key shape, a review threshold of 0 and a removed threshold declaration line each add one" (([string]([int](RtValuesBad (RtFixture 'badsince')) - [int](RtValuesBad (RtFixture 'base')))) + '|' + ([string]([int](RtValuesBad (RtFixture 'badafter')) - [int](RtValuesBad (RtFixture 'base')))) + '|' + ([string]([int](RtValuesBad (RtFixture 'noafter')) - [int](RtValuesBad (RtFixture 'base'))))) '1|1|1'
+    Chk "O96: main check -- every open row at or above the start key carries next: and kin: in its where cell" (RtGateBad) '0'
+    $rtg0 = [int](RtGateBad)
+    Chk "O97: transform control -- full marks 0, no next: 1, no kin: 1, below the start key (short nines) 0, ten times the start key (both missing) 2" (([string]([int](RtGateBad (RtRetroFixture 'base')) - $rtg0)) + '|' + ([string]([int](RtGateBad (RtRetroFixture 'nonext')) - $rtg0)) + '|' + ([string]([int](RtGateBad (RtRetroFixture 'nokin')) - $rtg0)) + '|' + ([string]([int](RtGateBad (RtRetroFixture 'below')) - $rtg0)) + '|' + ([string]([int](RtGateBad (RtRetroFixture 'wide')) - $rtg0))) '0|1|1|0|2'
+    Chk "O98: main check -- every row carrying a bare review-due in its where cell is open or pending" (RtReviewBad) '0'
+    $rtv0 = [int](RtReviewBad)
+    Chk "O99: transform control -- a bare review-due on a done row adds one; on an open row, backticked, or in the item cell adds none" (([string]([int](RtReviewBad (RtRetroFixture 'revdone')) - $rtv0)) + '|' + ([string]([int](RtReviewBad (RtRetroFixture 'revopen')) - $rtv0)) + '|' + ([string]([int](RtReviewBad (RtRetroFixture 'revquoted')) - $rtv0)) + '|' + ([string]([int](RtReviewBad (RtRetroFixture 'revitem')) - $rtv0))) '1|0|0|0'
     }
 
     # --- Part P: completion-criteria cross-check (M55) ----------------------

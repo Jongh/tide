@@ -3881,6 +3881,168 @@ chk "O84: 본 검사 - 갈래 이름 수가 러너의 조건 수와 같다" "$(r
 chk "O85: 변환 통제 - 갈래를 하나 더한 합성 규약에서 수 대조가 붉다" "$(ro_count_bad "$(ro_fixture base)")|$(ro_count_bad "$(ro_fixture add)")" "0|1"
 chk "O86: 본 검사 - 규약 안 백틱 ro- 토큰이 전부 선언된 갈래 이름이다" "$(ro_stray)" "0"
 chk "O87: 변환 통제 - 선언에 없는 ro- 토큰 하나를 센다" "$(ro_stray "$(ro_fixture base)")|$(ro_stray "$(ro_fixture stray)")" "0|1"
+# (O88~O99 · M85) **표에 들어오고 나가는 길** — 규약의 `retro-flow:` 이름 선언 · `retro-flow-sites:` 자리 쌍 · `retro-gate-since:` ·
+# `retro-review-after:` 값과 그 꼴을 묻는다. 시간 기반 게이트가 아니다 — 재심 표지를 **제때** 달았는지 · 다음 행동이 **옳은지**는 묻지 않는다.
+# 키 번호는 숫자로 견준다(`rf-99`가 `rf-105`보다 앞이다 — 문자열로 견주면 뒤집힌다, `O97`의 below 꼴이 그 통제다.
+# wide 꼴(시작 키의 열 배)은 숫자로도 문자열로도 시작 키 이상이라 비교의 종류가 아니라 큰 키가 세어지는지를 본다).
+RFL_KEY='retro-flow:'
+RFS_KEY='retro-flow-sites:'
+RGS_KEY='retro-gate-since:'
+RRA_KEY='retro-review-after:'
+RPEND=$(printf '%s' "$RSTAT" | LC_ALL=C awk '{ print $3 }')
+rt_decl() { # [규약 파일] → 「선언 줄 수 넷 | 이름 중복 | 정의 없음 · 여럿 | 고아 정의 | 정의 순서 위반」
+    _rtdf=${1:-$CONV}
+    printf '%s%s%s%s|%s|%s|%s|%s' "$(decl_count "$_rtdf" "$RFL_KEY")" "$(decl_count "$_rtdf" "$RFS_KEY")" \
+        "$(decl_count "$_rtdf" "$RGS_KEY")" "$(decl_count "$_rtdf" "$RRA_KEY")" "$(dn_dup "$RFL_KEY" "$_rtdf")" \
+        "$(dn_def_bad "$RFL_KEY" "$_rtdf")" "$(dn_def_orphan "$RFL_KEY" "$_rtdf")" "$(dn_def_order "$RFL_KEY" "$_rtdf")"
+}
+rt_site_bad() { # [규약 파일] [스킬 루트] → 자리 쌍이 정확히 하나가 아닌 이름 + 선언에 없는 쌍 이름 + 모르는 자리 + 자리의 두 파일 중 이름을 백틱으로 들지 않은 파일의 수
+    _rtsf=${1:-$CONV}; _rtsr=${2:-$ROOT}
+    _rtsn=$(dn_names "$RFL_KEY" "$_rtsf")
+    _rtsp=$(dn_pairs "$RFS_KEY" "$_rtsf")
+    _rtsb=0
+    for _rtsv in $_rtsn; do
+        _rtsc=$(printf '%s\n' "$_rtsp" | LC_ALL=C awk -v n="$_rtsv" 'substr($0, 1, index($0, "=") - 1) == n' | grep -c .)
+        [ "$_rtsc" = 1 ] || { _rtsb=$((_rtsb + 1)); continue; }
+        _rtss=$(printf '%s\n' "$_rtsp" | LC_ALL=C awk -v n="$_rtsv" 'substr($0, 1, index($0, "=") - 1) == n { print substr($0, index($0, "=") + 1) }')
+        case "$_rtss" in retro|milestone) ;; *) _rtsb=$((_rtsb + 1)); continue ;; esac
+        for _rtsx in SKILL.md template.md; do
+            LC_ALL=C grep -qF -- "\`$_rtsv\`" "$_rtsr/skills/$_rtss/$_rtsx" 2>/dev/null || _rtsb=$((_rtsb + 1))
+        done
+    done
+    printf '%s\n' "$_rtsp" | while IFS= read -r _rtsq; do [ -n "$_rtsq" ] || continue
+        printf '%s\n' "$_rtsn" | LC_ALL=C grep -qxF -- "${_rtsq%%=*}" || echo x; done | { _rtso=$(grep -c .); echo $((_rtsb + _rtso)); }
+}
+rt_stray() { # [규약 파일] [스킬 루트] → 규약(인자 없으면 규약 문서 집합) · retro · milestone 스킬과 템플릿 안 백틱 `rt-…` 토큰(자리 쌍은 `=` 앞) 중 선언에 없는 것의 수(서로 다른 토큰)
+    _rtxf=${1:-$CONV}; _rtxr=${2:-$ROOT}
+    _rtxn=$(dn_names "$RFL_KEY" "$_rtxf")
+    if [ -n "${1:-}" ]; then _rtxl=$1; else _rtxl=$(conv_files); fi
+    { printf '%s\n' "$_rtxl"; for _rtxs in retro milestone; do printf '%s\n' "$_rtxr/skills/$_rtxs/SKILL.md" "$_rtxr/skills/$_rtxs/template.md"; done; } |
+        while IFS= read -r _rtxp; do [ -f "$_rtxp" ] && cat "$_rtxp"; done |
+        LC_ALL=C awk -v q="\`" '{ s = $0; while ((i = index(s, q "rt-")) > 0) { s = substr(s, i + 1); j = index(s, q); if (j == 0) break; t = substr(s, 1, j - 1); e = index(t, "="); if (e > 0) t = substr(t, 1, e - 1); print t; s = substr(s, j + 1) } }' |
+        LC_ALL=C sort -u | { _rtx=0; while IFS= read -r _rtxv; do [ -n "$_rtxv" ] || continue
+            printf '%s\n' "$_rtxn" | LC_ALL=C grep -qxF -- "$_rtxv" || _rtx=$((_rtx + 1)); done; echo "$_rtx"; }
+}
+rt_since_num() { # [규약 파일] → `retro-gate-since:` 값이 `rf-` + 숫자 한 토큰이면 그 숫자(아니면 빈 출력)
+    decl_tail "${1:-$CONV}" "$RGS_KEY" | LC_ALL=C awk '{ if (NF == 1 && $1 ~ /^rf-[0-9]+$/) print substr($1, 4) }'
+}
+rt_values_bad() { # [규약 파일] → 시작 키가 `rf-{NN}` 꼴 한 토큰이 아니면 1 + 재심 기준이 양의 정수 한 토큰이 아니면 1
+    _rtvf=${1:-$CONV}; _rtv=0
+    [ -n "$(rt_since_num "$_rtvf")" ] || _rtv=$((_rtv + 1))
+    # 선언 줄이 없으면 입력이 0줄이라 본문이 돌지 않는다 — END에서 판정해야 「없음」이 「맞음」으로 새지 않는다(O95의 noafter가 통제).
+    decl_tail "$_rtvf" "$RRA_KEY" | LC_ALL=C awk '{ ok = (NF == 1 && $1 ~ /^[0-9]+$/ && $1 + 0 > 0) } END { exit !ok }' || _rtv=$((_rtv + 1))
+    echo "$_rtv"
+}
+rt_gate_bad() { # [retro 경로] [규약 파일] → 최상단 표에서 키 번호가 시작 키 이상인 미반영 행의 반영 위치 셀에 빠진 `next:` · `kin:`의 수
+    _rtgs=$(rt_since_num "${2:-$CONV}")
+    [ -n "$_rtgs" ] || { echo 0; return; }
+    LC_ALL=C awk -v mk="$RBLK" -v q='`' -v un="$RUNDONE" -v since="$_rtgs" '
+        mk == "" { exit }
+        index($0, "<!-- " mk ":start -->") > 0 { inb = 1; sep = 0; next }
+        index($0, "<!-- " mk ":end -->") > 0 { inb = 0; next }
+        inb && sep == 0 { if (index($0, "---") > 0) sep = 1; next }
+        inb && substr($0, 1, 1) == "|" {
+            n = split($0, f, "|"); if (n < 6) next
+            m = split(f[2], a, q); if (m < 3 || a[2] !~ /^rf-[0-9]+$/) next
+            v = f[4]; gsub(/\r/, "", v); gsub(/\*/, "", v); gsub(/ /, "", v)
+            pp = index(v, "("); if (pp > 0) v = substr(v, 1, pp - 1)
+            if (v != un || substr(a[2], 4) + 0 < since + 0) next
+            if (index(f[5], "next:") == 0) c++
+            if (index(f[5], "kin:") == 0) c++
+        }
+        END { print c + 0 }' "${1:-$RETRO}"
+}
+rt_review_bad() { # [retro 경로] → 최상단 표에서 반영 위치 셀에 `review-due`를 든 행 중 상태가 미반영 · 미결이 아닌 행의 수
+    # 표지는 반영 위치 셀의 맨 토큰이다 — 백틱 바로 뒤의 `review-due`는 산문 언급이라 세지 않는다. 행 전체를 보면 반영 행의
+    # 「재심 표지 `review-due`를 세웠다」가 표지로 읽힌다(M85 리뷰 · O99의 quoted 칸이 통제).
+    LC_ALL=C awk -v mk="$RBLK" -v q='`' -v un="$RUNDONE" -v pe="$RPEND" '
+        mk == "" { exit }
+        index($0, "<!-- " mk ":start -->") > 0 { inb = 1; sep = 0; next }
+        index($0, "<!-- " mk ":end -->") > 0 { inb = 0; next }
+        inb && sep == 0 { if (index($0, "---") > 0) sep = 1; next }
+        inb && substr($0, 1, 1) == "|" {
+            n = split($0, f, "|"); if (n < 6) next
+            s = f[5]; hit = 0
+            while ((i = index(s, "review-due")) > 0) { if (i == 1 || substr(s, i - 1, 1) != q) { hit = 1; break }; s = substr(s, i + 10) }
+            if (!hit) next
+            m = split(f[2], a, q); if (m < 3 || a[2] == "") next
+            v = f[4]; gsub(/\r/, "", v); gsub(/\*/, "", v); gsub(/ /, "", v)
+            pp = index(v, "("); if (pp > 0) v = substr(v, 1, pp - 1)
+            if (v != un && v != pe) c++
+        }
+        END { print c + 0 }' "${1:-$RETRO}"
+}
+rt_fixture() { # <base|dup|nodef|swap|nosite|stray|badsince|badafter|noafter> → 실제 선언의 이름 · 자리로 만든 합성 규약(실제 규약을 건드리지 않는다)
+    _rtff="$SBX/conv-rt-$1.md"
+    _rtfn=$(dn_names "$RFL_KEY" | LC_ALL=C tr '\n' ' ' | LC_ALL=C sed 's/ *$//')
+    _rtfp=$(dn_pairs "$RFS_KEY" | LC_ALL=C awk -v q="\`" '{ printf "%s%s%s%s", (NR > 1 ? " " : ""), q, $0, q }')
+    _rtf1=${_rtfn%% *}; _rtfs='rf-105'; _rtfa='5'; _rtfx=''
+    case "$1" in
+        dup) _rtfn="$_rtfn $_rtf1" ;;
+        nosite) _rtfp=${_rtfp#* } ;;
+        stray) _rtfx="  - see \`rt-gone\`" ;;
+        badsince) _rtfs='M85' ;;
+        badafter) _rtfa='0' ;;
+    esac
+    _rtfl="  - \`$RRA_KEY\` $_rtfa"
+    [ "$1" != noafter ] || _rtfl='  - zz'
+    printf '%s\n' "## fixture" "" "  - \`$RFL_KEY\` $_rtfn" "  - \`$RFS_KEY\` $_rtfp" "  - \`$RGS_KEY\` $_rtfs" "$_rtfl" "" > "$_rtff"
+    _rtfd=$(dn_names "$RFL_KEY")
+    case "$1" in
+        nodef) _rtfd=$(printf '%s\n' "$_rtfd" | LC_ALL=C sed 1d) ;;
+        swap) _rtfd=$(printf '%s\n' "$_rtfd" | LC_ALL=C awk 'NR == 1 { a = $0; next } NR == 2 { print; print a; next } { print }') ;;
+    esac
+    printf '%s\n' "$_rtfd" | while IFS= read -r _rtfv; do printf '  - **`%s`** - x\n' "$_rtfv"; done >> "$_rtff"
+    [ -z "$_rtfx" ] || printf '%s\n' "$_rtfx" >> "$_rtff"
+    printf '%s' "$_rtff"
+}
+rt_skills_fixture() { # <clean|drop> → retro · milestone 스킬과 템플릿 사본의 루트(drop: retro 템플릿에서 첫 선언 이름의 백틱 토큰을 지운다)
+    _rtkr="$SBX/rtsk-$1"
+    mkdir -p "$_rtkr/skills/retro" "$_rtkr/skills/milestone"
+    for _rtks in retro milestone; do cp "$ROOT/skills/$_rtks/SKILL.md" "$ROOT/skills/$_rtks/template.md" "$_rtkr/skills/$_rtks/"; done
+    if [ "$1" = drop ]; then
+        _rtkn=$(dn_names "$RFL_KEY" | head -1)
+        LC_ALL=C awk -v t="\`$_rtkn\`" '{ while ((i = index($0, t)) > 0) $0 = substr($0, 1, i - 1) "zz-gone" substr($0, i + length(t)); print }' \
+            "$ROOT/skills/retro/template.md" > "$_rtkr/skills/retro/template.md"
+    fi
+    printf '%s' "$_rtkr"
+}
+rt_retro_fixture() { # <base|nonext|nokin|below|wide|revdone|revopen|revquoted|revitem> → 최상단 창 끝에 합성 행 하나를 더한 회고 사본
+    _rtrf="$SBX/retro-rt-$1.md"
+    _rtrs=$(rt_since_num)
+    _rtrb=$(printf '%s' "$_rtrs" | LC_ALL=C awk '{ s = ""; for (i = 1; i < length($0); i++) s = s "9"; print (s == "" ? $0 - 1 : s) }')
+    case "$1" in
+        base) _rtrr="| \`rf-$_rtrs\` **zz** | zz | **$RUNDONE** | next: zz kin: zz |" ;;
+        nonext) _rtrr="| \`rf-$_rtrs\` **zz** | zz | **$RUNDONE** | zz kin: zz |" ;;
+        nokin) _rtrr="| \`rf-$_rtrs\` **zz** | zz | **$RUNDONE** | next: zz |" ;;
+        below) _rtrr="| \`rf-$_rtrb\` **zz** | zz | **$RUNDONE** | zz |" ;;
+        wide) _rtrr="| \`rf-${_rtrs}0\` **zz** | zz | **$RUNDONE** | zz |" ;;
+        revdone) _rtrr="| \`rf-0\` **zz** | zz | **$RFIRST** | zz review-due |" ;;
+        revopen) _rtrr="| \`rf-0\` **zz** | zz | **$RUNDONE** | zz review-due |" ;;
+        revquoted) _rtrr="| \`rf-0\` **zz** | zz | **$RFIRST** | zz \`review-due\` zz |" ;;
+        revitem) _rtrr="| \`rf-0\` **zz review-due** | zz | **$RFIRST** | zz |" ;;
+    esac
+    LC_ALL=C awk -v mk="$RBLK" -v r="$_rtrr" '
+        !d && index($0, "<!-- " mk ":end -->") > 0 { while (k > 0 && b[k] ~ /^[ \r]*$/) k--; for (i = 1; i <= k; i++) print b[i]; print r; for (i = k + 1; i <= kk; i++) print b[i]; k = 0; kk = 0; d = 1; print; next }
+        !d && index($0, "<!-- " mk ":start -->") > 0 { on = 1; print; next }
+        on && !d { b[++kk] = $0; k = kk; next }
+        { print }' "$RETRO" > "$_rtrf"
+    printf '%s' "$_rtrf"
+}
+chk "O88: 본 검사 - retro-flow 선언 넷이 한 줄씩이고 이름이 유일하며 정의 항목이 이름마다 하나 · 고아 없음 · 선언 순서" "$(rt_decl)" "1111|0|0|0|0"
+chk "O89: 변환 통제 - 합성 규약에서 이름 복제 · 정의 하나 지움 · 정의 첫 둘 맞바꿈이 각자 하나씩 는다" "$(( $(dn_dup "$RFL_KEY" "$(rt_fixture dup)") - $(dn_dup "$RFL_KEY" "$(rt_fixture base)") ))|$(( $(dn_def_bad "$RFL_KEY" "$(rt_fixture nodef)") - $(dn_def_bad "$RFL_KEY" "$(rt_fixture base)") ))|$(( $(dn_def_order "$RFL_KEY" "$(rt_fixture swap)") - $(dn_def_order "$RFL_KEY" "$(rt_fixture base)") ))" "1|1|1"
+chk "O90: 본 검사 - 선언된 이름마다 자리 쌍이 하나이고 그 자리의 스킬 · 템플릿이 이름을 백틱으로 든다" "$(rt_site_bad)" "0"
+chk "O91: 변환 통제 - 자리 쌍 하나를 지운 합성 규약 · 재서술처 한 파일에서 이름을 지운 사본이 각자 하나씩 는다" "$(( $(rt_site_bad "$(rt_fixture nosite)") - $(rt_site_bad "$(rt_fixture base)") ))|$(( $(rt_site_bad "" "$(rt_skills_fixture drop)") - $(rt_site_bad "" "$(rt_skills_fixture clean)") ))" "1|1"
+chk "O92: 본 검사 - 규약 문서 집합 · retro · milestone 스킬과 템플릿 안 백틱 rt- 토큰이 전부 선언된 이름이다" "$(rt_stray)" "0"
+chk "O93: 변환 통제 - 선언에 없는 rt- 토큰 하나를 센다" "$(( $(rt_stray "$(rt_fixture stray)") - $(rt_stray "$(rt_fixture base)") ))" "1"
+chk "O94: 본 검사 - 시작 키가 rf-{NN} 꼴 한 토큰이고 재심 기준이 양의 정수다" "$(rt_values_bad)" "0"
+chk "O95: 변환 통제 - 시작 키를 키 꼴이 아닌 값으로 · 재심 기준을 0으로 · 재심 기준 선언 줄을 지우면 각자 하나씩 는다" "$(( $(rt_values_bad "$(rt_fixture badsince)") - $(rt_values_bad "$(rt_fixture base)") ))|$(( $(rt_values_bad "$(rt_fixture badafter)") - $(rt_values_bad "$(rt_fixture base)") ))|$(( $(rt_values_bad "$(rt_fixture noafter)") - $(rt_values_bad "$(rt_fixture base)") ))" "1|1|1"
+chk "O96: 본 검사 - 시작 키 이상인 미반영 행마다 반영 위치 셀에 next: · kin: 이 있다" "$(rt_gate_bad)" "0"
+_rtg0=$(rt_gate_bad)
+chk "O97: 변환 통제 - 표지를 다 든 행 0 · next: 없음 1 · kin: 없음 1 · 시작 키 미만(짧은 9 꼴) 0 · 시작 키의 열 배(둘 다 없음) 2" "$(( $(rt_gate_bad "$(rt_retro_fixture base)") - _rtg0 ))|$(( $(rt_gate_bad "$(rt_retro_fixture nonext)") - _rtg0 ))|$(( $(rt_gate_bad "$(rt_retro_fixture nokin)") - _rtg0 ))|$(( $(rt_gate_bad "$(rt_retro_fixture below)") - _rtg0 ))|$(( $(rt_gate_bad "$(rt_retro_fixture wide)") - _rtg0 ))" "0|1|1|0|2"
+chk "O98: 본 검사 - 반영 위치 셀에 맨 토큰 review-due를 든 행의 상태가 미반영 · 미결이다" "$(rt_review_bad)" "0"
+_rtv0=$(rt_review_bad)
+chk "O99: 변환 통제 - 반영 행의 맨 토큰 review-due는 하나 늘고 미반영 행 · 백틱 언급 · 항목 셀의 것은 늘지 않는다" "$(( $(rt_review_bad "$(rt_retro_fixture revdone)") - _rtv0 ))|$(( $(rt_review_bad "$(rt_retro_fixture revopen)") - _rtv0 ))|$(( $(rt_review_bad "$(rt_retro_fixture revquoted)") - _rtv0 ))|$(( $(rt_review_bad "$(rt_retro_fixture revitem)") - _rtv0 ))" "1|0|0|0"
 fi
 
 # --- Part P: 완료 기준 대조 (M55) --------------------------------------------
