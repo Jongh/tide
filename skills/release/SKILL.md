@@ -242,8 +242,8 @@ git 쓰기 직전이다** — 버전 파일·CHANGELOG 편집은 git이 아니�
 2. **커밋 메시지가 여러 줄이면 실행 환경의 멀티라인 문법에 맞춘다.** `-m`을 반복하거나
    환경에 맞는 here-doc/here-string을 쓴다. 셸이 불일치하면(예: POSIX sh ↔ PowerShell)
    메시지에 따옴표·토큰이 그대로 섞여 오염될 수 있다.
-3. **CHANGELOG/README 릴리즈 노트에 사이트에서 제외하기로 한 용어(외부 저장소명 등)를
-   literal로 쓰지 않는다.** 이 문서들은 단일 원본화(snippets)로 사이트 콘텐츠에 그대로
+3. **CHANGELOG 릴리즈 노트에 사이트에서 제외하기로 한 용어(외부 저장소명 등)를
+   literal로 쓰지 않는다.** 이 문서는 단일 원본화(snippets)로 사이트 콘텐츠에 그대로
    유입될 수 있다. 제외 용어 처리는 `docs/conventions.md`의 규약을 따른다.
 4. **버전은 버전 파일(`plugin.json`)만 범프한다.** `docs/project-context.md`는 버전 숫자를
    복제하지 않으므로 release가 갱신하지 않는다 — 드리프트 차단은 갱신 단계 추가가 아니라
