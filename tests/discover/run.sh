@@ -1576,8 +1576,6 @@ chk "I6: 통제 — 대상(축 이름) 없는 부정어는 미검출"  "$(contra
 # 어느 편집이 조용한지가 우연에서 벗어난다"*고 적었으나 **거짓이었다**(M42 리뷰 차단 1: 트레일링
 # 탭·NBSP는 여전히 조용했다). 지금 성립하는 것만 적는다 — **아래 구분자 집합에 든 문자**가 꼬리에
 # 오면 양 셸이 함께 붉어진다. 표지 알파벳 자체(어떤 글자가 표지가 될 수 있는가)는 **묻지 않는다**.
-chk "I7: state-neg 선언 줄이 규약에 정확히 1개"  "$(decl_count "$CONV" 'state-neg:')"  "1"
-chk "I8: state-past 선언 줄이 규약에 정확히 1개" "$(decl_count "$CONV" 'state-past:')" "1"
 # 통제 — 산문 언급은 선언처로 세지 않는다(판별자가 살아 있음의 실증). 픽스처는 **ASCII만** 쓴다:
 # `run.ps1` 사본이 글자 그대로 같은 세 줄을 쓰므로 두 셸이 같은 것을 세는지가 바로 드러난다.
 {
@@ -1592,8 +1590,6 @@ chk "I9: 통제 — 산문 언급은 선언처로 세지 않는다" "$(decl_coun
 # 잃고 I2가 다시 0==0으로 조용히 통과하기 때문이다. 그래서 폭을 맞추고(위 `markers_of`) **폭 밖
 # 문자를 금지**해 그 부류를 시끄럽게 만든다. I12·I13은 그 금지가 공허하지 않음의 실증이다 —
 # 픽스처는 **ASCII 소스**로 바이트를 만들고(`printf` 8진), ps1 사본이 같은 바이트를 쓴다.
-chk "I10: state-neg 선언 줄 꼬리에 금지 구분자 0건"  "$(bad_seps "$CONV" 'state-neg:')"  "0"
-chk "I11: state-past 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" 'state-past:')" "0"
 printf -- '- `%s` alpha\tbeta\n'      'state-neg:' > "$ICON/sep-tab.md"
 printf -- '- `%s` alpha\302\240beta\n' 'state-neg:' > "$ICON/sep-nbsp.md"
 chk "I12: 통제 — 탭 구분자를 잡는다"   "$(bad_seps "$ICON/sep-tab.md" 'state-neg:')"  "1"
@@ -1637,8 +1633,6 @@ NSEP=$(printf '%s\n' "$SEP_CPS" | grep -c .)
 NSEPOK=$(printf '%s\n' "$SEP_OK_CPS" | grep -c .)
 chk "I16: sep-cps 추출 positive-control(>0)"    "$([ "$NSEP" -gt 0 ] && echo ok || echo no)"    "ok"
 chk "I17: sep-ok-cps 추출 positive-control(>0)" "$([ "$NSEPOK" -gt 0 ] && echo ok || echo no)" "ok"
-chk "I18: sep-cps 선언 줄이 규약에 정확히 1개"    "$(decl_count "$CONV" 'sep-cps:')"    "1"
-chk "I19: sep-ok-cps 선언 줄이 규약에 정확히 1개" "$(decl_count "$CONV" 'sep-ok-cps:')" "1"
 chk "I14: 규약이 선언한 구분자를 전부 잡는다"   "$(sep_hits "$SEP_CPS")"    "$NSEP"
 chk "I15: 통제 — 허용 문자는 잡지 않는다"       "$(sep_hits "$SEP_OK_CPS")" "0"
 fi
@@ -2407,8 +2401,6 @@ NLCAND=$(grep -c '^CAND' "$SBX/lscan.txt")
 NLBAD=$(grep -c '^BAD ' "$SBX/lscan.txt")
 NLIVING=$(grep -c . "$SBX/living.txt")
 [ "$NLBAD" = "0" ] || grep '^BAD ' "$SBX/lscan.txt" | sed 's/^BAD /  -> declared count vs enumerated items: /'
-chk "L1: count-word 선언 줄 정확히 1개" "$(decl_count "$CONV" 'count-word:')" "1"
-chk "L2: count-copula 선언 줄 정확히 1개" "$(decl_count "$CONV" 'count-copula:')" "1"
 chk "L3: 표지 추출 positive-control(수사>0 · 조사>0)" \
     "$([ "$NCW" -gt 0 ] && [ "$NCC" -gt 0 ] && echo ok || echo no)" "ok"
 chk "L4: 열거 기호 두 계열 각 20자(양 사본이 자기 단언)" "$NE1/$NE2" "20/20"
@@ -2584,8 +2576,6 @@ NEPICOPEN=$(grep -c '^OPEN [1-9]' "$SBX/epicscan.txt")
 NEPICREF=$(grep -c '^MREF ' "$SBX/epicscan.txt")
 NEPICBAD=$(grep -c '^BAD ' "$SBX/epicscan.txt")
 [ "$NEPICBAD" = "0" ] || grep '^BAD ' "$SBX/epicscan.txt" | sed 's/^BAD /  -> epic reference: /'
-chk "M1: epic-status 선언 줄 정확히 1개" "$(decl_count "$CONV" 'epic-status:')" "1"
-chk "M2: epic-since 선언 줄 정확히 1개" "$(decl_count "$CONV" 'epic-since:')" "1"
 # (M3) 표지가 비면 아래 판정이 통째로 공허해진다 — 추출 자체를 먼저 문다.
 # (M3) **복합 기댓값**이다. 앞자리는 추출 positive-control(살아 있는 표지가 뽑혀야 한다), 뒷자리는
 # **없는 키로 같은 추출 경로를 한 번 더 태워** 그것이 **비었다고 판정되는지**를 묻는다 — 두 사본이
@@ -2671,7 +2661,6 @@ chk "M9: 음성 통제 — 정상 참조 / 에픽 없는 트리는 붉지 않는
 # 에픽을 쓰지 않는 저장소에서는 둘 다 0이고 그때 M5는 발동하지 않는다(위 M9 뒷자리가 그 경로다).
 chk "M10: 이 저장소에 열린 에픽과 마일스톤 참조가 실재" \
     "$NEPICOPEN/$([ "$NEPICREF" -gt 0 ] && echo ok || echo no)" "1/ok"
-chk "M11: epic-members 선언 줄 정확히 1개" "$(decl_count "$CONV" 'epic-members:')" "1"
 # 픽스처 통제 둘 — **에픽 기준 순회**(규칙 3의 「그 반대」)를 실제 판정으로 건다. M51 리뷰 차단 1이
 # 정확히 이 축의 부재였고, **되돌림은 구현되지 않은 축을 볼 수 없어** 그때 잡지 못했다.
 chk "M12: 픽스처 통제 — 에픽이 실재하지 않는 마일스톤을 등재하면 잡는다" \
@@ -2920,8 +2909,12 @@ FLX_KEY='floor-excluded:'
 FAS_KEY='floor-asks:'
 FAC_KEY='floor-ask-cases:'
 FAF_KEY='floor-ask-from:'
-dn_names() { # <키> [규약 파일] → 공백으로 가른 이름 한 줄씩(공백 · 탭 · CR · VT · FF만으로 된 토큰은 빼고 — 금지 구분자 검사의 자리)
-    decl_tail "${2:-$CONV}" "$1" | LC_ALL=C awk '{ n = split($0, a, /[ ]/); for (i = 1; i <= n; i++) if (a[i] ~ /[^ \t\r\v\f]/) print a[i] }'
+dn_names() { # <키 …> [규약 파일] → 공백으로 가른 이름 한 줄씩(공백 · 탭 · CR · VT · FF만으로 된 토큰은 빼고 — 금지 구분자 검사의 자리)
+    # (M86) 키를 공백으로 이어 여럿 주면 선언 차례대로 이름을 잇는다 — 두 선언이 정의 목록 하나를 나눠 쓰는 시작점 술어(`SPB_KEY` ·
+    # `SPF_KEY`)가 같은 함수로 읽힌다(옛 `sp_*`의 흡수). 키 하나는 종전과 같다.
+    for _dnk in $1; do
+        decl_tail "${2:-$CONV}" "$_dnk" | LC_ALL=C awk '{ n = split($0, a, /[ ]/); for (i = 1; i <= n; i++) if (a[i] ~ /[^ \t\r\v\f]/) print a[i] }'
+    done
 }
 dn_pairs() { # <키> [규약 파일] → 선언의 백틱 구획마다 「이름=값」 한 줄(첫 `=`로 가른다 · `=`가 없는 구획은 버린다)
     decl_tail "${2:-$CONV}" "$1" | LC_ALL=C awk -v q="\`" '{
@@ -2932,11 +2925,15 @@ dn_pairs() { # <키> [규약 파일] → 선언의 백틱 구획마다 「이름
 dn_defs() { # <키> [규약 파일] → 정의 **항목**의 이름 한 줄씩(등장 순서) — 선언 줄부터, 그 줄보다 얕게 들여쓴 비어 있지 않은
     # 줄(또는 제목) 직전까지에서 **선언 줄과 같은 깊이**로 쓴 줄 중 문면이 `- **`이름`**`로 시작하는 줄의 이름(M79 — 더 깊은 줄은
     # 항목이 아니다. 바닥 정의 범위 안의 고지 정의가 섞이지 않는다). 들여쓰기는 공백만 센다(ps1 사본과 같다).
-    LC_ALL=C awk -v k="- \`$1\`" '
+    # (M86) 키가 여럿이면 창은 **첫 키**의 선언 줄 다음 줄부터 다음 제목(`#`) 직전까지이고 **깊이를 가리지 않는다** — 흡수한 옛 `sp_defs`의
+    # 창 그대로다(규약 "상태 확인 항목과 시작점 판단 (선언)" 절 「기계가 묻는 것과 리뷰의 자리」 ⑶). 키 하나는 위 M79 창 그대로다.
+    case $1 in *' '*) _dnany=1 ;; *) _dnany=0 ;; esac
+    LC_ALL=C awk -v k="- \`${1%% *}\`" -v any="$_dnany" '
         function ind(s,   n) { n = 0; while (substr(s, n + 1, 1) == " ") n++; return n }
         { sub(/\r$/, ""); t = $0; sub(/^[ \t]+/, "", t) }
         !on { if (substr(t, 1, length(k)) == k) { on = 1; d = ind($0) } ; next }
         /^#/ { exit }
+        any == 1 { if (substr(t, 1, 5) == "- **`") { r = substr(t, 6); j = index(r, "`**"); if (j > 1) print substr(r, 1, j - 1) } ; next }
         t == "" { next }
         ind($0) < d { exit }
         ind($0) == d && substr(t, 1, 5) == "- **`" { r = substr(t, 6); j = index(r, "`**"); if (j > 1) print substr(r, 1, j - 1) }' "${2:-$CONV}"
@@ -3088,7 +3085,7 @@ chk "N22: 음성 통제 - 붙지 않은 사본은 붉지 않는다" "$(floor_hit
 chk "N23: 픽스처 통제 - 하위 불릿으로 달아도 잡는다" "$(floor_hits "$(floor_fixture nest)")" "1"
 
 # --- 되돌림 축 선언 정합 (M53-T02) ------------------------------------------
-# 되돌림의 방향이 둘(`broken`·`adversarial`)이라는 것을 규약이 선언하고, **각 축이 그 절 안에서 실제로
+# 되돌림의 방향은 규약의 `mutation-axes:` 선언이 들고, **각 축이 그 절 안에서 실제로
 # 서술되는지**를 문다. 선언만 있고 서술이 없으면 «축이 있다»는 말만 남고 무엇을 하라는 것인지가
 # 사라진다 — M53-T01 실측: 재작업 17라운드가 낳은 차단 25건 중 `adversarial` 방향이 연 것이 15건이고
 # `broken` 방향이 연 것은 0건이었다. **묻는 방향이 한쪽이면 나머지는 통째로 뒤 단계로 미뤄진다.**
@@ -3719,8 +3716,6 @@ mst_hits() { # 선언된 상태 값 중 milestone 스킬에 등장하는 **서�
     echo "$_mh"
 }
 if part_on O; then
-chk "O1: retro-status 선언 줄 정확히 1개" "$(decl_count "$CONV" 'retro-status:')" "1"
-chk "O2: retro-block 선언 줄 정확히 1개" "$(decl_count "$CONV" 'retro-block:')" "1"
 # (O3) 추출 positive-control — 마커·표 파싱이 망가지면 아래 본 검사가 «행 0개»로 공허 통과한다.
 chk "O3: 후속 항목 행 추출 positive-control(>0)" "$([ "$(retro_rows "$RETRO")" -gt 0 ] && echo ok || echo no)" "ok"
 # (O4) **본 검사.** 표의 상태 값이 전부 선언 집합 안이어야 한다.
@@ -3761,8 +3756,6 @@ chk "O14: 오탐 방향 - 손대지 않은 사본은 창이 1개" "$(retro_block
 # (O15~O59 · M69·M70) 케이스. 본 검사 셋은 ⑴ 회고가 릴리즈 뒤에 돌았는가(백스톱) ⑵ 선언된 행 키가
 # 추적되는가 ⑶ 릴리즈된 마일스톤이 집었다는 행이 아직 미반영인가다. 통제는 **같은 함수**에 키·사본을
 # 먹여 판정의 반응을 묻는다(M46·M47 판례).
-chk "O15: retro-cadence 선언 줄 정확히 1개" "$(decl_count "$CONV" 'retro-cadence:')" "1"
-chk "O16: retro-pick 선언 줄 정확히 1개" "$(decl_count "$CONV" 'retro-pick:')" "1"
 chk "O17: 회고 기준 버전 추출 positive-control" "$([ -n "$(first_ver "$RETRO" '## ')" ] && echo ok || echo no)" "ok"
 RBASE=$(base_ver "$MDIR")
 RVER=$(first_ver "$RETRO" '## ')
@@ -3779,8 +3772,6 @@ chk "O22: 픽스처 통제 - 표에 없는 키를 주면 잡는다" "$(claim_mis
 chk "O23: 본 검사 - 회고가 본 릴리즈 위에 선 마일스톤의 선언 중 미반영 0개" "$(claim_stale "$RETRO" "$(target_claims "$MDIR" "$RVER" "$CHLOG" "${RSINCE:-0}")")" "0"
 chk "O24: 픽스처 통제 - 미반영 행의 키를 주면 잡는다" "$(claim_stale "$RETRO" "$(key_with_stat "$RETRO" "$RUNDONE")")" "1"
 chk "O25: 음성 통제 - 반영된 행의 키는 세지 않는다" "$(claim_stale "$RETRO" "$(key_with_stat "$RETRO" "$RFIRST")")" "0"
-chk "O26: retro-cadence 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" 'retro-cadence:')" "0"
-chk "O27: retro-pick 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" 'retro-pick:')" "0"
 chk "O28: 갱신 주기 병기어가 재서술처 둘에 공존" "$(scope_tok "$ROOT/skills/release/SKILL.md" "$RCAD")$(scope_tok "$ROOT/docs/commands.md" "$RCAD")" "yesyes"
 chk "O29: 집은 행 병기어가 재서술처 둘에 공존" "$(scope_tok "$ROOT/skills/milestone/SKILL.md" "$RPICK")$(scope_tok "$ROOT/skills/milestone/template.md" "$RPICK")" "yesyes"
 chk "O30: 창 통제 - 마커 창 밖의 키 있는 행은 보지 않는다" "$(claim_stale "$(retro_out_fixture)" zzz-outside)" "0"
@@ -3816,13 +3807,10 @@ chk "O45: 순서 규칙 병기어가 milestone 스킬에 있다" "$(scope_tok "$
 # (O46~O52 · M70 리뷰 라운드 0 차단) **릴리즈 표지** — debug 릴리즈가 기반 버전 규칙을 거짓으로 만들어, 도입 번호
 # 이상의 마일스톤은 릴리즈가 남긴 `- released:` 표지로 가린다. 릴리즈가 표지를 **통째로** 빠뜨렸는가는 묻지 않는다
 # (규약의 경계 — 다음 표지 릴리즈가 늦은 버전으로 메운다). 한 릴리즈가 일부만 표지하고 건너뛴 것은 아래 `O53`이 문다.
-chk "O46: retro-release-mark 선언 줄 정확히 1개" "$(decl_count "$CONV" 'retro-release-mark:')" "1"
-chk "O47: retro-mark-since 선언 줄 정확히 1개" "$(decl_count "$CONV" 'retro-mark-since:')" "1"
 chk "O48: 표지 도입 번호 추출 positive-control(M{숫자})" "$([ -n "$RSINCE" ] && echo ok || echo no)" "ok"
 chk "O49: 릴리즈 표지 병기어가 재서술처 둘에 공존" "$(scope_tok "$ROOT/skills/release/SKILL.md" "$RMARK")$(scope_tok "$ROOT/docs/commands.md" "$RMARK")" "yesyes"
 chk "O50: 본 검사 - 표지 줄이 둘 이상인 마일스톤 문서 0개" "$(mark_dup "$MDIR")" "0"
 chk "O51: 통제 - 표지 줄이 둘인 문서를 센다" "$(mark_dup "$(markdup_fixture)")" "1"
-chk "O52: 세 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" 'retro-release-mark:')$(bad_seps "$CONV" 'retro-mark-since:')$(bad_seps "$CONV" 'retro-mark-derive:')" "000"
 # (O53~O55 · M70 리뷰 라운드 1 차단) **표지 누락** — 표지 대상이 「이번 태그에 실리는 마일스톤 전부」라, 표지가 선
 # 마일스톤 아래에서 impl 보고서가 있는데 표지가 없는 문서는 누락이다(갈래 ⓐ의 공허 통과를 붉힌다). 통제는 합성
 # 픽스처 두 벌(누락 있음 · 없음)에 **같은 함수**를 먹인다 — 도입 번호 미만 · 초안 · 가장 큰 표지 위와 표지 둘을
@@ -3841,20 +3829,12 @@ chk "O56: 본 검사 - 표지가 있으면 가장 작은 표지 번호가 선언
 mkdir -p "$SBX/nomark-milestones"
 printf '%s\n' '# M1' > "$SBX/nomark-milestones/M1.md"
 chk "O57: 통제 - 가장 작은 표지 번호(clean 5 · gap 6 · 표지 없음 빈 값)" "$(mark_since "$GPCL/m")|$(mark_since "$GPFX/m")|$(mark_since "$SBX/nomark-milestones")" "5|6|"
-chk "O58: retro-mark-derive 선언 줄 정확히 1개" "$(decl_count "$CONV" 'retro-mark-derive:')" "1"
 chk "O59: 도입 번호 파생 병기어가 재서술처 셋에 공존" "$(scope_tok "$ROOT/skills/release/SKILL.md" "$RDERIVE")$(scope_tok "$ROOT/skills/retro/SKILL.md" "$RDERIVE")$(scope_tok "$ROOT/docs/commands.md" "$RDERIVE")" "yesyesyes"
 # (O60~O83 · M82) **순서 판정 갈래의 이름 선언** — 옛 산문 ⑴~⑷가 `retro-order-branches:` · `retro-order-verdict:`와 이름별 정의 항목이다.
 # 선언 정합(O60~O69)은 M78 · M79의 바닥 · 고지 선언과 같은 판정이다. 갈래 고정(O70~O74)은 갈래마다 그 갈래로 떨어지는 합성 입력이
 # 그 위치의 이름을 내는지 묻는다 — 러너의 조건 순서를 바꾸면 여기서 붉다. 변환 통제(O75~O83)는 판정이 선언을 읽는 자리마다
 # 합성 규약을 먹여 출력이 따라 바뀌는지 묻는다(`rf-88`). 정의 문장의 뜻과 러너 조건의 같음은 묻지 않는다(규약 「기계가 묻는 것」).
-chk "O60: retro-order-branches 선언 줄 정확히 1개" "$(decl_count "$CONV" "$ROB_KEY")" "1"
-chk "O61: retro-order-verdict 선언 줄 정확히 1개" "$(decl_count "$CONV" "$ROV_KEY")" "1"
 chk "O62: 갈래 이름 · 값 쌍 추출 positive-control(>=1)" "$([ "$(dn_names "$ROB_KEY" | grep -c .)" -ge 1 ] && [ "$(ro_pairs | grep -c .)" -ge 1 ] && echo ok || echo no)" "ok"
-chk "O63: 갈래 선언 두 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$ROB_KEY")$(bad_seps "$CONV" "$ROV_KEY")" "00"
-chk "O64: 본 검사 - 갈래 이름이 유일하다" "$(dn_dup "$ROB_KEY")" "0"
-chk "O65: 본 검사 - 갈래 이름마다 정의 항목이 정확히 하나" "$(dn_def_bad "$ROB_KEY")" "0"
-chk "O66: 본 검사 - 갈래 정의 항목마다 선언된 이름이 있다(고아 정의 0)" "$(dn_def_orphan "$ROB_KEY")" "0"
-chk "O67: 본 검사 - 갈래 정의 항목의 순서가 선언의 이름 순서와 같다" "$(dn_def_order "$ROB_KEY")" "0"
 chk "O68: 본 검사 - 값 선언의 이름 집합이 갈래 이름 집합과 같다" "$(ro_pair_mismatch)" "0"
 chk "O69: 본 검사 - 갈래 값이 ok · no 안에 있다" "$(ro_value_bad)" "0"
 ro_pin() { # <갈래 위치> <회고 버전> <첫째> <둘째> <기반 버전> → 판정이 낸 이름이 선언의 그 위치 이름과 같고 비지 않으면 yes
@@ -4284,8 +4264,6 @@ crit_skill_fixture() { # <모드> → 스킬 사본 경로
     printf '%s' "$_csf"
 }
 if part_on P; then
-chk "P1: criteria-verdict 선언 줄 정확히 1개" "$(decl_count "$CONV" 'criteria-verdict:')" "1"
-chk "P2: criteria-since 선언 줄 정확히 1개" "$(decl_count "$CONV" 'criteria-since:')" "1"
 # (P3) 추출 positive-control — 기준 파싱이 망가지면 «집합이 같다»가 «0 == 0»으로 공허 통과한다.
 chk "P3: 완료 기준 번호 추출 positive-control(>0)" "$([ "$(crit_seen "$CRITN")" -gt 0 ] && echo ok || echo no)" "ok"
 # (P4·P5) **본 검사 둘.** 번호 집합 일치(빠짐 0·유령 0)와 판정 값의 집합 소속.
@@ -4354,7 +4332,6 @@ meas_fixture() { # <blank|intact> → 가장 큰 번호 보고서 사본(blank�
     else cp "$_msrc" "$_mff"; fi
     printf '%s' "$_mff"
 }
-chk "P20: metrics-filled-since 선언 줄 정확히 1개" "$(decl_count "$CONV" "$MFS_KEY")" "1"
 chk "P21: 계측 줄 자리 수와 대상 보고서 추출 positive-control" "$([ "$(meas_slots)" -ge 1 ] && [ "$(meas_reports | grep -c .)" -ge 1 ] && echo ok || echo no)" "ok"
 chk "P22: 본 검사 - 선언 번호 이상 리뷰 보고서의 계측 줄 값이 비지 않는다" "$(meas_bad_total)" "0"
 chk "P23: 픽스처 통제 - 계측 줄 값 하나를 비운 사본에서 하나 늘어난다" "$(( $(meas_line_bad "$(meas_fixture blank)") - $(meas_line_bad "$(meas_fixture intact)") ))" "1"
@@ -4456,7 +4433,6 @@ bk_fixture() { # → 릴리즈 스킬 사본에 토큰 하나를 심은 것 (실
     printf '%s' "$_bkf"
 }
 if part_on R; then
-chk "R1: coverage-bookkeeping 선언 줄 정확히 1개" "$(decl_count "$CONV" "$BK_KEY")" "1"
 # (R2) 추출 positive-control — 토큰이 0개면 아래 본 검사가 «복제 0»으로 공허하게 통과한다.
 chk "R2: 토큰 추출 positive-control(>0)" "$([ "$(bk_tokens | LC_ALL=C awk '{ print NF }')" -gt 0 ] && echo ok || echo no)" "ok"
 # (R3) **본 검사.** 소비자가 목록을 다시 열거하면 그 자리가 두 번째 선언처가 된다.
@@ -4492,8 +4468,6 @@ ts_fixture() { # → 종료 상태 토큰을 **지운** 릴리즈 스킬 사본(
     printf '%s' "$_tsf"
 }
 if part_on S; then
-chk "S1: push-availability 선언 줄 정확히 1개" "$(decl_count "$CONV_REL" "$PA_KEY")" "1"
-chk "S2: terminal-state 선언 줄 정확히 1개" "$(decl_count "$CONV_REL" "$TS_KEY")" "1"
 # (S3) 추출 positive-control — 꼬리가 비면 아래 본 검사가 빈 토큰을 찾아 **공허하게** 갈린다.
 chk "S3: 두 선언 꼬리 추출 positive-control"     "$([ -n "$(pa_token)" ] && [ -n "$(ts_token)" ] && echo ok || echo no)" "ok"
 # (S4·S5) **본 검사** — 종료 상태 이름이 소비자 둘에 실제로 가 있는가. 규약에서 값을 바꾸면
@@ -4678,9 +4652,6 @@ dcn_stray() { # [더 볼 파일] → 규약 문서 집합 · release 스킬 · �
     dcn_toks "$ROOT"/docs/conventions*.md "$REL_SKILL" "$CMD_CANON" ${1:+"$1"} | { _c=0; while IFS= read -r _v; do [ -n "$_v" ] || continue
         printf '%s\n' "$_dcnu" | LC_ALL=C grep -qxF -- "$_v" || _c=$((_c + 1)); done; echo "$_c"; }
 }
-dcn_sum() { # <함수> → 두 키에 대해 그 판정을 돌린 합
-    echo $(( $("$1" "$DCP_KEY" "$CONV_REL") + $("$1" "$DCE_KEY" "$CONV_REL") ))
-}
 dcn_fixture() { # <defdrop|addname|outside|inside|prose|headtail|stray|after|anclast|ancdup> → 판정의 반응을 묻는 사본(실제 파일을 건드리지 않는다)
     _dcnf="$SBX/dcn-$1.md"
     case "$1" in
@@ -4780,8 +4751,6 @@ pf_fixture() { # <defdrop|addname|before|inside|after|prose|headtail|swap|stray|
     printf '%s' "$_pff"
 }
 if part_on S; then
-chk "S8: docs-commit-paths 선언 줄 정확히 1개" "$(decl_count "$CONV_REL" "$DC_KEY")" "1"
-chk "S9: docs-commit-paths 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV_REL" "$DC_KEY")" "0"
 # (S10) 추출 positive-control — 값이 비거나 스킬의 절이 사라지면 S11~S13 · S15가 «0»으로 공허하게 통과한다.
 chk "S10: 선언 값과 스킬 절 추출 positive-control" "$([ "$(dc_count)" -ge 1 ] && [ -n "$(dc_sec "$REL_SKILL")" ] && echo ok || echo no)" "ok"
 chk "S11: 본 검사 - 선언 값의 형태(끝의 /* 하나 · @ 조건은 다른 선언 값)" "$(dc_form_bad)" "0"
@@ -4793,13 +4762,9 @@ chk "S15: 본 검사 - 스킬의 문서 커밋 경로 절이 경로를 다시 �
 chk "S16: 픽스처 통제 - 절에 심은 경로를 잡는다" "$(( $(dc_dup_in "$(dc_dup_fixture)") - $(dc_dup_in "$REL_SKILL") ))" "1"
 chk "S17: 본 검사 - 회고 자동 실행의 돌지 않는 분기 항목에 docs 동작이 있다(앵커 1줄)" "$(dc_item_has "$REL_SKILL")" "yes 1"
 chk "S18: 픽스처 통제 - 항목에서 docs 토큰이 빠지면 잡는다" "$(( $(dc_item_yes "$REL_SKILL") - $(dc_item_yes "$(dc_item_fixture)") ))" "1"
-chk "S20: docs-commit-deny 선언 줄 정확히 1개" "$(decl_count "$CONV_REL" "$DCD_KEY")" "1"
 # (S21) 추출 positive-control — 거부 접두사가 비면 `S12`가 「`docs/` 밖」만 보고 판정 보고서를 허용하는 선언이 초록이 된다.
 chk "S21: 거부 접두사 추출 positive-control(>=1)" "$([ "$(dc_deny | grep -c .)" -ge 1 ] && echo ok || echo no)" "ok"
-chk "S22: docs-commit-deny 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV_REL" "$DCD_KEY")" "0"
 chk "S19: 본 검사 - 재서술처 셋(규약 본체 · 카탈로그 · CLAUDE.md)이 선언 키를 갖는다" "$(has_token "$CONV" "${DC_KEY%:}")$(has_token "$CMD_CANON" "${DC_KEY%:}")$(has_token "$CLAUDE_MD" "${DC_KEY%:}")" "yesyesyes"
-chk "S23: docs-commit-parts 선언 줄 정확히 1개" "$(decl_count "$CONV_REL" "$DP_KEY")" "1"
-chk "S24: docs-commit-parts 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV_REL" "$DP_KEY")" "0"
 # (S25) 추출 positive-control — 토큰이 비면 `S26`은 빠진 경로만 세고 `S27`은 «0»으로 공허하게 통과한다.
 chk "S25: docs-commit-parts 토큰 추출 positive-control(>=1)" "$([ "$(dp_toks | grep -c .)" -ge 1 ] && echo ok || echo no)" "ok"
 chk "S26: 본 검사 - 허용 경로마다 파트 토큰이 정확히 하나이고 토큰마다 허용 경로를 가리킨다" "$(dp_bad)" "0"
@@ -4808,15 +4773,9 @@ chk "S28: 배선 - release 스킬이 docs-commit-parts 키를 가리킨다" "$(h
 # (S29 · S30) 픽스처 통제 — 판정의 **반응**을 묻는다(`control-reads-delta`).
 chk "S29: 픽스처 통제 - 파트 토큰 하나를 지우면 잡는다" "$(( $(dp_bad "$(dp_fixture drop)") - $(dp_bad) ))" "1"
 chk "S30: 픽스처 통제 - 모르는 라벨을 잡는다" "$(( $(dp_label_bad "$(dp_fixture label)") - $(dp_label_bad) ))" "1"
-chk "S31: docs-commit-preconds 선언 줄 정확히 1개" "$(decl_count "$CONV_REL" "$DCP_KEY")" "1"
-chk "S32: docs-commit-epic-cases 선언 줄 정확히 1개" "$(decl_count "$CONV_REL" "$DCE_KEY")" "1"
 chk "S33: 두 선언 줄 꼬리에 금지 구분자 0건" "$(( $(bad_seps "$CONV_REL" "$DCP_KEY") + $(bad_seps "$CONV_REL" "$DCE_KEY") ))" "0"
 # (S34) 추출 positive-control — 이름이 비거나 스킬 절 단계 머리에 `dc-` 토큰이 없으면 S35~S40이 «0»으로 공허하게 통과한다.
 chk "S34: 두 선언의 이름과 스킬 절 단계 머리의 dc- 토큰 추출 positive-control" "$([ "$(dn_names "$DCP_KEY" "$CONV_REL" | grep -c .)" -ge 1 ] && [ "$(dn_names "$DCE_KEY" "$CONV_REL" | grep -c .)" -ge 1 ] && [ "$(dc_sec "$REL_SKILL" | dcn_heads | dcn_toks - | grep -c .)" -ge 1 ] && echo ok || echo no)" "ok"
-chk "S35: 본 검사 - 두 선언의 이름이 유일하다" "$(dcn_sum dn_dup)" "0"
-chk "S36: 본 검사 - 이름마다 정의 항목이 정확히 하나다" "$(dcn_sum dn_def_bad)" "0"
-chk "S37: 본 검사 - 선언에 없는 정의 항목이 없다" "$(dcn_sum dn_def_orphan)" "0"
-chk "S38: 본 검사 - 정의 항목의 순서가 선언의 이름 순서와 같다" "$(dcn_sum dn_def_order)" "0"
 chk "S39: 본 검사 - 스킬 문서 커밋 절의 단계 머리가 가리킨 dc- 이름 집합이 전제 선언의 이름 집합과 같다" "$(dcn_cover_bad)" "0"
 chk "S40: 본 검사 - 규약 문서 집합 · release 스킬 · 카탈로그의 dc- 토큰이 전부 선언된 이름이다" "$(dcn_stray)" "0"
 # (S41~S45) 변환 통제(`rf-88`) — 판정의 **반응**을 차이로 묻는다(`control-reads-delta`): 정의 범위 · 헬퍼 배선(규약 조각 인자) · 이름 추출 ·
@@ -4829,14 +4788,8 @@ chk "S45: 변환 통제 - 선언에 없는 dc- 토큰 하나를 센다" "$(( $(d
 # (S46 · S47) 단계 머리 창의 통제(M83 리뷰 라운드 0 차단 1) — 절 안이라도 산문 줄과 굵은 구획 뒤의 언급은 덮음으로 치지 않는다.
 chk "S46: 변환 통제 - 스킬 절 안 산문 줄의 dc- 토큰은 세지 않는다" "$(( $(dcn_cover_bad "$CONV_REL" "$(dcn_fixture prose)") - $(dcn_cover_bad) ))" "0"
 chk "S47: 변환 통제 - 단계 머리 굵은 구획 뒤의 dc- 토큰은 세지 않는다" "$(( $(dcn_cover_bad "$CONV_REL" "$(dcn_fixture headtail)") - $(dcn_cover_bad) ))" "0"
-chk "S48: release-preflights 선언 줄 정확히 1개" "$(decl_count "$CONV" "$PFS_KEY")" "1"
-chk "S49: release-preflights 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$PFS_KEY")" "0"
 # (S50) 추출 positive-control — 이름이 비거나 프리플라이트 창 단계 머리에 `pf-` 토큰이 없으면 S51~S57이 «0»으로 공허하게 통과한다.
 chk "S50: 프리플라이트 이름과 창 단계 머리의 pf- 토큰 추출 positive-control" "$([ "$(dn_names "$PFS_KEY" "$CONV" | grep -c .)" -ge 1 ] && [ "$(pf_heads_toks | grep -c .)" -ge 1 ] && echo ok || echo no)" "ok"
-chk "S51: 본 검사 - 프리플라이트 이름이 유일하다" "$(dn_dup "$PFS_KEY" "$CONV")" "0"
-chk "S52: 본 검사 - 이름마다 정의 항목이 정확히 하나다" "$(dn_def_bad "$PFS_KEY" "$CONV")" "0"
-chk "S53: 본 검사 - 선언에 없는 정의 항목이 없다" "$(dn_def_orphan "$PFS_KEY" "$CONV")" "0"
-chk "S54: 본 검사 - 정의 항목의 순서가 선언의 이름 순서와 같다" "$(dn_def_order "$PFS_KEY" "$CONV")" "0"
 chk "S55: 본 검사 - 스킬 프리플라이트 창 단계 머리의 pf- 이름 집합이 선언의 이름 집합과 같다" "$(pf_cover_bad)" "0"
 chk "S56: 본 검사 - 스킬 프리플라이트 창 단계 머리의 이름 차례가 선언 순서와 같다" "$(pf_order_bad)" "0"
 chk "S57: 본 검사 - 규약 문서 집합 · release · cycle 스킬 · 카탈로그의 pf- 토큰이 전부 선언된 이름이다" "$(pf_stray)" "0"
@@ -4870,7 +4823,6 @@ fi
 # M59에서 `run.sh`가 CRLF가 되자 **dash만** 즉사하고 bash·양 PowerShell은 초록이었다 — 「양 사본
 # 동일」도 「네 환경 동수」도 이 형태를 덮지 못한다. 패턴의 선언처는 `.gitattributes` 한 곳이고
 # 러너는 읽기만 한다(규약의 `source-eol:` 선언이 그 자리를 가리킨다).
-EOL_KEY='source-eol:'
 GITATTR="$ROOT/.gitattributes"
 eol_globs() { # [경로] → `.gitattributes`에서 eol=lf를 건 패턴 토큰(줄당 첫 낱말) 한 줄씩
     # 경로를 인자로 받는 이유는 `T7`이 **다른 파일을 먹여** 추출이 상수가 아니라 파일을 읽는지
@@ -4930,7 +4882,6 @@ b
     printf '%s' "$_efx"
 }
 if part_on T; then
-chk "T1: source-eol 선언 줄 정확히 1개" "$(decl_count "$CONV" "$EOL_KEY")" "1"
 # (T2) 추출 positive-control — 패턴이 0개면 아래 「검출 0」이 공허하다.
 chk "T2: eol=lf 패턴 추출 positive-control(>0)" "$([ "$(eol_globs | grep -c .)" -gt 0 ] && echo ok || echo no)" "ok"
 # (T3) 대상 positive-control — 패턴은 있는데 걸리는 추적 파일이 0개여도 같은 공허가 된다.
@@ -4968,7 +4919,6 @@ skipped_ms() { # [추가 마일스톤 번호] → 제외된 번호
 }
 skipped_n() { skipped_ms "${1-}" | grep -c .; }
 if part_on U; then
-chk "U1: measure-order 선언 줄 정확히 1개" "$(decl_count "$CONV" "$MO_KEY")" "1"
 # (U2) 추출 positive-control — 꼬리가 비면 아래 결합이 빈 토큰으로 공허하게 성립한다.
 chk "U2: 병기어 추출 positive-control" "$([ -n "$(mo_name)" ] && echo ok || echo no)" "ok"
 # (U3~U5) **본 검사** — 규율이 재서술되는 세 자리에 병기어가 실제로 가 있는가.
@@ -5337,11 +5287,6 @@ cf_restated() { # <병기어> → 그 병기어를 **백틱 토큰**으로 가�
     echo "$_cfn"
 }
 if part_on V; then
-chk "V1: control-form 선언 줄 정확히 1개" "$(decl_count "$CONV" "$CF_KEY")" "1"
-chk "V2: reversal-block 선언 줄 정확히 1개" "$(decl_count "$CONV" "$RVB_KEY")" "1"
-chk "V3: reversal-columns 선언 줄 정확히 1개" "$(decl_count "$CONV" "$RVC_KEY")" "1"
-chk "V4: reversal-sep 선언 줄 정확히 1개" "$(decl_count "$CONV" "$RVS_KEY")" "1"
-chk "V5: reversal-since 선언 줄 정확히 1개" "$(decl_count "$CONV" "$RVN_KEY")" "1"
 # (V6·V7) 추출 positive-control 둘 — 어느 하나가 비면 아래 본 검사가 **0 == 0**으로 공허 통과한다.
 chk "V6: 되돌림 행 추출 positive-control(>0)" "$([ "$(rv_rows_n)" -gt 0 ] && echo ok || echo no)" "ok"
 chk "V7: 본 검사 목록 추출 positive-control(>0)" "$([ "$(rv_main_n)" -gt 0 ] && echo ok || echo no)" "ok"
@@ -5388,7 +5333,7 @@ chk "V26: 픽스처 통제 - 목록 줄을 하나 더 만든 보고서를 더하
 chk "V30: 픽스처 통제 - 목록 줄을 두 줄로 접은 보고서를 더해도 하나 는다" "$(( $(rv_mainbadn "$RVN" "$(rv_fixture foldmain)") - $(rv_mainbadn "$RVN") ))" "1"
 chk "V33: 픽스처 통제 - 이름을 닫는 태그 뒤로 민 보고서를 더해도 하나 는다" "$(( $(rv_mainbadn "$RVN" "$(rv_fixture aftermain)") - $(rv_mainbadn "$RVN") ))" "1"
 chk "V27: 음성 통제 - 손대지 않은 사본을 더해도 늘지 않는다" "$(( $(rv_mainbadn "$RVN" "$(rv_fixture clean)") - $(rv_mainbadn "$RVN") ))" "0"
-# (V19) **본 검사 — 축 값의 집합 소속.** 되돌림의 방향은 둘(`mutation-axes:`)이고 표가 행마다 그것을
+# (V19) **본 검사 — 축 값의 집합 소속.** 되돌림의 방향은 `mutation-axes:` 선언이 들고 표가 행마다 그것을
 # 적는다. 열만 만들고 값을 안 재면 **죽은 선언**이 된다 — 빈 칸도 집합 밖으로 센다.
 chk "V19: 본 검사 - 선언 집합 밖이거나 빈 축 값 0개" "$(rv_axisbad)" "0"
 # (V20) 픽스처 통제 — 차이로 묻는다.
@@ -5524,13 +5469,10 @@ marks_used_in() { # <파일> <선언 키> <표지들> → 그 **선언 줄이 �
 # 값 수가 어긋나면 `W156` · `W157`이 붉다. 헬퍼는 파트 가드 **밖**에서 정의한다(`rf-60`).
 SPB_KEY='start-point-block-predicates:'
 SPF_KEY='start-point-form-predicates:'
-sp_names() { # <B|F> [규약 파일] → 선언된 이름 한 줄씩(공백 · 탭 · CR · VT · FF만으로 된 토큰은 빼고 — 그것은 금지 구분자 검사의 자리)
-    case $1 in B) _spk=$SPB_KEY ;; *) _spk=$SPF_KEY ;; esac
-    decl_tail "${2:-$CONV}" "$_spk" | LC_ALL=C awk '{ n = split($0, a, /[ ]/); for (i = 1; i <= n; i++) if (a[i] ~ /[^ \t\r\v\f]/) print a[i] }'
-}
-sp_count() { sp_names "$@" | grep -c .; }
+sp_key() { case $1 in B) printf '%s' "$SPB_KEY" ;; *) printf '%s' "$SPF_KEY" ;; esac; }   # <B|F> → 선언 키
+sp_count() { dn_names "$(sp_key "$1")" | grep -c .; }
 sp_name() { # <B|F> <값들> [규약 파일] → "이름=값 …"(위치로 짝짓는다 · 이름이 모자라면 `?=값` · 값이 모자라면 `이름=?`)
-    _spn=$(sp_names "$1" "${3:-}" | LC_ALL=C tr '\n' ' ')
+    _spn=$(dn_names "$(sp_key "$1")" "${3:-}" | LC_ALL=C tr '\n' ' ')
     LC_ALL=C awk -v names="$_spn" -v vals="$2" 'BEGIN {
         sub(/ +$/, "", names); sub(/^ +/, "", vals); sub(/ +$/, "", vals)
         n = (names == "") ? 0 : split(names, N, / +/); m = (vals == "") ? 0 : split(vals, V, / +/)
@@ -5538,51 +5480,30 @@ sp_name() { # <B|F> <값들> [규약 파일] → "이름=값 …"(위치로 짝�
         for (i = 1; i <= k; i++) { s = s (i > 1 ? " " : "") ((i <= n) ? N[i] : "?") "=" ((i <= m) ? V[i] : "?") }
         print s }'
 }
-sp_defs() { # [규약 파일] → 정의 **항목**의 이름 한 줄씩(등장 순서) — 블록 술어 선언 줄부터 다음 제목(`#`) 직전까지, 걷은 문면이 `- **`이름`**`로 시작하는 줄의 이름
-    # (M75 리뷰 사소 3 — 「`**`이름`**`을 담은 아무 줄」이 아니라 항목 머리만 센다).
-    LC_ALL=C awk -v k="- \`$SPB_KEY\`" '
-        { sub(/\r$/, ""); t = $0; sub(/^[ \t]+/, "", t) }
-        !on && substr(t, 1, length(k)) == k { on = 1; next }
-        on && /^#/ { exit }
-        on && substr(t, 1, 5) == "- **`" { r = substr(t, 6); j = index(r, "`**"); if (j > 1) print substr(r, 1, j - 1) }' "${1:-$CONV}"
-}
-# (M76) **정의 항목의 순서는 선언의 이름 순서(블록 다음 형태)와 같다** — 선언된 이름을 가진 정의 항목을 등장 순서대로 걸으며, 선언에서의 위치가
-# 앞 항목보다 앞으로 되돌아간 횟수를 센다(정상 0). 선언만 또는 정의만 순서를 바꾼 편집이 붉다. 둘을 함께 바꾼 편집은 초록이다 — 이름이 값의
-# 위치와 **뜻으로** 맞는가는 여기서 묻지 않는다(규약의 「기계가 묻는 것과 리뷰의 자리」 항목). 선언되지 않은 정의는 `W160`의 자리라 건너뛴다.
-sp_def_order() { # [규약 파일] → 순서를 거스른 횟수
-    _spof=${1:-$CONV}
-    _spol=$({ sp_names B "$_spof"; sp_names F "$_spof"; } | LC_ALL=C tr '\n' ' ')
-    sp_defs "$_spof" | LC_ALL=C awk -v names="$_spol" '
-        BEGIN { n = split(names, N, / +/); for (i = 1; i <= n; i++) if (N[i] != "" && !(N[i] in I)) I[N[i]] = i }
-        ($0 in I) { if (p && I[$0] < p) c++; p = I[$0] }
-        END { print c + 0 }'
-}
-sp_order_fixture() { # <in|swap> → 선언 두 줄과 정의 항목 셋만 든 합성 규약(순서 통제). `swap`은 정의 첫 둘의 순서만 바꾼다.
+# (M86) **이름 · 정의 · 고아 · 유일 · 순서 판정은 공용 헬퍼 `dn_*`가 낸다** — 두 선언을 공백으로 이은 키 목록(`SP_KEYS`)을 넘긴다.
+# 정의 창은 키가 여럿일 때의 `dn_defs` 창(블록 술어 선언 줄 다음부터 다음 제목 직전까지 · **깊이를 가리지 않는다**)이고, 흡수한 옛 `sp_defs`의
+# 창과 같다(M86 리뷰 차단 1 — 같은 깊이만 세게 좁혔던 라운드 0은 들여쓴 고아 정의를 초록으로 남겼다). 통제는 `W164`.
+SP_KEYS="$SPB_KEY $SPF_KEY"
+sp_order_fixture() { # <in|swap|deep|deepx> → 선언 두 줄과 정의 항목 셋만 든 합성 규약(순서 통제). `swap`은 정의 첫 둘의 순서만 바꾼다.
     # 실제 규약을 쓰지 않는다 — 실제 규약의 순서가 이미 어긋나 있으면 맞바꾼 사본이 위반을 **줄여** 통제가 기준선을 재게 된다(M76 되돌림 실측).
+    # (M86 라운드 1) `deep`은 둘째 정의를 더 깊이 들이고 그 앞에 0열 산문 한 줄을 둔다 — 키 여럿의 창이 깊이를 가리지 않음의 통제(`W164`).
+    # `deepx`는 거기에 더 깊이 들인 고아 정의 `zz-od` 하나를 더한다.
     _spxf="$SBX/conv-spo-$1.md"
     if [ "$1" = swap ]; then _spx1=zz-ob; _spx2=zz-oa; else _spx1=zz-oa; _spx2=zz-ob; fi
-    printf '%s\n' "## fixture" "" "  - \`$SPB_KEY\` zz-oa zz-ob" "" "  - \`$SPF_KEY\` zz-oc" "" \
-        "  - **\`$_spx1\`** - x" "  - **\`$_spx2\`** - x" "  - **\`zz-oc\`** - x" > "$_spxf"
+    case $1 in
+        deep|deepx)
+            printf '%s\n' "## fixture" "" "  - \`$SPB_KEY\` zz-oa zz-ob" "" "  - \`$SPF_KEY\` zz-oc" "" \
+                "  - **\`zz-oa\`** - x" "zz prose" "      - **\`zz-ob\`** - x" "  - **\`zz-oc\`** - x" > "$_spxf"
+            [ "$1" = deepx ] && printf '%s\n' "      - **\`zz-od\`** - x" >> "$_spxf" ;;
+        *)
+            printf '%s\n' "## fixture" "" "  - \`$SPB_KEY\` zz-oa zz-ob" "" "  - \`$SPF_KEY\` zz-oc" "" \
+                "  - **\`$_spx1\`** - x" "  - **\`$_spx2\`** - x" "  - **\`zz-oc\`** - x" > "$_spxf" ;;
+    esac
     printf '%s' "$_spxf"
-}
-sp_def_bad() { # → 선언된 이름 중 정의 항목이 정확히 하나가 아닌 이름의 수(선언 → 정의)
-    _spdl=$(sp_defs)
-    { sp_names B; sp_names F; } | { _spd=0; while IFS= read -r _spv; do
-        [ "$(printf '%s\n' "$_spdl" | LC_ALL=C grep -cxF -- "$_spv")" = 1 ] || _spd=$((_spd + 1))
-    done; echo "$_spd"; }
-}
-sp_def_orphan() { # → 정의 항목 중 두 선언 어디에도 없는 이름의 수(정의 → 선언 · M75 리뷰 차단 1 — 산문이 선언보다 넓어도 초록이었다)
-    _spnl=$({ sp_names B; sp_names F; })
-    sp_defs | { _spo=0; while IFS= read -r _spv; do
-        printf '%s\n' "$_spnl" | LC_ALL=C grep -qxF -- "$_spv" || _spo=$((_spo + 1))
-    done; echo "$_spo"; }
-}
-sp_name_dup() { # → 두 선언을 통틀어 두 번 이상 나온 이름의 초과 수(같은 이름이 두 값에 붙거나 두 선언에 들면 붉다)
-    { sp_names B; sp_names F; } | LC_ALL=C sort | LC_ALL=C uniq -d | grep -c .
 }
 sp_wire_fixture() { # → 블록 선언의 첫 이름을 바꾼 규약 사본(배선 통제 — 이름을 박지 않았다면 출력이 따라 바뀐다)
     _spwf="$SBX/conv-spw.md"
-    _spw1=$(sp_names B | head -1)
+    _spw1=$(dn_names "$SPB_KEY" | head -1)
     if [ -n "$_spw1" ]; then
         LC_ALL=C awk -v k="\`$SPB_KEY\`" -v o="$_spw1" '{ i = index($0, k); if (i > 0) { t = substr($0, i + length(k)); j = index(t, " " o); if (j > 0) $0 = substr($0, 1, i + length(k) - 1) substr(t, 1, j) "zzz-wired" substr(t, j + 1 + length(o)) } print }' "$CONV" > "$_spwf"
     else
@@ -5635,7 +5556,6 @@ MK_FIX4="$SBX/marks-boldlist.md"
     printf 'the markers are **`zzz-m1`** and **`zzz-m2`** on one line\n'
     printf 'uses **`zzz-m1`** as a boundary sentence\n'
 } > "$MK_FIX4"
-chk "W1: scope-decl 선언 줄 정확히 1개" "$(decl_count "$CONV" "$SCOPE_KEY")" "1"
 # (W2) 추출 positive-control — 병기어를 못 뽑으면 아래 결합이 **폴백 토큰**으로 돌아 전부 붉는데,
 # 그 원인이 「어디서 지워졌는가」인지 「선언이 없는가」인지 여기서 갈린다.
 chk "W2: 병기어 추출 positive-control" "$([ "$SCOPE_ALIAS" != zzz-scope-decl-unset ] && echo ok || echo no)" "ok"
@@ -5650,7 +5570,6 @@ chk "W6: impl 템플릿이 병기어를 백틱 토큰으로 갖는다" "$(scope_
 # (W30) **자리별 단언 — 셋째 재서술처**(M63). 결합(`W3`)만 넓히면 **어느 자리가 죽었는지**가 가려진다
 # (`W4`~`W6`이 앞 셋에 대해 같은 판단을 적는 것과 같은 형태다).
 chk "W30: review 템플릿이 병기어를 백틱 토큰으로 갖는다" "$(scope_tok "$REV_TPL" "$SCOPE_ALIAS")" "yes"
-chk "W7: scope-limits 선언 줄 정확히 1개" "$(decl_count "$CONV" "$SCOPE_LIM_KEY")" "1"
 # (W8) 표지 추출 positive-control — 0이면 아래 `W9`가 **0 == 0**으로 공허 통과한다.
 chk "W8: 경계 표지 추출 positive-control(>0)" "$([ "$NSCM" -gt 0 ] && echo ok || echo no)" "ok"
 # (W9) **본 검사** — 선언한 경계 표지가 전부 규약 본문에서 **실제로 쓰인다**(경계 문장이 살아 있다).
@@ -5690,7 +5609,6 @@ chk "W12: 배선 - 다른 병기어를 주면 결합이 성립하지 않는다" 
 MC_KEY='measure-cache:'
 MC_ALIAS=$(decl_tail "$CONV" "$MC_KEY" | LC_ALL=C awk '{ print $1 }')
 [ -n "$MC_ALIAS" ] || MC_ALIAS=zzz-measure-cache-unset
-chk "W13: measure-cache 선언 줄 정확히 1개" "$(decl_count "$CONV" "$MC_KEY")" "1"
 # (W14) 추출 positive-control — `W2`와 같은 사유(폴백으로 돌면 원인이 가려진다).
 chk "W14: 캐시 병기어 추출 positive-control" "$([ "$MC_ALIAS" != zzz-measure-cache-unset ] && echo ok || echo no)" "ok"
 # (W15~W17) **본 검사** — 병기어가 규약과 impl 스킬 둘 다에 있고(`in_both`), 규약 쪽은 **정의 줄**을,
@@ -5710,7 +5628,6 @@ chk "W18: 배선 - 다른 캐시 병기어를 주면 결합이 성립하지 않�
 VS_KEY='verify-scope:'
 VS_MARKS=$(markers_of "$VS_KEY")
 NVSM=$(printf '%s\n' "$VS_MARKS" | grep -c .)
-chk "W19: verify-scope 선언 줄 정확히 1개" "$(decl_count "$CONV" "$VS_KEY")" "1"
 # (W20) 추출 positive-control — 0이면 아래 `W21`이 **0 == 0**으로 공허 통과한다(`W8`과 같은 사유).
 chk "W20: 검증 범위 표지 추출 positive-control(>0)" "$([ "$NVSM" -gt 0 ] && echo ok || echo no)" "ok"
 # (W21) **본 검사** — 선언한 표지가 전부 규약 본문에서 **실제로 쓰인다**(정의 문장이 살아 있다).
@@ -5720,7 +5637,6 @@ chk "W21: 검증 범위 표지 전부가 선언 절 안에서 쓰인다" "$(mark
 # 보이지 않는 한 글자(NBSP·탭)에 **한쪽만 붉어 총계가 갈린다** — 실측된 자리다. 금지 자체를 여기
 # 두면 그 갈림이 **양 축에서 함께** 붉는다. 통제(`I12`·`I13`)가 이미 이 금지의 비공허를 실증하므로
 # 여기서 픽스처를 다시 만들지 않는다.
-chk "W26: scope-decl 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$SCOPE_KEY")" "0"
 # (W49~W57 · M65) **구조적 불가 주장의 근거** — `scope-decl:`의 반대 방향 병기어다. 층·재서술처·기전이
 # 위 `W1`~`W6`·`W12`·`W26`과 같아 **같은 헬퍼**(`scope_all`·`scope_defn`·`scope_tok`·`bad_seps`)를 부른다.
 # 공유의 근거는 **규약이 두 병기어에 적은 재서술처 목록이 같다**는 사실이다 — 한쪽만 늘면 공유가
@@ -5729,7 +5645,6 @@ chk "W26: scope-decl 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$C
 INF_KEY='infeasible-decl:'
 INF_ALIAS=$(decl_tail "$CONV" "$INF_KEY" | LC_ALL=C awk '{ print $1 }')
 [ -n "$INF_ALIAS" ] || INF_ALIAS=zzz-infeasible-decl-unset
-chk "W49: infeasible-decl 선언 줄 정확히 1개" "$(decl_count "$CONV" "$INF_KEY")" "1"
 chk "W50: 불가 주장 병기어 추출 positive-control" "$([ "$INF_ALIAS" != zzz-infeasible-decl-unset ] && echo ok || echo no)" "ok"
 # (W51) **본 검사** — 규약 + 재서술처 셋, 네 파일 결합(`W3`과 같은 헬퍼).
 chk "W51: 불가 주장 병기어($INF_ALIAS) 네 파일 전부에 등장" "$(scope_all "$INF_ALIAS")" "yes"
@@ -5742,14 +5657,12 @@ chk "W55: review 템플릿이 불가 주장 병기어를 백틱 토큰으로 갖
 # **구조로 상수**다).
 chk "W56: 배선 - 다른 불가 주장 병기어를 주면 결합이 성립하지 않는다" "$(scope_all zzz-other-infeasible)" "no"
 # (W57) 꼬리 구분자 — `W26`과 같은 헬퍼·같은 사유(두 사본의 분리 폭이 갈리는 자리를 양 축에서 함께 붉힌다).
-chk "W57: infeasible-decl 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$INF_KEY")" "0"
 # (W58~W66 · M66) **다른 절차에 기대는 주장의 분기** — `scope-decl:`·`infeasible-decl:`과 같은 층의 셋째
 # 병기어이고 재서술처도 같은 셋이라 **같은 헬퍼**를 부른다(공유의 근거와 깨지는 조건은 `W49` 주석과 같다).
 # 발화(어떤 문장이 기대는 주장인가)는 여기서 묻지 않는다 — 규약이 그 판정을 리뷰의 목록 대조에 둔다.
 LEAN_KEY='lean-decl:'
 LEAN_ALIAS=$(decl_tail "$CONV" "$LEAN_KEY" | LC_ALL=C awk '{ print $1 }')
 [ -n "$LEAN_ALIAS" ] || LEAN_ALIAS=zzz-lean-decl-unset
-chk "W58: lean-decl 선언 줄 정확히 1개" "$(decl_count "$CONV" "$LEAN_KEY")" "1"
 chk "W59: 기대는 분기 병기어 추출 positive-control" "$([ "$LEAN_ALIAS" != zzz-lean-decl-unset ] && echo ok || echo no)" "ok"
 # (W60) **본 검사** — 규약 + 재서술처 셋, 네 파일 결합(`W3`·`W51`과 같은 헬퍼).
 chk "W60: 기대는 분기 병기어($LEAN_ALIAS) 네 파일 전부에 등장" "$(scope_all "$LEAN_ALIAS")" "yes"
@@ -5761,7 +5674,6 @@ chk "W64: review 템플릿이 기대는 분기 병기어를 백틱 토큰으로 
 # (W65) **배선** — `W12`·`W56`과 같은 형태(인자로 준 토큰 하나만 읽고 그 토큰은 어느 파일에도 없어 기준선이
 # **구조로 상수**다).
 chk "W65: 배선 - 다른 기대는 분기 병기어를 주면 결합이 성립하지 않는다" "$(scope_all zzz-other-lean)" "no"
-chk "W66: lean-decl 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$LEAN_KEY")" "0"
 # (W67~W72 · M66) **스캔 양성 통제** — 규약 "릴리즈 빌드 출력 검증" 절의 병기어와 재서술처 하나
 # (`skills/release/SKILL.md`). 재서술처가 하나라 결합이 자리별 단언과 겹치므로 결합 케이스를 두지 않고
 # 규약 정의 줄(`W69`)과 재서술처 백틱 토큰(`W70`)만 문다. 여기서 release 스킬의 토큰은 **파일 전역**으로 찾고,
@@ -5769,14 +5681,12 @@ chk "W66: lean-decl 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CO
 SCAN_KEY='scan-control:'
 SCAN_ALIAS=$(decl_tail "$CONV" "$SCAN_KEY" | LC_ALL=C awk '{ print $1 }')
 [ -n "$SCAN_ALIAS" ] || SCAN_ALIAS=zzz-scan-control-unset
-chk "W67: scan-control 선언 줄 정확히 1개" "$(decl_count "$CONV" "$SCAN_KEY")" "1"
 chk "W68: 스캔 양성 통제 병기어 추출 positive-control" "$([ "$SCAN_ALIAS" != zzz-scan-control-unset ] && echo ok || echo no)" "ok"
 chk "W69: 규약이 스캔 양성 통제 병기어의 정의 줄을 정확히 하나 갖는다" "$(scope_defn "$SCAN_ALIAS")" "1"
 chk "W70: release SKILL이 스캔 양성 통제 병기어를 백틱 토큰으로 갖는다" "$(scope_tok "$REL_SKILL" "$SCAN_ALIAS")" "yes"
 # (W71) **배선** — 인자로 준 토큰(어느 파일에도 없음)을 주면 `no`다. 이 케이스가 없으면 `scope_tok`이 인자를
 # 무시해도 `W70`이 초록이다(기준선이 구조로 상수 — `W12`와 같은 형태).
 chk "W71: 배선 - 다른 스캔 양성 통제 병기어는 release SKILL에 없다" "$(scope_tok "$REL_SKILL" zzz-other-scan)" "no"
-chk "W72: scan-control 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$SCAN_KEY")" "0"
 # (W73~W78 · M67) **판정 없는 부재 잡** — 규약 측정 배당 블록의 병기어(`absent-job:`)와 재서술처 하나
 # (`skills/release/SKILL.md`의 `pr` 모드 마무리). `W67`~`W72`와 같은 층·같은 형태다. 재서술처가 하나라 결합이
 # 자리별 단언과 겹치므로 결합 케이스를 두지 않고 정의 줄(`W75`)과 재서술처 백틱 토큰(`W76`)만 문다.
@@ -5786,14 +5696,12 @@ chk "W72: scan-control 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "
 ABSENT_KEY='absent-job:'
 ABSENT_ALIAS=$(decl_tail "$CONV" "$ABSENT_KEY" | LC_ALL=C awk '{ print $1 }')
 [ -n "$ABSENT_ALIAS" ] || ABSENT_ALIAS=zzz-absent-job-unset
-chk "W73: absent-job 선언 줄 정확히 1개" "$(decl_count "$CONV" "$ABSENT_KEY")" "1"
 chk "W74: 부재 잡 병기어 추출 positive-control" "$([ "$ABSENT_ALIAS" != zzz-absent-job-unset ] && echo ok || echo no)" "ok"
 chk "W75: 규약이 부재 잡 병기어의 정의 줄을 정확히 하나 갖는다" "$(scope_defn "$ABSENT_ALIAS")" "1"
 chk "W76: release SKILL이 부재 잡 병기어를 백틱 토큰으로 갖는다" "$(scope_tok "$REL_SKILL" "$ABSENT_ALIAS")" "yes"
 # (W77) **배선** — 인자로 준 토큰(어느 파일에도 없음)을 주면 `no`다. 이 케이스가 없으면 `scope_tok`이 인자를
 # 무시해도 `W76`이 초록이다(기준선이 구조로 상수 — `W71`과 같은 형태).
 chk "W77: 배선 - 다른 부재 잡 병기어는 release SKILL에 없다" "$(scope_tok "$REL_SKILL" zzz-other-absent)" "no"
-chk "W78: absent-job 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$ABSENT_KEY")" "0"
 # (W79~W90 · M68) **단계 창** — 위 두 병기어의 토큰은 파일 전역이 아니라 자기 단계를 가리키는 **앵커와 같은 항목
 # 창**에 있어야 한다. 창은 토큰이 든 **가장 안쪽 목록 항목의 부분 트리**다(항목 줄부터 들여쓰기가 더 깊은 줄이
 # 이어지는 데까지 · 빈 줄은 끊지 않는다). Part N의 `floor_hits_in` 창(최상위 항목의 부분 트리)과 **함수를 공유하지
@@ -5849,25 +5757,20 @@ ABSENT_WIN=$(item_win_probe "$REL_SKILL" "$ABSENT_ALIAS" "$ABSENT_ANCHOR")
 # 어느 픽스처도 밟지 않는다(제거해도 전수 초록을 M68 리뷰가 실측했다). 새 픽스처가 필요해 다음 사이클로 넘겼다.
 printf '1. step %s\n   - a `%s`\n   - b %s\n' "$SCAN_ANCHOR" "$SCAN_ALIAS" "$SCAN_ANCHOR" > "$SBX/winfx_scan.md"
 printf '1. step %s\n   - a `%s`\n   - b %s\n' "$ABSENT_ANCHOR" "$ABSENT_ALIAS" "$ABSENT_ANCHOR" > "$SBX/winfx_absent.md"
-chk "W79: scan-control-anchor 선언 줄 정확히 1개" "$(decl_count "$CONV" 'scan-control-anchor:')" "1"
 chk "W80: 스캔 단계 앵커 추출 positive-control" "$([ "$SCAN_ANCHOR" != zzz-scan-anchor-unset ] && echo ok || echo no)" "ok"
 chk "W81: 스캔 양성 통제 토큰이 앵커와 같은 항목 창에 있다" "${SCAN_WIN%% *}" "yes"
 chk "W82: 스캔 단계 앵커가 파일에서 그 창 안에만 있다" "$(win_unique "$SCAN_WIN")" "ok"
 chk "W83: 통제 - 앵커 밖 항목 창의 스캔 토큰을 잡는다" "$(item_win_probe "$SBX/winfx_scan.md" "$SCAN_ALIAS" "$SCAN_ANCHOR" | LC_ALL=C awk '{ print $1 }')" "no"
-chk "W84: scan-control-anchor 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" 'scan-control-anchor:')" "0"
-chk "W85: absent-job-anchor 선언 줄 정확히 1개" "$(decl_count "$CONV" 'absent-job-anchor:')" "1"
 chk "W86: 부재 잡 단계 앵커 추출 positive-control" "$([ "$ABSENT_ANCHOR" != zzz-absent-anchor-unset ] && echo ok || echo no)" "ok"
 chk "W87: 부재 잡 토큰이 앵커와 같은 항목 창에 있다" "${ABSENT_WIN%% *}" "yes"
 chk "W88: 부재 잡 단계 앵커가 파일에서 그 창 안에만 있다" "$(win_unique "$ABSENT_WIN")" "ok"
 chk "W89: 통제 - 앵커 밖 항목 창의 부재 잡 토큰을 잡는다" "$(item_win_probe "$SBX/winfx_absent.md" "$ABSENT_ALIAS" "$ABSENT_ANCHOR" | LC_ALL=C awk '{ print $1 }')" "no"
-chk "W90: absent-job-anchor 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" 'absent-job-anchor:')" "0"
 # (W91~W98 · M70) **새 판정의 생명주기 상태표** — 규약 "새 판정의 생명주기 상태표" 소절의 병기어와 재서술처
 # 둘(impl SKILL · impl 템플릿). `lean-decl:`(W58~W66)과 같은 형태이되 재서술처 집합이 달라 세 파일 결합을
 # `in_all_three`로 묻는다. 표가 상태 목록을 빠짐없이 덮는가·실측이 정말 돌았는가는 묻지 않는다(규약이 리뷰의 층에 둔다).
 LIFE_KEY='lifecycle-decl:'
 LIFE_ALIAS=$(decl_tail "$CONV" "$LIFE_KEY" | LC_ALL=C awk '{ print $1 }')
 [ -n "$LIFE_ALIAS" ] || LIFE_ALIAS=zzz-lifecycle-decl-unset
-chk "W91: lifecycle-decl 선언 줄 정확히 1개" "$(decl_count "$CONV" "$LIFE_KEY")" "1"
 chk "W92: 생명주기 병기어 추출 positive-control" "$([ "$LIFE_ALIAS" != zzz-lifecycle-decl-unset ] && echo ok || echo no)" "ok"
 chk "W93: 생명주기 병기어($LIFE_ALIAS) 세 파일 전부에 등장" "$(in_all_three "$LIFE_ALIAS" "$CONV" "$IMPL_SKILL" "$IMPL_TPL")" "yes"
 chk "W94: 규약이 생명주기 병기어의 정의 줄을 정확히 하나 갖는다" "$(scope_defn "$LIFE_ALIAS")" "1"
@@ -5875,7 +5778,6 @@ chk "W95: impl SKILL이 생명주기 병기어를 백틱 토큰으로 갖는다"
 chk "W96: impl 템플릿이 생명주기 병기어를 백틱 토큰으로 갖는다" "$(scope_tok "$IMPL_TPL" "$LIFE_ALIAS")" "yes"
 # (W97) **배선** — `W65`와 같은 형태(인자로 준 토큰은 어느 파일에도 없어 기준선이 구조로 상수다).
 chk "W97: 배선 - 다른 생명주기 병기어를 주면 결합이 성립하지 않는다" "$(in_all_three zzz-other-lifecycle "$CONV" "$IMPL_SKILL" "$IMPL_TPL")" "no"
-chk "W98: lifecycle-decl 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$LIFE_KEY")" "0"
 # (W99~W110 · M71) **전이 표** — 같은 소절이 상태 목록을 손으로 늘리는 열거 대신 **스킬 흐름의 전이**에서 끌어내게 했다.
 # 전이마다 선언 줄 하나(`tr-…:`)가 있고 꼬리의 첫 백틱 구획이 출처 파일, 둘째가 그 파일 안의 앵커다. 상태 목록은 ASCII
 # 마커 블록 안에서 전이를 인용한다. 무는 것은 넷 — 전이 선언의 유일성 · 앵커가 출처 파일에서 정확히 한 줄 · 덮음(모든 전이가 인용된다) · 고아
@@ -5934,9 +5836,7 @@ LTR_MARKS="$(LC_ALL=C grep -cF '<!-- lifecycle-states:start -->' "$CONV") $(LC_A
 mkdir -p "$SBX/ltrfx"
 printf '  - `lifecycle-transitions:` tr-fa tr-fb tr-fc\n  - `tr-fa:` `sk.md` `anc-a`\n  - `tr-fb:` `sk.md` `anc-b`\n  - `tr-fc:` `sk.md` `anc-c`\n<!-- lifecycle-states:start -->\n  - s1 `tr-fa` `tr-fc` `tr-fzz`\n<!-- lifecycle-states:end -->\n' > "$SBX/ltrfx/conv.md"
 printf 'anc-a\nanc-c one\nanc-c two\n' > "$SBX/ltrfx/sk.md"
-chk "W99: lifecycle-transitions 선언 줄 정확히 1개" "$(decl_count "$CONV" "$LTR_KEY")" "1"
 chk "W100: 전이 추출 positive-control(>0)" "$([ "$NLTR" -gt 0 ] && echo ok || echo no)" "ok"
-chk "W101: lifecycle-transitions 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$LTR_KEY")" "0"
 chk "W102: 선언 줄이 정확히 하나가 아닌 전이 0개" "$(ltr_dup "$CONV")" "0"
 chk "W103: 출처 파일에서 앵커가 정확히 한 줄이 아닌 전이 0개" "$(ltr_anchor_missing "$CONV" "$ROOT")" "0"
 chk "W104: 상태 블록 마커가 각각 정확히 하나" "$LTR_MARKS" "1 1"
@@ -5946,14 +5846,11 @@ chk "W107: 상태 목록이 인용한 표 밖의 전이 0개" "$(ltr_orphans "$C
 chk "W108: 통제 - 픽스처에서 앵커가 없거나 두 줄인 전이를 센다" "$(ltr_anchor_missing "$SBX/ltrfx/conv.md" "$SBX/ltrfx")" "2"
 chk "W109: 통제 - 픽스처에서 인용되지 않은 전이를 센다" "$(ltr_uncovered "$SBX/ltrfx/conv.md")" "1"
 chk "W110: 통제 - 픽스처에서 표 밖의 인용을 센다" "$(ltr_orphans "$SBX/ltrfx/conv.md")" "1"
-chk "W27: measure-cache 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$MC_KEY")" "0"
 # (W28~W29) **표지 키 둘**에는 같은 금지를 다른 사유로 건다 — `markers_of`의 분리 폭은 두 사본 모두
 # ASCII 공백 하나로 못박혀 있어 금지 문자가 축을 **가르지 않는다**. 대신 **표지 둘을 한 토큰으로
 # 붙여** 선언된 수를 줄이고, `W9`·`W21`은 **줄어든 수와 자기를 비교**해 통과한다. positive-control
 # (`W8`·`W20`)은 수가 여전히 0보다 커서 초록이다. **보이지 않는 한 글자가 경계 표지를 은퇴시킬 수
 # 없어야 한다.**
-chk "W28: scope-limits 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$SCOPE_LIM_KEY")" "0"
-chk "W29: verify-scope 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$VS_KEY")" "0"
 
 # (W111~W151·M72·M73) **사이클 시작점이 리뷰 판정을 읽는가.** `/tide:cycle`의 인자 없는 시작점은 판정을 보지
 # 않아 판정 `불가`에서 새 마일스톤으로 갔고(상태 목록의 `st-fail-then-draft`), 판정 규칙의 단일 원본인
@@ -6058,7 +5955,6 @@ form_probe() { # <파일> <절 앵커> <항목 키> <기대 줄> → "<키로 �
 CYC_BR_N=$(sec_span "$CYC_SKILL" "$CYC_SEC_ANCHOR" | LC_ALL=C grep -c -- '- 판정 `')
 chk "W117: 시작점 절 갈래 줄 추출 positive-control(>=2)" "$([ "${CYC_BR_N:-0}" -ge 2 ] && echo ok || echo no)" "ok"
 # (W127·W128) **선언 쪽** — 대응 선언 줄이 정확히 하나이고, 쌍이 실제로 뽑힌다(0이면 기대 줄이 비어 공허하다).
-chk "W127: start-point-map 선언 줄 정확히 1개" "$(decl_count "$CONV" "$SPM_KEY")" "1"
 chk "W128: 선언 쌍 추출 positive-control(>=3)" "$([ "$(spm_pairs "$CONV")" -ge 3 ] && echo ok || echo no)" "ok"
 # (W118~W120) **본 검사 — 갈래 항목이 선언에서 조립한 한 줄과 같은가.** 키마다 항목이 정확히 하나이고, 그 줄이 기대
 # 줄과 바이트 같으며, 이어진 줄이 없어야 한다(`1 yes no`).
@@ -6159,9 +6055,6 @@ _cyc_block() { sp_name B "$(_cyc_block_raw "$1")"; } # <대상 파일> → 블�
 # (W137) **본 검사 — 갈래 블록.** 정상은 `1 yes yes yes yes yes 3`이다(라운드 2부터 일곱 값 — 포인터 줄이 셋째 값).
 chk "W137: 시작점 갈래가 선언에서 조립한 블록으로 선다" "$(_cyc_block "$CYC_SKILL")" "$(sp_name B '1 yes yes yes yes yes 3')"
 # (W138~W140) 선언 쪽 — 부모 선언 줄의 유일성과, 두 선언 꼬리의 금지 구분자(다른 선언 줄과 같은 형태 · `W26` 등).
-chk "W138: start-point-map 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$SPM_KEY")" "0"
-chk "W139: start-point-parent 선언 줄 정확히 1개" "$(decl_count "$CONV" "$SPP_KEY")" "1"
-chk "W140: start-point-parent 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$SPP_KEY")" "0"
 # (W141~W145) 통제 — 라운드 0 리뷰가 잰 변이를 픽스처로 승격한다. 바탕 픽스처의 부모 · 갈래 줄은 **선언에서 조립**한다.
 _fx_ins() { LC_ALL=C awk -v n="$3" -v t="$4" '{ print } NR == n { print t }' "$1" > "$2"; }   # <원본> <대상> <줄 번호> <넣을 줄>
 _fx_rep() { LC_ALL=C awk -v n="$3" -v t="$4" 'NR == n { print t; next } { print }' "$1" > "$2"; } # <원본> <대상> <줄 번호> <바꿀 줄>
@@ -6195,28 +6088,24 @@ chk "W146: 오탐 방향 - 설명 항목과 다음 항목이 붙은 정상 블�
 # 뒤집는 편집이 두 사본 141/0 초록임을 쟀다. 포인터 줄도 선언(`start-point-pointer:`)에서 조립한 줄과 줄 전체가 같아야 한다. 두 선언 값에는
 # 추출 positive-control을 둔다(`W128`과 같은 형태 — 값이 비면 기대 줄이 비어 판정이 공허하다).
 chk "W147: start-point-parent 값 추출 positive-control" "$([ -n "$CYC_WANT_PARENT" ] && [ "$CYC_WANT_PARENT" != '- ' ] && echo ok || echo no)" "ok"
-chk "W148: start-point-pointer 선언 줄 정확히 1개" "$(decl_count "$CONV" "$SPT_KEY")" "1"
-chk "W149: start-point-pointer 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$SPT_KEY")" "0"
 chk "W150: start-point-pointer 값 추출 positive-control" "$([ -n "$CYC_WANT_POINTER" ] && echo ok || echo no)" "ok"
 _fx_rep "$SBX/cycfx/blk.md" "$SBX/cycfx/blk-ptr.md" 5 '    — 이 조건과 아래 갈래는 폐기됐다. 판정과 무관하게 언제나 **milestone 단계부터** 간다 (판정을 읽는 법은 `review-report` 행)'
 chk "W151: 통제 - 포인터 줄 산문으로 뒤집은 부모 조건을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-ptr.md")" "$(sp_name B '1 yes no yes yes yes 3')"
 # (W152~W159 · M75) **판정 술어의 이름 선언** — 블록 · 형태 판정의 값 이름은 규약의 두 선언이 들고 러너는 읽기만 한다. 무는 것은 선언의 유일성 ·
 # 추출 · 금지 구분자 · **이름 수 = 판정이 내는 값 수** · 이름마다 정의 항목 정확히 하나 · 배선(선언을 바꾸면 출력이 따라 바뀐다)까지다. 정의 문장의
 # 뜻과, 선언과 정의를 함께 바꾼 이름 순서가 값의 위치와 맞는가는 묻지 않는다(규약이 적는 경계 — 정의 항목의 순서 = 선언 순서는 아래 `W162`가 문다).
-chk "W152: start-point-block-predicates 선언 줄 정확히 1개" "$(decl_count "$CONV" "$SPB_KEY")" "1"
-chk "W153: start-point-form-predicates 선언 줄 정확히 1개" "$(decl_count "$CONV" "$SPF_KEY")" "1"
 chk "W154: 두 술어 선언의 이름 추출 positive-control(>=1)" "$([ "$(sp_count B)" -ge 1 ] && [ "$(sp_count F)" -ge 1 ] && echo ok || echo no)" "ok"
-chk "W155: 두 술어 선언 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$SPB_KEY")$(bad_seps "$CONV" "$SPF_KEY")" "00"
 chk "W156: 본 검사 - 블록 술어 이름 수가 블록 판정이 내는 값 수와 같다" "$(sp_count B)" "$(_cyc_block_raw "$CYC_SKILL" | LC_ALL=C awk '{ print NF }')"
 chk "W157: 본 검사 - 형태 술어 이름 수가 형태 판정이 내는 값 수와 같다" "$(sp_count F)" "$(form_probe "$CYC_SKILL" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$CYC_WANT_FAIL" | LC_ALL=C awk '{ print NF }')"
-chk "W158: 본 검사 - 술어 이름마다 정의 항목이 정확히 하나" "$(sp_def_bad)" "0"
 # (W160 · W161 · M75 리뷰 차단 1) **역방향과 유일성** — `W158`은 선언 → 정의 한 방향이라, 선언되지 않은 정의 항목을 더하거나 선언에 같은 이름을
 # 두 번 쓰는 편집이 초록이었다(반증 실측). 정의 → 선언(고아 정의 항목)과 두 선언을 통틀은 이름 유일성을 함께 묻는다.
-chk "W160: 본 검사 - 정의 항목마다 선언된 이름이 있다(고아 정의 0)" "$(sp_def_orphan)" "0"
-chk "W161: 본 검사 - 두 술어 선언을 통틀어 이름이 유일하다" "$(sp_name_dup)" "0"
 # (W162 · W163 · M76) **정의 항목의 순서** — 선언만 또는 정의만 순서를 바꾸면 `W162`가 붉다. 이름이 값의 위치와 뜻으로 맞는가는 묻지 않는다.
-chk "W162: 본 검사 - 정의 항목의 순서가 선언의 이름 순서와 같다" "$(sp_def_order)" "0"
-chk "W163: 통제 - 정의 항목 첫 둘만 맞바꾼 합성 규약에서 순서 위반이 하나 는다" "$(( $(sp_def_order "$(sp_order_fixture swap)") - $(sp_def_order "$(sp_order_fixture in)") ))" "1"
+chk "W163: 통제 - 정의 항목 첫 둘만 맞바꾼 합성 규약에서 순서 위반이 하나 는다" "$(( $(dn_def_order "$SP_KEYS" "$(sp_order_fixture swap)") - $(dn_def_order "$SP_KEYS" "$(sp_order_fixture in)") ))" "1"
+# (W164 · M86 라운드 1) **키 여럿 입력의 통제** — 넓힌 `dn_names` · `dn_defs`(키를 공백으로 이은 목록)의 입력 변환마다 칸 하나(`rf-88`):
+# 두 키의 이름 수 − 첫 키의 이름 수(둘째 키의 이름 수 1) · 더 깊이 들인 정의와 0열 산문을 지나도 세는 정의 수(3) · 그 사본의 정의 위반(0) ·
+# 더 깊이 들인 고아 정의 하나(1). 라운드 0의 같은 깊이 창은 둘째 · 넷째 칸이 1 · 0이었다(리뷰 차단 1).
+_spdf=$(sp_order_fixture deep)
+chk "W164: 통제 - 키 여럿 입력: 둘째 키 이름 수 · 깊이 무관 정의 수 · 정의 위반 · 들여쓴 고아" "$(( $(dn_names "$SP_KEYS" "$_spdf" | grep -c .) - $(dn_names "$SPB_KEY" "$_spdf" | grep -c .) ))|$(dn_defs "$SP_KEYS" "$_spdf" | grep -c .)|$(dn_def_bad "$SP_KEYS" "$_spdf")|$(dn_def_orphan "$SP_KEYS" "$(sp_order_fixture deepx)")" "1|3|0|1"
 # (W159) 배선 통제 — 블록 선언의 첫 이름을 바꾼 규약 사본을 같은 헬퍼에 먹이면 출력에 그 바뀐 이름이 나타나야 한다(차이 1). 러너가 이름을 박아 두면 0이다.
 chk "W159: 통제 - 선언의 이름을 바꾸면 출력이 따라 바뀐다" "$(( $(sp_name B '1' "$(sp_wire_fixture)" | LC_ALL=C grep -c 'zzz-wired=') - $(sp_name B '1' | LC_ALL=C grep -c 'zzz-wired=') ))" "1"
 fi
@@ -6304,8 +6193,6 @@ NMAV=$(printf '%s\n' "$MA_VALS" | tr ' ' '\n' | grep -c .)
 MJ_JOB=$(decl_tail "$CONV" "$MJ_KEY" | tr ' \011' '\n\n' | grep -E '^[a-z][a-z0-9-]*$' | head -1)
 NAXT=$(axis_site_tokens | grep -c .)
 MA_WF="$ROOT/.github/workflows/tests.yml"
-chk "W31: measure-axis 선언 줄 정확히 1개" "$(decl_count "$CONV" "$MA_KEY")" "1"
-chk "W32: measure-axis-job 선언 줄 정확히 1개" "$(decl_count "$CONV" "$MJ_KEY")" "1"
 # (W33~W35) 추출 positive-control 셋 — 각각 0이면 아래 본 검사가 **0 == 0**으로 공허 통과한다.
 # `W35`는 재서술처 쪽 추출이다: 토큰 형태(`axis-` 접두)가 바뀌어 아무것도 긁히지 않으면 `W37`이 공허다.
 chk "W33: 배당 축 값 추출 positive-control(>0)" "$([ "$NMAV" -gt 0 ] && echo ok || echo no)" "ok"
@@ -6321,8 +6208,6 @@ chk "W38: 배당이 지목한 CI 잡이 워크플로에 실재" "$(has_job "$(ci
 # **구조로 상수**다). 이 케이스가 없으면 `axis_sites_have`가 인자를 무시해도 `W36`이 초록이다.
 chk "W39: 배선 - 선언에 없는 값을 주면 재서술처 결합이 성립하지 않는다" "$(axis_sites_have zzz-other-axis)" "no"
 # (W40~W41) 꼬리 구분자 — `W26`~`W29`와 같은 헬퍼·같은 사유.
-chk "W40: measure-axis 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$MA_KEY")" "0"
-chk "W41: measure-axis-job 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$MJ_KEY")" "0"
 # (W42) **본 검사** — 재서술처 셋이 축 이름을 백틱으로 적지 않는다(적용 범위).
 chk "W42: 재서술처 셋이 축 이름을 백틱으로 적지 않는다" "$(axis_name_sites)" "0"
 # (W43) **통제** — 같은 판정 함수가 픽스처 한 줄을 잡는다. 픽스처를 건 값과 걸지 않은 값의 **차이**를
@@ -6335,7 +6220,6 @@ chk "W43: 통제 — 판정 함수가 백틱 축 이름 픽스처를 잡는다" 
 MN_KEY='measure-axis-names:'
 MN_VALS=$(decl_tail "$CONV" "$MN_KEY" | tr ' \011' '\n\n' | LC_ALL=C grep -E '^[a-z][a-z0-9-]*$' | tr '\n' ' ' | sed 's/ *$//')
 NMNV=$(printf '%s\n' "$MN_VALS" | tr ' ' '\n' | grep -c .)
-chk "W44: measure-axis-names 선언 줄 정확히 1개" "$(decl_count "$CONV" "$MN_KEY")" "1"
 # (W45) 추출 positive-control — 0이면 `W46`이 잡 이름 하나만 세는 반쪽 검사가 된다.
 chk "W45: 참조 구현 축 이름 추출 positive-control(>0)" "$([ "$NMNV" -gt 0 ] && echo ok || echo no)" "ok"
 # (W46) **본 검사**.
@@ -6347,7 +6231,232 @@ AXT_FIX="$SBX/axis-token-fixture.md"
 AXT_FIRST=$(printf '%s\n' $MN_VALS | head -1)
 { cat "$IMPL_TPL" 2>/dev/null; echo; printf '| 로컬 `%s` |\n' "$AXT_FIRST"; printf '| CI `%s` |\n' "$MJ_JOB"; } > "$AXT_FIX"
 chk "W47: 통제 — 판정 함수가 선언된 이름의 백틱 토큰 픽스처를 잡는다" "$(( $(axis_name_token_hits "$AXT_FIX") - $(axis_name_token_hits "$IMPL_TPL") ))" "2"
-chk "W48: measure-axis-names 선언 줄 꼬리에 금지 구분자 0건" "$(bad_seps "$CONV" "$MN_KEY")" "0"
+fi
+
+# --- 선언 판정 등록표 (M86) ----------------------------------------------------
+# **선언 위생과 이름 선언 묶음의 본 검사는 이 표의 한 줄에서 나온다** — 행은 「파트|케이스 ID|판정|규약 파일|키|라벨」이다. 판정은
+# `count`(선언 줄 정확히 1개) · `seps`(키마다 꼬리 금지 구분자 0 — 키 여럿이면 값을 잇는다) · `dup` `def` `orphan` `order`(공용 헬퍼
+# `dn_*` — 키 여럿이면 한 선언 목록으로 읽는다) · 그 넷의 `-sum`(키마다 돌린 합 — 문서 커밋 두 선언)이다. ID · 라벨 · 기대값은 손으로
+# 적던 케이스 줄과 같다(M86 impl 보고서 T02 · T03 — 옮기기 전후의 라벨 목록 대조). 케이스는 자기 파트에서만 낸다(`part_on`).
+# `cover` 행은 케이스를 내지 않고 **이 하니스가 아는 선언 키**로만 든다 — 덮음 판정(`F27`)이 규약 문서 집합에서 발견한 선언 키 집합과
+# 이 표의 키 집합을 견준다. **Part N의 선언 케이스는 이 표에 두지 않는다** — `case_ids`가 러너 소스의 케이스 줄을 읽어
+# `floor-ask-cases:` 대응을 묻기 때문이다(그 키들은 `cover` 행이다). 키는 소스의 리터럴이고 선언의 원본은 규약 줄 자체다 — 표가 정하는
+# 것은 「어느 키를 어느 케이스 ID로 묻는가」뿐이다.
+decl_reg() { # → 등록표 행(한 줄씩)
+    cat <<'DECLREG'
+I|I7|count|CONV|state-neg:|state-neg 선언 줄이 규약에 정확히 1개
+I|I8|count|CONV|state-past:|state-past 선언 줄이 규약에 정확히 1개
+I|I10|seps|CONV|state-neg:|state-neg 선언 줄 꼬리에 금지 구분자 0건
+I|I11|seps|CONV|state-past:|state-past 선언 줄 꼬리에 금지 구분자 0건
+I|I18|count|CONV|sep-cps:|sep-cps 선언 줄이 규약에 정확히 1개
+I|I19|count|CONV|sep-ok-cps:|sep-ok-cps 선언 줄이 규약에 정확히 1개
+L|L1|count|CONV|count-word:|count-word 선언 줄 정확히 1개
+L|L2|count|CONV|count-copula:|count-copula 선언 줄 정확히 1개
+M|M1|count|CONV|epic-status:|epic-status 선언 줄 정확히 1개
+M|M2|count|CONV|epic-since:|epic-since 선언 줄 정확히 1개
+M|M11|count|CONV|epic-members:|epic-members 선언 줄 정확히 1개
+O|O1|count|CONV|retro-status:|retro-status 선언 줄 정확히 1개
+O|O2|count|CONV|retro-block:|retro-block 선언 줄 정확히 1개
+O|O15|count|CONV|retro-cadence:|retro-cadence 선언 줄 정확히 1개
+O|O16|count|CONV|retro-pick:|retro-pick 선언 줄 정확히 1개
+O|O26|seps|CONV|retro-cadence:|retro-cadence 선언 줄 꼬리에 금지 구분자 0건
+O|O27|seps|CONV|retro-pick:|retro-pick 선언 줄 꼬리에 금지 구분자 0건
+O|O46|count|CONV|retro-release-mark:|retro-release-mark 선언 줄 정확히 1개
+O|O47|count|CONV|retro-mark-since:|retro-mark-since 선언 줄 정확히 1개
+O|O52|seps|CONV|retro-release-mark: retro-mark-since: retro-mark-derive:|세 선언 줄 꼬리에 금지 구분자 0건
+O|O58|count|CONV|retro-mark-derive:|retro-mark-derive 선언 줄 정확히 1개
+O|O60|count|CONV|retro-order-branches:|retro-order-branches 선언 줄 정확히 1개
+O|O61|count|CONV|retro-order-verdict:|retro-order-verdict 선언 줄 정확히 1개
+O|O63|seps|CONV|retro-order-branches: retro-order-verdict:|갈래 선언 두 줄 꼬리에 금지 구분자 0건
+O|O64|dup|CONV|retro-order-branches:|본 검사 - 갈래 이름이 유일하다
+O|O65|def|CONV|retro-order-branches:|본 검사 - 갈래 이름마다 정의 항목이 정확히 하나
+O|O66|orphan|CONV|retro-order-branches:|본 검사 - 갈래 정의 항목마다 선언된 이름이 있다(고아 정의 0)
+O|O67|order|CONV|retro-order-branches:|본 검사 - 갈래 정의 항목의 순서가 선언의 이름 순서와 같다
+P|P1|count|CONV|criteria-verdict:|criteria-verdict 선언 줄 정확히 1개
+P|P2|count|CONV|criteria-since:|criteria-since 선언 줄 정확히 1개
+P|P20|count|CONV|metrics-filled-since:|metrics-filled-since 선언 줄 정확히 1개
+R|R1|count|CONV|coverage-bookkeeping:|coverage-bookkeeping 선언 줄 정확히 1개
+S|S1|count|CONV_REL|push-availability:|push-availability 선언 줄 정확히 1개
+S|S2|count|CONV_REL|terminal-state:|terminal-state 선언 줄 정확히 1개
+S|S8|count|CONV_REL|docs-commit-paths:|docs-commit-paths 선언 줄 정확히 1개
+S|S9|seps|CONV_REL|docs-commit-paths:|docs-commit-paths 선언 줄 꼬리에 금지 구분자 0건
+S|S20|count|CONV_REL|docs-commit-deny:|docs-commit-deny 선언 줄 정확히 1개
+S|S22|seps|CONV_REL|docs-commit-deny:|docs-commit-deny 선언 줄 꼬리에 금지 구분자 0건
+S|S23|count|CONV_REL|docs-commit-parts:|docs-commit-parts 선언 줄 정확히 1개
+S|S24|seps|CONV_REL|docs-commit-parts:|docs-commit-parts 선언 줄 꼬리에 금지 구분자 0건
+S|S31|count|CONV_REL|docs-commit-preconds:|docs-commit-preconds 선언 줄 정확히 1개
+S|S32|count|CONV_REL|docs-commit-epic-cases:|docs-commit-epic-cases 선언 줄 정확히 1개
+S|S35|dup-sum|CONV_REL|docs-commit-preconds: docs-commit-epic-cases:|본 검사 - 두 선언의 이름이 유일하다
+S|S36|def-sum|CONV_REL|docs-commit-preconds: docs-commit-epic-cases:|본 검사 - 이름마다 정의 항목이 정확히 하나다
+S|S37|orphan-sum|CONV_REL|docs-commit-preconds: docs-commit-epic-cases:|본 검사 - 선언에 없는 정의 항목이 없다
+S|S38|order-sum|CONV_REL|docs-commit-preconds: docs-commit-epic-cases:|본 검사 - 정의 항목의 순서가 선언의 이름 순서와 같다
+S|S48|count|CONV|release-preflights:|release-preflights 선언 줄 정확히 1개
+S|S49|seps|CONV|release-preflights:|release-preflights 선언 줄 꼬리에 금지 구분자 0건
+S|S51|dup|CONV|release-preflights:|본 검사 - 프리플라이트 이름이 유일하다
+S|S52|def|CONV|release-preflights:|본 검사 - 이름마다 정의 항목이 정확히 하나다
+S|S53|orphan|CONV|release-preflights:|본 검사 - 선언에 없는 정의 항목이 없다
+S|S54|order|CONV|release-preflights:|본 검사 - 정의 항목의 순서가 선언의 이름 순서와 같다
+T|T1|count|CONV|source-eol:|source-eol 선언 줄 정확히 1개
+U|U1|count|CONV|measure-order:|measure-order 선언 줄 정확히 1개
+V|V1|count|CONV|control-form:|control-form 선언 줄 정확히 1개
+V|V2|count|CONV|reversal-block:|reversal-block 선언 줄 정확히 1개
+V|V3|count|CONV|reversal-columns:|reversal-columns 선언 줄 정확히 1개
+V|V4|count|CONV|reversal-sep:|reversal-sep 선언 줄 정확히 1개
+V|V5|count|CONV|reversal-since:|reversal-since 선언 줄 정확히 1개
+W|W1|count|CONV|scope-decl:|scope-decl 선언 줄 정확히 1개
+W|W7|count|CONV|scope-limits:|scope-limits 선언 줄 정확히 1개
+W|W13|count|CONV|measure-cache:|measure-cache 선언 줄 정확히 1개
+W|W19|count|CONV|verify-scope:|verify-scope 선언 줄 정확히 1개
+W|W26|seps|CONV|scope-decl:|scope-decl 선언 줄 꼬리에 금지 구분자 0건
+W|W49|count|CONV|infeasible-decl:|infeasible-decl 선언 줄 정확히 1개
+W|W57|seps|CONV|infeasible-decl:|infeasible-decl 선언 줄 꼬리에 금지 구분자 0건
+W|W58|count|CONV|lean-decl:|lean-decl 선언 줄 정확히 1개
+W|W66|seps|CONV|lean-decl:|lean-decl 선언 줄 꼬리에 금지 구분자 0건
+W|W67|count|CONV|scan-control:|scan-control 선언 줄 정확히 1개
+W|W72|seps|CONV|scan-control:|scan-control 선언 줄 꼬리에 금지 구분자 0건
+W|W73|count|CONV|absent-job:|absent-job 선언 줄 정확히 1개
+W|W78|seps|CONV|absent-job:|absent-job 선언 줄 꼬리에 금지 구분자 0건
+W|W79|count|CONV|scan-control-anchor:|scan-control-anchor 선언 줄 정확히 1개
+W|W84|seps|CONV|scan-control-anchor:|scan-control-anchor 선언 줄 꼬리에 금지 구분자 0건
+W|W85|count|CONV|absent-job-anchor:|absent-job-anchor 선언 줄 정확히 1개
+W|W90|seps|CONV|absent-job-anchor:|absent-job-anchor 선언 줄 꼬리에 금지 구분자 0건
+W|W91|count|CONV|lifecycle-decl:|lifecycle-decl 선언 줄 정확히 1개
+W|W98|seps|CONV|lifecycle-decl:|lifecycle-decl 선언 줄 꼬리에 금지 구분자 0건
+W|W99|count|CONV|lifecycle-transitions:|lifecycle-transitions 선언 줄 정확히 1개
+W|W101|seps|CONV|lifecycle-transitions:|lifecycle-transitions 선언 줄 꼬리에 금지 구분자 0건
+W|W27|seps|CONV|measure-cache:|measure-cache 선언 줄 꼬리에 금지 구분자 0건
+W|W28|seps|CONV|scope-limits:|scope-limits 선언 줄 꼬리에 금지 구분자 0건
+W|W29|seps|CONV|verify-scope:|verify-scope 선언 줄 꼬리에 금지 구분자 0건
+W|W127|count|CONV|start-point-map:|start-point-map 선언 줄 정확히 1개
+W|W138|seps|CONV|start-point-map:|start-point-map 선언 줄 꼬리에 금지 구분자 0건
+W|W139|count|CONV|start-point-parent:|start-point-parent 선언 줄 정확히 1개
+W|W140|seps|CONV|start-point-parent:|start-point-parent 선언 줄 꼬리에 금지 구분자 0건
+W|W148|count|CONV|start-point-pointer:|start-point-pointer 선언 줄 정확히 1개
+W|W149|seps|CONV|start-point-pointer:|start-point-pointer 선언 줄 꼬리에 금지 구분자 0건
+W|W152|count|CONV|start-point-block-predicates:|start-point-block-predicates 선언 줄 정확히 1개
+W|W153|count|CONV|start-point-form-predicates:|start-point-form-predicates 선언 줄 정확히 1개
+W|W155|seps|CONV|start-point-block-predicates: start-point-form-predicates:|두 술어 선언 꼬리에 금지 구분자 0건
+W|W158|def|CONV|start-point-block-predicates: start-point-form-predicates:|본 검사 - 술어 이름마다 정의 항목이 정확히 하나
+W|W160|orphan|CONV|start-point-block-predicates: start-point-form-predicates:|본 검사 - 정의 항목마다 선언된 이름이 있다(고아 정의 0)
+W|W161|dup|CONV|start-point-block-predicates: start-point-form-predicates:|본 검사 - 두 술어 선언을 통틀어 이름이 유일하다
+W|W162|order|CONV|start-point-block-predicates: start-point-form-predicates:|본 검사 - 정의 항목의 순서가 선언의 이름 순서와 같다
+W|W31|count|CONV|measure-axis:|measure-axis 선언 줄 정확히 1개
+W|W32|count|CONV|measure-axis-job:|measure-axis-job 선언 줄 정확히 1개
+W|W40|seps|CONV|measure-axis:|measure-axis 선언 줄 꼬리에 금지 구분자 0건
+W|W41|seps|CONV|measure-axis-job:|measure-axis-job 선언 줄 꼬리에 금지 구분자 0건
+W|W44|count|CONV|measure-axis-names:|measure-axis-names 선언 줄 정확히 1개
+W|W48|seps|CONV|measure-axis-names:|measure-axis-names 선언 줄 꼬리에 금지 구분자 0건
+-|-|cover|CONV|status-items:|-
+-|-|cover|CONV|autonomy-level:|-
+-|-|cover|CONV|autonomy-default:|-
+-|-|cover|CONV|autonomy-lines:|-
+-|-|cover|CONV|floor-marks:|-
+-|-|cover|CONV|floor-items:|-
+-|-|cover|CONV|floor-mark-map:|-
+-|-|cover|CONV|floor-unmarked:|-
+-|-|cover|CONV|floor-excluded:|-
+-|-|cover|CONV|floor-asks:|-
+-|-|cover|CONV|floor-ask-cases:|-
+-|-|cover|CONV|floor-ask-from:|-
+-|-|cover|CONV|retro-flow:|-
+-|-|cover|CONV|retro-flow-sites:|-
+-|-|cover|CONV|retro-gate-since:|-
+-|-|cover|CONV|retro-review-after:|-
+-|-|cover|CONV|tr-draft:|-
+-|-|cover|CONV|tr-impl:|-
+-|-|cover|CONV|tr-review:|-
+-|-|cover|CONV|tr-release-commit:|-
+-|-|cover|CONV|tr-tag:|-
+-|-|cover|CONV|tr-retro:|-
+-|-|cover|CONV|tr-retro-skip:|-
+-|-|cover|CONV|tr-forced:|-
+-|-|cover|CONV|tr-debug-open:|-
+-|-|cover|CONV|tr-debug-done:|-
+-|-|cover|CONV|tr-debug-release:|-
+-|-|cover|CONV|tr-pr-create:|-
+-|-|cover|CONV|tr-pr-finalize:|-
+-|-|cover|CONV|tr-continuous-stop:|-
+-|-|cover|CONV|tr-downstream:|-
+-|-|cover|CONV|tr-part-select:|-
+-|-|cover|CONV|mutation-axes:|-
+DECLREG
+}
+decl_reg_run() { # 등록표의 케이스 행을 파트 선택에 맞춰 낸다(파이프가 아니라 리다이렉트라 카운터가 같은 셸에 남는다)
+    while IFS='|' read -r _rgp _rgi _rgc _rgf _rgk _rgl; do
+        [ "$_rgc" = cover ] && continue
+        part_on "$_rgp" || continue
+        case $_rgf in CONV_REL) _rgff=$CONV_REL ;; *) _rgff=$CONV ;; esac
+        case $_rgc in
+            count) _rgg=$(decl_count "$_rgff" "$_rgk"); _rgw=1 ;;
+            seps) _rgg=; _rgw=; for _rgx in $_rgk; do _rgg=$_rgg$(bad_seps "$_rgff" "$_rgx"); _rgw=${_rgw}0; done ;;
+            dup|def|orphan|order)
+                case $_rgc in dup) _rgfn=dn_dup ;; def) _rgfn=dn_def_bad ;; orphan) _rgfn=dn_def_orphan ;; *) _rgfn=dn_def_order ;; esac
+                _rgg=$("$_rgfn" "$_rgk" "$_rgff"); _rgw=0 ;;
+            *-sum)
+                case $_rgc in dup-sum) _rgfn=dn_dup ;; def-sum) _rgfn=dn_def_bad ;; orphan-sum) _rgfn=dn_def_orphan ;; *) _rgfn=dn_def_order ;; esac
+                _rgg=0; for _rgx in $_rgk; do _rgg=$((_rgg + $("$_rgfn" "$_rgx" "$_rgff"))); done; _rgw=0 ;;
+            *) _rgg="unknown-check:$_rgc"; _rgw=0 ;;
+        esac
+        chk "$_rgi: $_rgl" "$_rgg" "$_rgw"
+    done <<DECLRUN
+$(decl_reg)
+DECLRUN
+}
+decl_reg_run
+
+# (F24~F28 · M86) **덮음 판정** — 규약 문서 집합(글롭 `docs/conventions*.md`)의 선언 줄을 한 번의 패스로 발견해, 키마다 선언 줄이
+# 하나인지 · 꼬리에 금지 구분자가 없는지 · 발견한 키 집합이 위 등록표의 키 집합과 같은지를 묻는다. 선언 줄의 꼴은 `decl_lines`와 같다
+# (줄 머리 공백 · 탭 → `-` → 공백 · 탭 하나 이상 → 백틱으로 감싼 키). 키는 `[a-z][a-z0-9-]*:` 꼴만 센다.
+decl_disc() { # [디렉터리] [k|t] → 선언 줄마다 키(k) 또는 꼬리(t) 한 줄(줄 끝 CR 하나만 벗긴다 — `decl_lines`와 같다)
+    for _ddf in "${1:-$ROOT/docs}"/conventions*.md; do
+        [ -f "$_ddf" ] || continue
+        LC_ALL=C awk -v cr="$(printf '\r')" -v q='`' -v w="${2:-k}" '{
+            s = $0
+            if (length(s) > 0 && substr(s, length(s), 1) == cr) s = substr(s, 1, length(s) - 1)
+            i = 1
+            while (i <= length(s) && (substr(s, i, 1) == " " || substr(s, i, 1) == "\t")) i++
+            if (substr(s, i, 1) != "-") next
+            i++; n = 0
+            while (i <= length(s) && (substr(s, i, 1) == " " || substr(s, i, 1) == "\t")) { i++; n++ }
+            if (n < 1 || substr(s, i, 1) != q) next
+            r = substr(s, i + 1); j = index(r, q)
+            if (j < 2) next
+            k = substr(r, 1, j - 1)
+            if (k !~ /^[a-z][a-z0-9-]*:$/) next
+            if (w == "k") print k; else print substr(r, j + 1)
+        }' "$_ddf"
+    done
+}
+decl_reg_keys() { # → 등록표가 아는 키(중복 없이)
+    decl_reg | LC_ALL=C awk -F'|' '{ n = split($5, a, / +/); for (i = 1; i <= n; i++) if (a[i] != "") print a[i] }' | LC_ALL=C sort -u
+}
+decl_disc_dup() { decl_disc "${1:-}" k | LC_ALL=C sort | LC_ALL=C uniq -d | grep -c .; }   # [디렉터리] → 선언 줄이 둘 이상인 키의 수
+decl_disc_seps() { decl_disc "${1:-}" t | LC_ALL=C grep -Ec "$SEP_RE"; }                   # [디렉터리] → 꼬리에 금지 구분자가 있는 선언 줄의 수
+decl_disc_unreg() { # [디렉터리] → 발견한 키 집합과 등록표 키 집합의 대칭차 크기
+    decl_disc "${1:-}" k | LC_ALL=C sort -u > "$SBX/decl-disc.txt"
+    decl_reg_keys > "$SBX/decl-reg.txt"
+    LC_ALL=C comm -3 "$SBX/decl-disc.txt" "$SBX/decl-reg.txt" | grep -c .
+}
+decl_fixture() { # <add|drop|dup|sep|frag> → 규약 문서 집합 사본 디렉터리(실제 파일을 건드리지 않는다)
+    _dfx="$SBX/declfx-$1"; rm -rf "$_dfx"; mkdir -p "$_dfx"
+    for _dff in "$ROOT"/docs/conventions*.md; do cp "$_dff" "$_dfx/"; done
+    _dfc="$_dfx/conventions.md"
+    case $1 in
+        add)  printf '%s\n' '' '  - `zz-m86-unreg:` zz' >> "$_dfc" ;;
+        frag) printf '%s\n' '# fixture' '' '  - `zz-m86-frag:` zz' > "$_dfx/conventions-zz-m86.md" ;;
+        drop) LC_ALL=C awk -v k='- `retro-status:`' '{ t = $0; sub(/^[ \t]+/, "", t); if (substr(t, 1, length(k)) == k) next; print }' "$_dfc" > "$_dfc.new" && mv "$_dfc.new" "$_dfc" ;;
+        dup)  LC_ALL=C awk -v k='- `retro-status:`' '{ print; t = $0; sub(/^[ \t]+/, "", t); if (substr(t, 1, length(k)) == k) print }' "$_dfc" > "$_dfc.new" && mv "$_dfc.new" "$_dfc" ;;
+        sep)  LC_ALL=C awk -v k='`retro-status:` ' -v tb="$(printf '\t')" '{ i = index($0, k); if (i > 0) $0 = substr($0, 1, i + length(k) - 2) tb substr($0, i + length(k)); print }' "$_dfc" > "$_dfc.new" && mv "$_dfc.new" "$_dfc" ;;
+    esac
+    printf '%s' "$_dfx"
+}
+if part_on F; then
+chk "F24: 선언 줄 발견 positive-control(>0) · 등록표 키 추출(>0)" "$([ "$(decl_disc '' k | grep -c .)" -gt 0 ] && [ "$(decl_reg_keys | grep -c .)" -gt 0 ] && echo ok || echo no)" "ok"
+chk "F25: 본 검사 - 규약 문서 집합에서 선언 줄이 둘 이상인 키 0개" "$(decl_disc_dup)" "0"
+chk "F26: 본 검사 - 규약 문서 집합의 선언 꼬리에 금지 구분자 0건" "$(decl_disc_seps)" "0"
+chk "F27: 본 검사 - 발견한 선언 키 집합과 등록표 키 집합의 대칭차 0" "$(decl_disc_unreg)" "0"
+_dfb27=$(decl_disc_unreg "$ROOT/docs"); _dfb25=$(decl_disc_dup "$ROOT/docs"); _dfb26=$(decl_disc_seps "$ROOT/docs")
+chk "F28: 통제 - 사본에서 등록 밖 선언 더함 · 등록 선언 지움 · 새 조각 문서 · 선언 복제 · 꼬리 탭이 각자 하나씩 는다" "$(( $(decl_disc_unreg "$(decl_fixture add)") - _dfb27 ))|$(( $(decl_disc_unreg "$(decl_fixture drop)") - _dfb27 ))|$(( $(decl_disc_unreg "$(decl_fixture frag)") - _dfb27 ))|$(( $(decl_disc_dup "$(decl_fixture dup)") - _dfb25 ))|$(( $(decl_disc_seps "$(decl_fixture sep)") - _dfb26 ))" "1|1|1|1|1"
 fi
 
 # **`F1`은 전수 실행에서만 돈다**(M64-T03) — 부분 실행에서 이 대조가 돌면 구조상 언제나 붉어

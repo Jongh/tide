@@ -1674,8 +1674,6 @@ try {
     # stops being luck" -- that was FALSE (a trailing tab and an NBSP were still silent, M42 review
     # blocker 1). What holds now: any character in the separator set below makes BOTH shells red. The
     # marker alphabet itself (which characters may form a marker) is still NOT bitten.
-    Chk "I7: exactly one state-neg declaration line in the convention" (DeclCount $CONV 'state-neg:') '1'
-    Chk "I8: exactly one state-past declaration line in the convention" (DeclCount $CONV 'state-past:') '1'
     # control -- a prose mention is not a declaration site. The fixture is ASCII-only and the .sh twin
     # writes the very same three lines, so it is immediately visible whether both shells count the same.
     $fxDc = Join-Path $sbx 'contra-decl.md'
@@ -1690,8 +1688,6 @@ try {
     # BOTH shells and I2 goes back to passing 0==0. So the width is matched (MarkersOf) AND every other
     # separator is forbidden here. I12/I13 prove the ban is not vacuous. The fixtures are written from
     # ASCII SOURCE ([char] escapes) and the .sh twin writes the very same bytes via printf octal.
-    Chk "I10: no forbidden separator in the state-neg declaration tail" (BadSeps $CONV 'state-neg:') '0'
-    Chk "I11: no forbidden separator in the state-past declaration tail" (BadSeps $CONV 'state-past:') '0'
     $fxTab = Join-Path $sbx 'contra-sep-tab.md'
     $fxNbsp = Join-Path $sbx 'contra-sep-nbsp.md'
     [System.IO.File]::WriteAllText($fxTab, ('- `state-neg:` alpha' + [char]0x0009 + 'beta' + "`n"), $noBom)
@@ -1727,8 +1723,6 @@ try {
     # pin declaration-line uniqueness for the other two keys. Extraction (>0) and uniqueness (exactly 1).
     Chk "I16: sep-cps extraction positive control (>0)" $(if ($sepCps.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
     Chk "I17: sep-ok-cps extraction positive control (>0)" $(if ($sepOkCps.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
-    Chk "I18: exactly one sep-cps declaration line in the convention" (DeclCount $CONV 'sep-cps:') '1'
-    Chk "I19: exactly one sep-ok-cps declaration line in the convention" (DeclCount $CONV 'sep-ok-cps:') '1'
     Chk "I14: every separator the convention declares is caught" ([string](SepHits $sepCps)) ([string]$sepCps.Count)
     Chk "I15: control -- an allowed character is not caught" ([string](SepHits $sepOkCps)) '0'
     }
@@ -2589,8 +2583,6 @@ try {
     $lCand = @($lScan | Where-Object { $_ -eq 'CAND' }).Count
     $lBad = @($lScan | Where-Object { $_.StartsWith('BAD ', [System.StringComparison]::Ordinal) })
     foreach ($b in $lBad) { Write-Host ("  -> declared count vs enumerated items: " + $b.Substring(4)) }
-    Chk "L1: exactly one count-word declaration line" (DeclCount $CONV 'count-word:') '1'
-    Chk "L2: exactly one count-copula declaration line" (DeclCount $CONV 'count-copula:') '1'
     Chk "L3: marker extraction positive control (numerals>0, copulas>0)" `
         $(if ($lWord.Count -gt 0 -and $cntCops.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
     Chk "L4: 20 enumerators in each series (each copy self-asserts)" ("{0}/{1}" -f $ENUM_S1.Count, $ENUM_S2.Count) '20/20'
@@ -2817,8 +2809,6 @@ try {
     if ($epicBadLines.Count -gt 0) {
         foreach ($b in $epicBadLines) { Write-Host ("  -> epic reference: " + $b.Substring(4)) }
     }
-    Chk "M1: epic-status declaration line is exactly 1" (DeclCount $CONV 'epic-status:') '1'
-    Chk "M2: epic-since declaration line is exactly 1" (DeclCount $CONV 'epic-since:') '1'
     # (M3) If the markers are empty the whole verdict below is vacuous -- ask about extraction first.
     # (M3) COMPOUND. The first half is the positive control (the live markers must extract). The second
     # runs the SAME extraction path with a key that does not exist and demands it read as EMPTY --
@@ -2913,7 +2903,6 @@ try {
     # exist. A repo that does not use epics has both at zero and then M5 never fires (M9's second half).
     Chk "M10: this repo has an open epic and a milestone reference" `
         ("{0}/{1}" -f $nEpicOpen, $(if ($nEpicRef -gt 0) { 'ok' } else { 'no' })) '1/ok'
-    Chk "M11: epic-members declaration line is exactly 1" (DeclCount $CONV 'epic-members:') '1'
     # Two fixture controls for the EPIC-SIDE pass (the "and the reverse" half of rule 3). M51's review
     # blocker 1 was exactly this axis missing, and THE REVERSAL MEASUREMENT COULD NOT SEE IT -- you
     # cannot break an axis that was never implemented.
@@ -3205,12 +3194,19 @@ try {
     $FAS_KEY = 'floor-asks:'
     $FAC_KEY = 'floor-ask-cases:'
     $FAF_KEY = 'floor-ask-from:'
+    # (M86) $key may hold several keys joined by single spaces -- names are concatenated in declaration order, so the two
+    # start-point predicate declarations (one shared definition list) are read by the SAME functions (the old Sp* helpers are
+    # absorbed). A single key behaves as before.
     function DnNames([string]$key, [string]$flConv = '') {
         if ($flConv -eq '') { $flConv = $CONV }
-        $tail = DeclTail $flConv $key
-        if ($null -eq $tail) { return @() }
         $ws = [char[]]@([char]0x20, [char]0x09, [char]0x0D, [char]0x0B, [char]0x0C)
-        return @($tail -split ' ' | Where-Object { $_.Trim($ws) -ne '' })
+        $out = New-Object System.Collections.Generic.List[string]
+        foreach ($k in ($key -split ' ' | Where-Object { $_ -ne '' })) {
+            $tail = DeclTail $flConv $k
+            if ($null -eq $tail) { continue }
+            foreach ($t in ($tail -split ' ')) { if ($t.Trim($ws) -ne '') { $out.Add($t) } }
+        }
+        return @($out)
     }
     # Backtick spans of a declaration, one "name=value" each (split at the FIRST `=`; spans without one are dropped).
     function DnPairs([string]$key, [string]$flConv = '') {
@@ -3233,7 +3229,11 @@ try {
     # Indentation counts spaces only (same as the .sh twin).
     function DnDefs([string]$key, [string]$flConv = '') {
         if ($flConv -eq '') { $flConv = $CONV }
-        $k = '- `' + $key + '`'
+        # (M86) several keys -> the window runs from the line after the FIRST key's declaration line up to the next heading ('#')
+        # at ANY depth -- the window of the absorbed SpDefs, as the convention's start-point section states. One key keeps the M79 window.
+        $dnKeys = @($key -split ' ' | Where-Object { $_ -ne '' })
+        $any = ($dnKeys.Count -gt 1)
+        $k = '- `' + ($dnKeys | Select-Object -First 1) + '`'
         $ws = [char[]]@([char]0x20, [char]0x09)
         $on = $false; $d = 0
         $out = New-Object System.Collections.Generic.List[string]
@@ -3242,6 +3242,13 @@ try {
             $ind = $ln.Length - $ln.TrimStart([char]0x20).Length
             if (-not $on) { if ($t.StartsWith($k, [System.StringComparison]::Ordinal)) { $on = $true; $d = $ind }; continue }
             if ($ln.StartsWith('#', [System.StringComparison]::Ordinal)) { break }
+            if ($any) {
+                if ($t.StartsWith('- **`', [System.StringComparison]::Ordinal)) {
+                    $r = $t.Substring(5); $j = $r.IndexOf('`**', [System.StringComparison]::Ordinal)
+                    if ($j -gt 0) { $out.Add($r.Substring(0, $j)) }
+                }
+                continue
+            }
             if ($t -eq '') { continue }
             if ($ind -lt $d) { break }
             if ($ind -eq $d -and $t.StartsWith('- **`', [System.StringComparison]::Ordinal)) {
@@ -3444,7 +3451,7 @@ try {
     Chk "N23: control -- attaching via a nested bullet is caught too" ([string](FloorHits (FloorFixture 'nest'))) '1'
 
     # --- reversal-axis declaration consistency (M53-T02) ----------------------
-    # The convention declares that reversal has TWO directions (`broken`, `adversarial`) and this asks
+    # The convention's `mutation-axes:` line declares the reversal directions and this asks
     # whether each declared axis is actually DESCRIBED in that section. A declaration without a
     # description leaves "there are axes" and nothing telling you what to do -- M53-T01 measured it:
     # of 25 blockers born from 17 rework rounds, the `adversarial` direction opened 15 and `broken`
@@ -4235,8 +4242,6 @@ try {
         return $n
     }
     if (PartOn 'O') {
-    Chk "O1: retro-status declaration line is exactly 1" (DeclCount $CONV 'retro-status:') '1'
-    Chk "O2: retro-block declaration line is exactly 1" (DeclCount $CONV 'retro-block:') '1'
     # (O3) Extraction positive-control -- a broken marker/table parse makes the main check vacuous.
     Chk "O3: follow-up row extraction positive-control (>0)" $(if ((RetroRows $RETRO) -gt 0) { 'ok' } else { 'no' }) 'ok'
     # (O4) THE MAIN CHECK. Every status value in the table must be inside the declared set.
@@ -4263,8 +4268,6 @@ try {
     # (O15-O59 / M69-M70) The three main checks are (1) did the retro run after the release (the backstop),
     # (2) is each declared row key still tracked, (3) does a released milestone claim a row that is
     # still untaken. Controls feed keys and copies to the SAME functions (the M46/M47 precedent).
-    Chk "O15: retro-cadence declaration line is exactly 1" (DeclCount $CONV 'retro-cadence:') '1'
-    Chk "O16: retro-pick declaration line is exactly 1" (DeclCount $CONV 'retro-pick:') '1'
     Chk "O17: retro base-version extraction positive-control" $(if ((FirstVer $RETRO '## ') -ne '') { 'ok' } else { 'no' }) 'ok'
     $RBASE = BaseVer $MDIR
     $RVER = FirstVer $RETRO '## '
@@ -4284,8 +4287,6 @@ try {
     Chk "O23: main check -- no claim of a milestone above a release the retro saw is still untaken" ([string](ClaimStale $RETRO (TargetClaims $MDIR $RVER $CHLOG $RSINCE_N))) '0'
     Chk "O24: control -- the key of an untaken row is caught" ([string](ClaimStale $RETRO @((KeyWithStat $RETRO $rUndone)))) '1'
     Chk "O25: negative control -- the key of a taken row is not counted" ([string](ClaimStale $RETRO @((KeyWithStat $RETRO $rFirst)))) '0'
-    Chk "O26: no forbidden separator in the retro-cadence declaration tail" (BadSeps $CONV 'retro-cadence:') '0'
-    Chk "O27: no forbidden separator in the retro-pick declaration tail" (BadSeps $CONV 'retro-pick:') '0'
     Chk "O28: the cadence co-term is present at both restatement sites" ((ScopeTok (Join-Path $ROOT 'skills/release/SKILL.md') $RCAD) + (ScopeTok (Join-Path $ROOT 'docs/commands.md') $RCAD)) 'yesyes'
     Chk "O29: the claimed-row co-term is present at both restatement sites" ((ScopeTok (Join-Path $ROOT 'skills/milestone/SKILL.md') $RPICK) + (ScopeTok (Join-Path $ROOT 'skills/milestone/template.md') $RPICK)) 'yesyes'
     Chk "O30: window control -- a keyed row outside the marker window is not seen" ([string](ClaimStale (RetroOutFixture) @('zzz-outside'))) '0'
@@ -4324,13 +4325,10 @@ try {
     # false, so milestones at or above the since-number are picked by the `- released:` mark the release leaves.
     # Whether a release omitted the mark ENTIRELY is not asked (the convention's boundary -- the next marking
     # release fills it with a later version). A release that marked some and skipped a lower one is bitten by O53.
-    Chk "O46: retro-release-mark declaration line is exactly 1" (DeclCount $CONV 'retro-release-mark:') '1'
-    Chk "O47: retro-mark-since declaration line is exactly 1" (DeclCount $CONV 'retro-mark-since:') '1'
     Chk "O48: mark since-number extraction positive-control (M{digits})" $(if ($RSINCE -ne '') { 'ok' } else { 'no' }) 'ok'
     Chk "O49: the release-mark co-term is present at both restatement sites" ((ScopeTok (Join-Path $ROOT 'skills/release/SKILL.md') $RMARK) + (ScopeTok (Join-Path $ROOT 'docs/commands.md') $RMARK)) 'yesyes'
     Chk "O50: main check -- milestone docs carrying more than one mark line: 0" ([string](MarkDup $MDIR)) '0'
     Chk "O51: control -- a doc with two mark lines is counted" ([string](MarkDup (MarkdupFixture))) '1'
-    Chk "O52: no forbidden separator in the three declaration tails" ((BadSeps $CONV 'retro-release-mark:') + (BadSeps $CONV 'retro-mark-since:') + (BadSeps $CONV 'retro-mark-derive:')) '000'
     # (O53-O55 / M70 review round 1 blocker) MISSING MARKS -- the mark goes on every milestone the tag ships, so
     # below a marked milestone an impl-reported doc without a mark is a miss (it turns path a's vacuous pass red).
     # The controls feed two synthetic fixtures (miss / no miss) to the SAME function, with a below-since doc, a
@@ -4354,7 +4352,6 @@ try {
     New-Item -ItemType Directory -Force -Path $nomk | Out-Null
     [System.IO.File]::WriteAllLines((Join-Path $nomk 'M1.md'), [string[]]@('# M1'), (New-Object System.Text.UTF8Encoding($false)))
     Chk "O57: control -- lowest marked number (clean 5, gap 6, no mark empty)" ((MarkSince (Join-Path $GPCL 'm')) + '|' + (MarkSince (Join-Path $GPFX 'm')) + '|' + (MarkSince $nomk)) '5|6|'
-    Chk "O58: retro-mark-derive declaration line is exactly 1" (DeclCount $CONV 'retro-mark-derive:') '1'
     Chk "O59: the since-derivation co-term is present at all three restatement sites" ((ScopeTok (Join-Path $ROOT 'skills/release/SKILL.md') $RDERIVE) + (ScopeTok (Join-Path $ROOT 'skills/retro/SKILL.md') $RDERIVE) + (ScopeTok (Join-Path $ROOT 'docs/commands.md') $RDERIVE)) 'yesyesyes'
     # (O60-O83 / M82) THE ORDER VERDICT'S BRANCH NAMES ARE DECLARED -- the old prose list is `retro-order-branches:` +
     # `retro-order-verdict:` + one definition item per name. O60-O69 are the same declaration checks as the M78/M79 floor
@@ -4362,14 +4359,7 @@ try {
     # that position (reordering the runner's conditions goes red here). O75-O83 are TRANSFORM CONTROLS -- each place the
     # verdict reads the declaration gets a synthetic conventions file and the output must follow (rf-88). Whether a
     # definition's meaning matches the runner's condition is not asked (the convention's "what the machine asks").
-    Chk "O60: retro-order-branches declaration line is exactly 1" (DeclCount $CONV $ROB_KEY) '1'
-    Chk "O61: retro-order-verdict declaration line is exactly 1" (DeclCount $CONV $ROV_KEY) '1'
     Chk "O62: branch name and value pair extraction positive-control (>=1)" $(if (@(DnNames $ROB_KEY).Count -ge 1 -and @(RoPairs).Count -ge 1) { 'ok' } else { 'no' }) 'ok'
-    Chk "O63: no forbidden separator in the tails of the two branch declarations" ((BadSeps $CONV $ROB_KEY) + (BadSeps $CONV $ROV_KEY)) '00'
-    Chk "O64: main check -- branch names are unique" (DnDup $ROB_KEY) '0'
-    Chk "O65: main check -- every branch name has exactly one definition item" (DnDefBad $ROB_KEY) '0'
-    Chk "O66: main check -- every branch definition item has a declared name (0 orphans)" (DnDefOrphan $ROB_KEY) '0'
-    Chk "O67: main check -- branch definition order equals declaration name order" (DnDefOrder $ROB_KEY) '0'
     Chk "O68: main check -- the value declaration's name set equals the branch name set" (RoPairMismatch) '0'
     Chk "O69: main check -- every branch value is ok or no" (RoValueBad) '0'
     function RoPin([int]$pos, [string]$rv, [string]$c1, [string]$c2, [string]$base) {
@@ -4921,8 +4911,6 @@ try {
         return $f
     }
     if (PartOn 'P') {
-    Chk "P1: criteria-verdict declaration line is exactly 1" (DeclCount $CONV 'criteria-verdict:') '1'
-    Chk "P2: criteria-since declaration line is exactly 1" (DeclCount $CONV 'criteria-since:') '1'
     # (P3) Extraction positive-control -- a broken parse makes "the sets match" vacuous (0 == 0).
     Chk "P3: criteria-number extraction positive-control (>0)" $(if ((CritSeen ([int]$critN)) -gt 0) { 'ok' } else { 'no' }) 'ok'
     # (P4/P5) THE TWO MAIN CHECKS: number-set equality (no omissions, no ghosts) and set membership.
@@ -5023,7 +5011,6 @@ try {
         [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
         return $f
     }
-    Chk "P20: exactly one metrics-filled-since declaration line" (DeclCount $CONV $MFS_KEY) '1'
     Chk "P21: metrics slots and target reports extract (positive-control)" $(if ([int](MeasSlots) -ge 1 -and @(MeasReports).Count -ge 1) { 'ok' } else { 'no' }) 'ok'
     Chk "P22: main check -- the metrics line values of review reports at or above the declared number are not empty" (MeasBadTotal) '0'
     Chk "P23: fixture control -- blanking one metrics value in a copy moves the check by one" ([string]([int](MeasLineBad (MeasFixture 'blank')) - [int](MeasLineBad (MeasFixture 'intact')))) '1'
@@ -5136,7 +5123,6 @@ try {
         return $f
     }
     if (PartOn 'R') {
-    Chk "R1: coverage-bookkeeping declaration line is exactly 1" (DeclCount $CONV $BK_KEY) '1'
     # (R2) extraction positive-control -- zero tokens would make the main check vacuously green.
     Chk "R2: token extraction positive-control (>0)" $(if (@(BkTokens).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
     # (R3) MAIN CHECK -- a consumer that re-enumerates becomes a second declaration site.
@@ -5174,8 +5160,6 @@ try {
         return $f
     }
     if (PartOn 'S') {
-    Chk "S1: push-availability declaration line is exactly 1" (DeclCount $CONV_REL $PA_KEY) '1'
-    Chk "S2: terminal-state declaration line is exactly 1" (DeclCount $CONV_REL $TS_KEY) '1'
     # (S3) extraction positive-control -- an empty tail would make the checks below split on an
     # empty token and pass vacuously.
     Chk "S3: both declaration tails extract (positive-control)" $(if ((PaToken) -ne '' -and (TsToken) -ne '') { 'ok' } else { 'no' }) 'ok'
@@ -5471,9 +5455,6 @@ try {
         foreach ($f in $files) { foreach ($l in [System.IO.File]::ReadAllLines($f)) { $lines.Add($l) } }
         return [string]@(DcnToks $lines | Where-Object { -not $u.Contains($_) }).Count
     }
-    function DcnSum([string]$fn) {
-        return [string]([int](& $fn $DCP_KEY $CONV_REL) + [int](& $fn $DCE_KEY $CONV_REL))
-    }
     # Copies that ask a verdict's RESPONSE (the real files are never touched).
     function DcnFixture([string]$mode) {
         $f = Join-Path $sbx ('dcn-' + $mode + '.md')
@@ -5687,8 +5668,6 @@ try {
     }
     $DC_ALIAS = $DC_KEY.TrimEnd(':')
     if (PartOn 'S') {
-    Chk "S8: exactly one docs-commit-paths declaration line" (DeclCount $CONV_REL $DC_KEY) '1'
-    Chk "S9: no forbidden separator in the docs-commit-paths declaration tail" (BadSeps $CONV_REL $DC_KEY) '0'
     # (S10) extraction positive-control -- empty values or a vanished skill section would make S11-S13/S15 pass on "0".
     Chk "S10: declaration values and skill section extract (positive-control)" $(if (@(DcVals).Count -ge 1 -and @(DcSec $REL_SKILL).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
     Chk "S11: main check -- value form (one trailing /*, @ names another declared value)" (DcFormBad) '0'
@@ -5700,13 +5679,9 @@ try {
     Chk "S16: control -- a path planted in the section is caught" ([string]((DcDupIn (DcDupFixture)) - (DcDupIn $REL_SKILL))) '1'
     Chk "S17: main check -- the retro non-firing item carries the docs action (anchor on 1 line)" (DcItemHas $REL_SKILL) 'yes 1'
     Chk "S18: control -- a docs token dropped from the item is caught" ([string]((DcItemYes $REL_SKILL) - (DcItemYes (DcItemFixture)))) '1'
-    Chk "S20: exactly one docs-commit-deny declaration line" (DeclCount $CONV_REL $DCD_KEY) '1'
     # (S21) extraction positive-control -- with no deny prefix S12 only checks "outside docs/" and a declaration allowing verdict reports goes green.
     Chk "S21: deny prefixes extract (positive-control, >=1)" $(if (@(DcDeny).Count -ge 1) { 'ok' } else { 'no' }) 'ok'
-    Chk "S22: no forbidden separator in the docs-commit-deny declaration tail" (BadSeps $CONV_REL $DCD_KEY) '0'
     Chk "S19: main check -- the three restatement sites (conventions body, catalog, CLAUDE.md) carry the key" ((HasToken $CONV $DC_ALIAS) + (HasToken $CMD_CANON $DC_ALIAS) + (HasToken $CLAUDE_MD $DC_ALIAS)) 'yesyesyes'
-    Chk "S23: exactly one docs-commit-parts declaration line" (DeclCount $CONV_REL $DP_KEY) '1'
-    Chk "S24: no forbidden separator in the docs-commit-parts declaration tail" (BadSeps $CONV_REL $DP_KEY) '0'
     # (S25) extraction positive-control -- with no token S26 would only count missing paths and S27 would pass on "0".
     Chk "S25: docs-commit-parts tokens extract (positive-control, >=1)" $(if (@(DpToks).Count -ge 1) { 'ok' } else { 'no' }) 'ok'
     Chk "S26: main check -- every allowed path has exactly one parts token and every token names an allowed path" (DpBad) '0'
@@ -5715,15 +5690,9 @@ try {
     # (S29/S30) fixture controls -- ask the verdicts' RESPONSE (control-reads-delta).
     Chk "S29: control -- dropping one parts token is caught" ([string]([int](DpBad (DpFixture 'drop')) - [int](DpBad))) '1'
     Chk "S30: control -- an unknown label is caught" ([string]([int](DpLabelBad (DpFixture 'label')) - [int](DpLabelBad))) '1'
-    Chk "S31: exactly one docs-commit-preconds declaration line" (DeclCount $CONV_REL $DCP_KEY) '1'
-    Chk "S32: exactly one docs-commit-epic-cases declaration line" (DeclCount $CONV_REL $DCE_KEY) '1'
     Chk "S33: no forbidden separator in either declaration tail" ([string]([int](BadSeps $CONV_REL $DCP_KEY) + [int](BadSeps $CONV_REL $DCE_KEY))) '0'
     # (S34) extraction positive-control -- with no names or no `dc-` token in the skill section step heads S35-S40 would pass on "0".
     Chk "S34: names of both declarations and dc- tokens of the skill section step heads extract (positive-control)" $(if (@(DnNames $DCP_KEY $CONV_REL).Count -ge 1 -and @(DnNames $DCE_KEY $CONV_REL).Count -ge 1 -and @(DcnToks @(DcnHeads @(DcSec $REL_SKILL))).Count -ge 1) { 'ok' } else { 'no' }) 'ok'
-    Chk "S35: main check -- names of both declarations are unique" (DcnSum 'DnDup') '0'
-    Chk "S36: main check -- every name has exactly one definition item" (DcnSum 'DnDefBad') '0'
-    Chk "S37: main check -- no definition item outside the declarations" (DcnSum 'DnDefOrphan') '0'
-    Chk "S38: main check -- definition order equals declaration name order" (DcnSum 'DnDefOrder') '0'
     Chk "S39: main check -- dc- names pointed at by the step heads of the skill's document-commit section equal the precondition names" (DcnCoverBad) '0'
     Chk "S40: main check -- every dc- token in the conventions set, the release skill and the catalog is a declared name" (DcnStray) '0'
     # (S41-S45) transform controls (rf-88) -- ask the verdict's RESPONSE as a delta (control-reads-delta): definition range, helper
@@ -5737,14 +5706,8 @@ try {
     # the bold span do not count as coverage.
     Chk "S46: transform control -- a dc- token on a prose line inside the skill section is not counted" ([string]([int](DcnCoverBad $CONV_REL (DcnFixture 'prose')) - [int](DcnCoverBad))) '0'
     Chk "S47: transform control -- a dc- token after the bold span of a step head is not counted" ([string]([int](DcnCoverBad $CONV_REL (DcnFixture 'headtail')) - [int](DcnCoverBad))) '0'
-    Chk "S48: exactly one release-preflights declaration line" (DeclCount $CONV $PFS_KEY) '1'
-    Chk "S49: no forbidden separator in the release-preflights declaration tail" (BadSeps $CONV $PFS_KEY) '0'
     # (S50) extraction positive-control -- with no names or no `pf-` token in the window's step heads S51-S57 would pass on "0".
     Chk "S50: preflight names and pf- tokens of the window step heads extract (positive-control)" $(if (@(DnNames $PFS_KEY $CONV).Count -ge 1 -and @(PfHeadsToks).Count -ge 1) { 'ok' } else { 'no' }) 'ok'
-    Chk "S51: main check -- preflight names are unique" (DnDup $PFS_KEY $CONV) '0'
-    Chk "S52: main check -- every name has exactly one definition item" (DnDefBad $PFS_KEY $CONV) '0'
-    Chk "S53: main check -- no definition item outside the declaration" (DnDefOrphan $PFS_KEY $CONV) '0'
-    Chk "S54: main check -- definition order equals declaration name order" (DnDefOrder $PFS_KEY $CONV) '0'
     Chk "S55: main check -- pf- names in the step heads of the skill's preflight window equal the declared names" (PfCoverBad) '0'
     Chk "S56: main check -- the order of names in those step heads equals the declaration order" (PfOrderBad) '0'
     Chk "S57: main check -- every pf- token in the conventions set, the release and cycle skills and the catalog is a declared name" (PfStray) '0'
@@ -5780,7 +5743,6 @@ try {
     # and pwsh 7 all went green -- neither "both copies agree" nor "four environments, same count"
     # covers a copy that dies in ONE shell. The pattern's single declaration site is
     # `.gitattributes`; the runner only READS it (the conventions' `source-eol:` line points there).
-    $EOL_KEY = 'source-eol:'
     $GITATTR = Join-Path $ROOT '.gitattributes'
     function EolGlobs([string]$path = '') {
         # The path is a parameter so that T7 can FEED A DIFFERENT FILE and prove the extraction
@@ -5828,7 +5790,6 @@ try {
         return $f
     }
     if (PartOn 'T') {
-    Chk "T1: source-eol declaration line is exactly 1" (DeclCount $CONV $EOL_KEY) '1'
     # (T2) extraction positive-control -- zero patterns makes "0 detected" vacuous.
     Chk "T2: eol=lf pattern extraction positive-control (>0)" $(if (@(EolGlobs).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
     # (T3) target positive-control -- patterns but zero tracked files is the same vacuum.
@@ -5876,7 +5837,6 @@ try {
     }
     function SkippedN([string]$extra) { return @(SkippedMs $extra).Count }
     if (PartOn 'U') {
-    Chk "U1: measure-order declaration line is exactly 1" (DeclCount $CONV $MO_KEY) '1'
     # (U2) extraction positive-control -- an empty tail would bind the empty token everywhere.
     Chk "U2: alias extraction positive-control" $(if ((MoName) -ne '') { 'ok' } else { 'no' }) 'ok'
     # (U3-U5) MAIN CHECKS -- the alias must actually be present in all three restatement sites.
@@ -6285,11 +6245,6 @@ try {
         return $n
     }
     if (PartOn 'V') {
-    Chk "V1: control-form declaration line is exactly 1" (DeclCount $CONV $CF_KEY) '1' 
-    Chk "V2: reversal-block declaration line is exactly 1" (DeclCount $CONV $RVB_KEY) '1'
-    Chk "V3: reversal-columns declaration line is exactly 1" (DeclCount $CONV $RVC_KEY) '1'
-    Chk "V4: reversal-sep declaration line is exactly 1" (DeclCount $CONV $RVS_KEY) '1'
-    Chk "V5: reversal-since declaration line is exactly 1" (DeclCount $CONV $RVN_KEY) '1'
     # (V6/V7) two extraction positive-controls -- either empty and the main check below would
     # pass VACUOUSLY as 0 == 0.
     Chk "V6: reversal-row extraction positive-control (>0)" $(if ((RvRowsN '' '') -gt 0) { 'ok' } else { 'no' }) 'ok'
@@ -6341,8 +6296,8 @@ try {
     Chk "V30: control -- adding a report with a folded list line raises it by one too" ([string]((RvMainBadN $RVN (RvFixture 'foldmain')) - (RvMainBadN $RVN ''))) '1'
     Chk "V33: control -- adding a report with a name past the closer raises it by one too" ([string]((RvMainBadN $RVN (RvFixture 'aftermain')) - (RvMainBadN $RVN ''))) '1'
     Chk "V27: negative control -- adding an untouched copy does not raise it" ([string]((RvMainBadN $RVN (RvFixture 'clean')) - (RvMainBadN $RVN ''))) '0'
-    # (V19) MAIN CHECK -- axis values belong to the declared set. Reversal has TWO directions
-    # (`mutation-axes:`) and the table records one per row. A column whose values are never checked
+    # (V19) MAIN CHECK -- axis values belong to the declared set. The reversal directions are held by
+    # the `mutation-axes:` declaration and the table records one per row. A column whose values are never checked
     # is a dead declaration, so EMPTY cells count as outside the set too.
     Chk "V19: main check -- axis cells outside the declared set or empty: 0" ([string](RvAxisBad '')) '0'
     # (V20) fixture control -- asked as a DELTA.
@@ -6393,17 +6348,10 @@ try {
     $SPB_KEY = 'start-point-block-predicates:'
     $SPF_KEY = 'start-point-form-predicates:'
     # Parameter is NOT named `$conv` -- PowerShell variables are case-insensitive, so it would shadow the global `$CONV`.
-    function SpNames([string]$which, [string]$spConv = '') {
-        if ($spConv -eq '') { $spConv = $CONV }
-        $key = if ($which -eq 'B') { $SPB_KEY } else { $SPF_KEY }
-        $tail = DeclTail $spConv $key
-        if ($null -eq $tail) { return @() }
-        $ws = [char[]]@([char]0x20, [char]0x09, [char]0x0D, [char]0x0B, [char]0x0C)
-        return @($tail -split ' ' | Where-Object { $_.Trim($ws) -ne '' })
-    }
-    function SpCount([string]$which) { return [string](@(SpNames $which).Count) }
+    function SpKey([string]$which) { if ($which -eq 'B') { return $SPB_KEY } else { return $SPF_KEY } }
+    function SpCount([string]$which) { return [string](@(DnNames (SpKey $which)).Count) }
     function SpName([string]$which, [string]$vals, [string]$spConv = '') {
-        $n = @(SpNames $which $spConv)
+        $n = @(DnNames (SpKey $which) $spConv)
         $v = @(($vals.Trim(' ')) -split ' +' | Where-Object { $_ -ne '' })
         $k = [Math]::Max($n.Count, $v.Count)
         $parts = New-Object System.Collections.Generic.List[string]
@@ -6414,77 +6362,33 @@ try {
         }
         return ($parts -join ' ')
     }
-    # Definition ITEM names -- from the block predicate declaration line to the next heading (`#`), the lines whose
-    # space/tab-stripped text starts with "- **`name`**" (M75 review minor 3: item heads only, not any line with the bold name).
-    function SpDefs([string]$spConv = '') {
-        if ($spConv -eq '') { $spConv = $CONV }
-        $k = '- `' + $SPB_KEY + '`'
-        $ws = [char[]]@([char]0x20, [char]0x09)
-        $on = $false
-        $out = New-Object System.Collections.Generic.List[string]
-        foreach ($ln in [System.IO.File]::ReadAllLines($spConv)) {
-            $t = $ln.TrimStart($ws)
-            if (-not $on) { if ($t.StartsWith($k, [System.StringComparison]::Ordinal)) { $on = $true }; continue }
-            if ($ln.StartsWith('#', [System.StringComparison]::Ordinal)) { break }
-            if ($t.StartsWith('- **`', [System.StringComparison]::Ordinal)) {
-                $r = $t.Substring(5); $j = $r.IndexOf('`**', [System.StringComparison]::Ordinal)
-                if ($j -gt 0) { $out.Add($r.Substring(0, $j)) }
-            }
-        }
-        return $out
-    }
-    function SpDefBad {
-        $defs = @(SpDefs)
-        $bad = 0
-        foreach ($nm in (@(SpNames 'B') + @(SpNames 'F'))) {
-            $c = @($defs | Where-Object { [string]::Equals($_, $nm, [System.StringComparison]::Ordinal) }).Count
-            if ($c -ne 1) { $bad++ }
-        }
-        return [string]$bad
-    }
-    # Reverse direction and uniqueness (M75 review blocker 1 -- an undeclared definition item, or a name written twice in the
-    # declarations, stayed green because W158 only went declaration -> definition).
-    function SpDefOrphan {
-        $names = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
-        foreach ($nm in (@(SpNames 'B') + @(SpNames 'F'))) { [void]$names.Add($nm) }
-        return [string]@(@(SpDefs) | Where-Object { -not $names.Contains($_) }).Count
-    }
-    function SpNameDup {
-        $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
-        $dup = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
-        foreach ($nm in (@(SpNames 'B') + @(SpNames 'F'))) { if (-not $seen.Add($nm)) { [void]$dup.Add($nm) } }
-        return [string]$dup.Count
-    }
-    # (M76) DEFINITION ITEM ORDER equals the declaration name order (block then form) -- walk the definition items that carry a
-    # declared name in order and count how often the declaration position steps back (normal 0). Reordering only the declaration
-    # or only the definitions goes red; reordering both stays green -- whether a name matches its value position BY MEANING is not
-    # asked here (the conventions boundary item). Undeclared definitions are skipped (that is W160's place).
-    function SpDefOrder([string]$spConv = '') {
-        if ($spConv -eq '') { $spConv = $CONV }
-        $idx = New-Object 'System.Collections.Generic.Dictionary[string,int]'([System.StringComparer]::Ordinal)
-        $i = 0
-        foreach ($nm in (@(SpNames 'B' $spConv) + @(SpNames 'F' $spConv))) { $i++; if (-not $idx.ContainsKey($nm)) { $idx[$nm] = $i } }
-        $p = 0; $c = 0
-        foreach ($d in @(SpDefs $spConv)) {
-            if ($idx.ContainsKey($d)) { $v = $idx[$d]; if ($p -gt 0 -and $v -lt $p) { $c++ }; $p = $v }
-        }
-        return [string]$c
-    }
+    # (M86) NAME / DEFINITION / ORPHAN / UNIQUE / ORDER verdicts come from the shared Dn* helpers -- pass the two declarations as
+    # one space-joined key list ($SP_KEYS). With several keys DnDefs' window runs from the block declaration line to the next
+    # heading at ANY depth -- the window of the absorbed SpDefs (M86 review blocker 1: round 0 narrowed it to the SAME depth and
+    # left an indented orphan definition green). Control: W164.
+    $SP_KEYS = $SPB_KEY + ' ' + $SPF_KEY
     # Order control fixture -- a SYNTHETIC conventions file holding only the two declaration lines and three definition items;
     # 'swap' reverses the first two definitions. Not a copy of the real conventions: if the real order is already broken, swapping
     # its first two items can REDUCE the violations and the control would measure the baseline (M76 reversal measurement).
     function SpOrderFixture([string]$mode) {
+        # (M86 round 1) 'deep' indents the second definition deeper and puts a column-0 prose line before it -- the control that
+        # the several-key window ignores depth (W164). 'deepx' adds one deeper-indented orphan definition 'zz-od'.
         $f = Join-Path $sbx ('conv-spo-' + $mode + '.md')
         if ($mode -eq 'swap') { $d1 = 'zz-ob'; $d2 = 'zz-oa' } else { $d1 = 'zz-oa'; $d2 = 'zz-ob' }
         $bt = [string][char]0x60
         $lines = @('## fixture', '', ('  - ' + $bt + $SPB_KEY + $bt + ' zz-oa zz-ob'), '', ('  - ' + $bt + $SPF_KEY + $bt + ' zz-oc'), '',
             ('  - **' + $bt + $d1 + $bt + '** - x'), ('  - **' + $bt + $d2 + $bt + '** - x'), ('  - **' + $bt + 'zz-oc' + $bt + '** - x'))
+        if ($mode -eq 'deep' -or $mode -eq 'deepx') {
+            $lines = @('## fixture', '', ('  - ' + $bt + $SPB_KEY + $bt + ' zz-oa zz-ob'), '', ('  - ' + $bt + $SPF_KEY + $bt + ' zz-oc'), '',
+                ('  - **' + $bt + 'zz-oa' + $bt + '** - x'), 'zz prose', ('      - **' + $bt + 'zz-ob' + $bt + '** - x'), ('  - **' + $bt + 'zz-oc' + $bt + '** - x'))
+            if ($mode -eq 'deepx') { $lines += ('      - **' + $bt + 'zz-od' + $bt + '** - x') }
+        }
         [System.IO.File]::WriteAllLines($f, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
         return $f
     }
     function SpWireFixture {
         $f = Join-Path $sbx 'conv-spw.md'
-        $first = @(SpNames 'B') | Select-Object -First 1
+        $first = @(DnNames $SPB_KEY) | Select-Object -First 1
         $w = '`' + $SPB_KEY + '`'
         $lines = New-Object System.Collections.ArrayList
         foreach ($l in [System.IO.File]::ReadAllLines($CONV)) {
@@ -6656,7 +6560,6 @@ try {
         '- `zzz-mk:` `zzz-m1` `zzz-m2`',
         'the markers are **`zzz-m1`** and **`zzz-m2`** on one line',
         'uses **`zzz-m1`** as a boundary sentence'))
-    Chk "W1: scope-decl declaration line is exactly 1" (DeclCount $CONV $SCOPE_KEY) '1'
     # (W2) extraction positive-control -- with no co-term the binds below run on the FALLBACK token and
     # all redden; this case separates "the declaration is gone" from "a seat lost the co-term".
     Chk "W2: co-term extraction positive-control" $(if ($SCOPE_ALIAS -ne 'zzz-scope-decl-unset') { 'ok' } else { 'no' }) 'ok'
@@ -6673,7 +6576,6 @@ try {
     # (W30) PER-SITE ASSERTION FOR THE THIRD RESTATEMENT SITE (M63). Widening only the combination
     # (`W3`) hides WHICH site died -- the same judgement `W4`-`W6` record for the first three.
     Chk "W30: review template carries the co-term as a backticked token" (ScopeTok $REV_TPL $SCOPE_ALIAS) 'yes'
-    Chk "W7: scope-limits declaration line is exactly 1" (DeclCount $CONV $SCOPE_LIM_KEY) '1'
     # (W8) marker extraction positive-control -- at 0 the check below would pass VACUOUSLY as 0 == 0.
     Chk "W8: boundary-marker extraction positive-control (>0)" $(if ($NSCM -gt 0) { 'ok' } else { 'no' }) 'ok'
     # (W9) MAIN CHECK -- every declared boundary marker is really used inside the declaration section.
@@ -6723,7 +6625,6 @@ try {
         if ($mcA.Count -gt 0) { $MC_ALIAS = $mcA[0] }
     }
     if ($MC_ALIAS -eq '') { $MC_ALIAS = 'zzz-measure-cache-unset' }
-    Chk "W13: measure-cache declaration line is exactly 1" (DeclCount $CONV $MC_KEY) '1'
     # (W14) extraction positive-control -- same reason as `W2` (running on the fallback hides the cause).
     Chk "W14: cache co-term extraction positive-control" $(if ($MC_ALIAS -ne 'zzz-measure-cache-unset') { 'ok' } else { 'no' }) 'ok'
     # (W15-W17) MAIN CHECK -- the co-term lives in the convention and the impl skill, and each seat is
@@ -6745,7 +6646,6 @@ try {
     $VS_KEY = 'verify-scope:'
     $VS_MARKS = @(MarkersOf $VS_KEY)
     $NVSM = $VS_MARKS.Count
-    Chk "W19: verify-scope declaration line is exactly 1" (DeclCount $CONV $VS_KEY) '1'
     # (W20) extraction positive-control -- at 0 the check below would pass VACUOUSLY (same as `W8`).
     Chk "W20: verify-scope marker extraction positive-control (>0)" $(if ($NVSM -gt 0) { 'ok' } else { 'no' }) 'ok'
     # (W21) MAIN CHECK -- every declared marker is really used outside the declaration line.
@@ -6755,7 +6655,6 @@ try {
     # at different widths, one invisible character (NBSP, TAB) reddens ONE copy only and the totals
     # disagree over a tree neither copy calls broken -- measured. Forbidding the character makes that
     # split reach BOTH axes at once. `I12`/`I13` already prove the ban is not vacuous, so no new fixture.
-    Chk "W26: no forbidden separator in the scope-decl declaration tail" (BadSeps $CONV $SCOPE_KEY) '0'
     # (W49-W57 / M65) EVIDENCE FOR A STRUCTURAL-INFEASIBILITY CLAIM -- the co-term in the opposite
     # direction of `scope-decl:`. Layer, restatement sites and mechanism match `W1`-`W6` / `W12` / `W26`,
     # so this calls THE SAME HELPERS (`ScopeAll` / `ScopeDefn` / `ScopeTok` / `BadSeps`). Sharing rests
@@ -6772,7 +6671,6 @@ try {
         if ($infA.Count -gt 0) { $INF_ALIAS = $infA[0] }
     }
     if ($INF_ALIAS -eq '') { $INF_ALIAS = 'zzz-infeasible-decl-unset' }
-    Chk "W49: infeasible-decl declaration line is exactly 1" (DeclCount $CONV $INF_KEY) '1'
     Chk "W50: infeasibility co-term extraction positive-control" $(if ($INF_ALIAS -ne 'zzz-infeasible-decl-unset') { 'ok' } else { 'no' }) 'ok'
     # (W51) MAIN CHECK -- the convention plus the three restatement sites, a four-file bind (same helper as `W3`).
     Chk "W51: infeasibility co-term ($INF_ALIAS) in all four files" (ScopeAll $INF_ALIAS) 'yes'
@@ -6785,7 +6683,6 @@ try {
     # baseline is CONSTANT BY CONSTRUCTION).
     Chk "W56: wiring -- another infeasibility co-term does not satisfy the bind" (ScopeAll 'zzz-other-infeasible') 'no'
     # (W57) tail separator -- same helper and reason as `W26`.
-    Chk "W57: no forbidden separator in the infeasible-decl declaration tail" (BadSeps $CONV $INF_KEY) '0'
     # (W58-W66 / M66) BRANCHES OF A CLAIM THAT LEANS ON ANOTHER PROCEDURE -- the third co-term in the same
     # layer as `scope-decl:` / `infeasible-decl:`; its restatement sites are the same three, so it calls THE
     # SAME HELPERS (the reason and the breaking condition are those in the `W49` comment). Whether a sentence
@@ -6798,7 +6695,6 @@ try {
         if ($leanA.Count -gt 0) { $LEAN_ALIAS = $leanA[0] }
     }
     if ($LEAN_ALIAS -eq '') { $LEAN_ALIAS = 'zzz-lean-decl-unset' }
-    Chk "W58: lean-decl declaration line is exactly 1" (DeclCount $CONV $LEAN_KEY) '1'
     Chk "W59: leaning-claim co-term extraction positive-control" $(if ($LEAN_ALIAS -ne 'zzz-lean-decl-unset') { 'ok' } else { 'no' }) 'ok'
     # (W60) MAIN CHECK -- the convention plus the three restatement sites (same helper as `W3` / `W51`).
     Chk "W60: leaning-claim co-term ($LEAN_ALIAS) in all four files" (ScopeAll $LEAN_ALIAS) 'yes'
@@ -6810,7 +6706,6 @@ try {
     # (W65) WIRING -- same shape as `W12` / `W56` (the token handed in is in no file, so the baseline is
     # CONSTANT BY CONSTRUCTION).
     Chk "W65: wiring -- another leaning-claim co-term does not satisfy the bind" (ScopeAll 'zzz-other-lean') 'no'
-    Chk "W66: no forbidden separator in the lean-decl declaration tail" (BadSeps $CONV $LEAN_KEY) '0'
     # (W67-W72 / M66) SCAN POSITIVE CONTROL -- the co-term in the convention's release build-output section and
     # ONE restatement site (`skills/release/SKILL.md`). With one site a bind would duplicate the per-site check,
     # so only the definition line (`W69`) and the site token (`W70`) are asked. Here the release-skill token is
@@ -6823,14 +6718,12 @@ try {
         if ($scanA.Count -gt 0) { $SCAN_ALIAS = $scanA[0] }
     }
     if ($SCAN_ALIAS -eq '') { $SCAN_ALIAS = 'zzz-scan-control-unset' }
-    Chk "W67: scan-control declaration line is exactly 1" (DeclCount $CONV $SCAN_KEY) '1'
     Chk "W68: scan positive-control co-term extraction positive-control" $(if ($SCAN_ALIAS -ne 'zzz-scan-control-unset') { 'ok' } else { 'no' }) 'ok'
     Chk "W69: the convention has exactly one definition line for the scan positive-control co-term" ([string](ScopeDefn $SCAN_ALIAS)) '1'
     Chk "W70: release SKILL carries the scan positive-control co-term as a backticked token" (ScopeTok $REL_SKILL $SCAN_ALIAS) 'yes'
     # (W71) WIRING -- a token found in no file must give `no`; without this case `ScopeTok` could ignore its
     # argument and `W70` would stay green (baseline constant by construction -- same shape as `W12`).
     Chk "W71: wiring -- another scan positive-control co-term is not in release SKILL" (ScopeTok $REL_SKILL 'zzz-other-scan') 'no'
-    Chk "W72: no forbidden separator in the scan-control declaration tail" (BadSeps $CONV $SCAN_KEY) '0'
     # (W73-W78 / M67) ABSENT JOB UNJUDGED -- the co-term in the convention's measurement-allocation block
     # (`absent-job:`) and ONE restatement site (the pr-mode finalize bullet of `skills/release/SKILL.md`).
     # Same layer and shape as `W67`-`W72`. With one site a bind would duplicate the per-site check, so only
@@ -6845,14 +6738,12 @@ try {
         if ($absentA.Count -gt 0) { $ABSENT_ALIAS = $absentA[0] }
     }
     if ($ABSENT_ALIAS -eq '') { $ABSENT_ALIAS = 'zzz-absent-job-unset' }
-    Chk "W73: absent-job declaration line is exactly 1" (DeclCount $CONV $ABSENT_KEY) '1'
     Chk "W74: absent-job co-term extraction positive-control" $(if ($ABSENT_ALIAS -ne 'zzz-absent-job-unset') { 'ok' } else { 'no' }) 'ok'
     Chk "W75: the convention has exactly one definition line for the absent-job co-term" ([string](ScopeDefn $ABSENT_ALIAS)) '1'
     Chk "W76: release SKILL carries the absent-job co-term as a backticked token" (ScopeTok $REL_SKILL $ABSENT_ALIAS) 'yes'
     # (W77) WIRING -- a token found in no file must give `no`; without this case `ScopeTok` could ignore its
     # argument and `W76` would stay green (baseline constant by construction -- same shape as `W71`).
     Chk "W77: wiring -- another absent-job co-term is not in release SKILL" (ScopeTok $REL_SKILL 'zzz-other-absent') 'no'
-    Chk "W78: no forbidden separator in the absent-job declaration tail" (BadSeps $CONV $ABSENT_KEY) '0'
     # (W79-W90 / M68) STEP WINDOW -- the two co-term tokens above must sit in the SAME ITEM WINDOW as an anchor
     # naming their step, not merely somewhere in the file. The window is the SUBTREE OF THE INNERMOST LIST ITEM
     # holding the token (from the item line through the following lines indented deeper; blank lines do not
@@ -6938,18 +6829,14 @@ try {
     [System.IO.File]::WriteAllText($winFxScan, ('1. step ' + $SCAN_ANCHOR + "`n   - a " + $bq + $SCAN_ALIAS + $bq + "`n   - b " + $SCAN_ANCHOR + "`n"), $u8w)
     $winFxAbsent = Join-Path $sbx 'winfx_absent.md'
     [System.IO.File]::WriteAllText($winFxAbsent, ('1. step ' + $ABSENT_ANCHOR + "`n   - a " + $bq + $ABSENT_ALIAS + $bq + "`n   - b " + $ABSENT_ANCHOR + "`n"), $u8w)
-    Chk "W79: scan-control-anchor declaration line is exactly 1" (DeclCount $CONV 'scan-control-anchor:') '1'
     Chk "W80: scan step anchor extraction positive-control" $(if ($SCAN_ANCHOR -ne 'zzz-scan-anchor-unset') { 'ok' } else { 'no' }) 'ok'
     Chk "W81: the scan positive-control token sits in the same item window as its anchor" ($scanWin.Split(' ')[0]) 'yes'
     Chk "W82: the scan step anchor appears in the file only inside that window" (WinUnique $scanWin) 'ok'
     Chk "W83: control -- a scan token in an item window without the anchor is caught" ((ItemWinProbe $winFxScan $SCAN_ALIAS $SCAN_ANCHOR).Split(' ')[0]) 'no'
-    Chk "W84: no forbidden separator in the scan-control-anchor declaration tail" (BadSeps $CONV 'scan-control-anchor:') '0'
-    Chk "W85: absent-job-anchor declaration line is exactly 1" (DeclCount $CONV 'absent-job-anchor:') '1'
     Chk "W86: absent-job step anchor extraction positive-control" $(if ($ABSENT_ANCHOR -ne 'zzz-absent-anchor-unset') { 'ok' } else { 'no' }) 'ok'
     Chk "W87: the absent-job token sits in the same item window as its anchor" ($absentWin.Split(' ')[0]) 'yes'
     Chk "W88: the absent-job step anchor appears in the file only inside that window" (WinUnique $absentWin) 'ok'
     Chk "W89: control -- an absent-job token in an item window without the anchor is caught" ((ItemWinProbe $winFxAbsent $ABSENT_ALIAS $ABSENT_ANCHOR).Split(' ')[0]) 'no'
-    Chk "W90: no forbidden separator in the absent-job-anchor declaration tail" (BadSeps $CONV 'absent-job-anchor:') '0'
     # (W91-W98 / M70) LIFECYCLE STATE TABLE FOR NEW JUDGEMENTS -- the co-term of the convention's subsection and
     # its two restatement sites (impl SKILL, impl template). Same shape as `lean-decl:` (W58-W66) but a different
     # site set, so the three-file join uses InAllThree. Whether the table covers every state and whether the
@@ -6962,7 +6849,6 @@ try {
         if ($lifeA.Count -gt 0) { $LIFE_ALIAS = $lifeA[0] }
     }
     if ($LIFE_ALIAS -eq '') { $LIFE_ALIAS = 'zzz-lifecycle-decl-unset' }
-    Chk "W91: lifecycle-decl declaration line is exactly 1" (DeclCount $CONV $LIFE_KEY) '1'
     Chk "W92: lifecycle co-term extraction positive-control" $(if ($LIFE_ALIAS -ne 'zzz-lifecycle-decl-unset') { 'ok' } else { 'no' }) 'ok'
     Chk "W93: lifecycle co-term ($LIFE_ALIAS) in all three files" (InAllThree $LIFE_ALIAS $CONV $IMPL_SKILL $IMPL_TPL) 'yes'
     Chk "W94: the convention has exactly one definition line for the lifecycle co-term" (ScopeDefn $LIFE_ALIAS) '1'
@@ -6970,7 +6856,6 @@ try {
     Chk "W96: impl template carries the lifecycle co-term as a backtick token" (ScopeTok $IMPL_TPL $LIFE_ALIAS) 'yes'
     # (W97) WIRING -- same shape as W65 (the given token is in no file, so the baseline is structurally constant).
     Chk "W97: wiring -- another lifecycle co-term breaks the join" (InAllThree 'zzz-other-lifecycle' $CONV $IMPL_SKILL $IMPL_TPL) 'no'
-    Chk "W98: no forbidden separator in the lifecycle-decl declaration tail" (BadSeps $CONV $LIFE_KEY) '0'
     # (W99-W110 / M71) TRANSITION TABLE -- the same subsection now derives the state list from the TRANSITIONS of the
     # skill flow instead of a hand-grown enumeration. Each transition has one declaration line (`tr-...:`) whose tail
     # carries the source file in its first backtick segment and an anchor inside that file in its second. The state
@@ -7073,9 +6958,7 @@ try {
     $ltrFxConv = Join-Path $ltrFx 'conv.md'
     [System.IO.File]::WriteAllText($ltrFxConv, ('  - ' + $bq + 'lifecycle-transitions:' + $bq + " tr-fa tr-fb tr-fc`n  - " + $bq + 'tr-fa:' + $bq + ' ' + $bq + 'sk.md' + $bq + ' ' + $bq + 'anc-a' + $bq + "`n  - " + $bq + 'tr-fb:' + $bq + ' ' + $bq + 'sk.md' + $bq + ' ' + $bq + 'anc-b' + $bq + "`n  - " + $bq + 'tr-fc:' + $bq + ' ' + $bq + 'sk.md' + $bq + ' ' + $bq + 'anc-c' + $bq + "`n<!-- lifecycle-states:start -->`n  - s1 " + $bq + 'tr-fa' + $bq + ' ' + $bq + 'tr-fc' + $bq + ' ' + $bq + 'tr-fzz' + $bq + "`n<!-- lifecycle-states:end -->`n"), $u8w)
     [System.IO.File]::WriteAllText((Join-Path $ltrFx 'sk.md'), "anc-a`nanc-c one`nanc-c two`n", $u8w)
-    Chk "W99: lifecycle-transitions declaration line is exactly 1" (DeclCount $CONV $LTR_KEY) '1'
     Chk "W100: transition extraction positive-control (>0)" $(if ($nLtr -gt 0) { 'ok' } else { 'no' }) 'ok'
-    Chk "W101: no forbidden separator in the lifecycle-transitions declaration tail" (BadSeps $CONV $LTR_KEY) '0'
     Chk "W102: transitions whose declaration line is not exactly one: 0" (LtrDup $CONV) '0'
     Chk "W103: transitions whose anchor is not on exactly one line of the source file: 0" (LtrAnchorMissing $CONV $ROOT) '0'
     Chk "W104: the state block markers each appear exactly once" $ltrMarks '1 1'
@@ -7085,14 +6968,11 @@ try {
     Chk "W108: control -- counts the fixture transitions whose anchor is missing or on two lines" (LtrAnchorMissing $ltrFxConv $ltrFx) '2'
     Chk "W109: control -- counts the fixture transition that is not cited" (LtrUncovered $ltrFxConv) '1'
     Chk "W110: control -- counts the fixture citation outside the table" (LtrOrphans $ltrFxConv) '1'
-    Chk "W27: no forbidden separator in the measure-cache declaration tail" (BadSeps $CONV $MC_KEY) '0'
     # (W28-W29) the two MARKER keys get the same ban, for a different failure: `MarkersOf` is width-pinned
     # to one ASCII space in both copies, so a forbidden character there does NOT split the axes -- it
     # MERGES two markers into one token in BOTH, the declared count drops, and `W9`/`W21` compare the
     # smaller number to itself and pass. The positive controls (`W8`/`W20`) stay green because the count
     # is still above zero. An invisible character must not be able to retire a boundary marker.
-    Chk "W28: no forbidden separator in the scope-limits declaration tail" (BadSeps $CONV $SCOPE_LIM_KEY) '0'
-    Chk "W29: no forbidden separator in the verify-scope declaration tail" (BadSeps $CONV $VS_KEY) '0'
 
     # (W111-W151 / M72, M73) DOES THE CYCLE START POINT READ THE REVIEW VERDICT. The no-argument start point
     # of /tide:cycle did not look at the verdict, so a "not possible" verdict went to a new milestone
@@ -7229,7 +7109,6 @@ try {
     $cycBrN = @(SecSpan $CYC_SKILL $CYC_SEC_ANCHOR | Where-Object { $_.Contains($cycBrKey) }).Count
     Chk "W117: positive-control for branch lines in the start-point section (>=2)" $(if ($cycBrN -ge 2) { 'ok' } else { 'no' }) 'ok'
     # (W127-W128) THE DECLARATION SIDE -- exactly one declaration line, and pairs actually extracted.
-    Chk "W127: exactly one start-point-map declaration line" (DeclCount $CONV $SPM_KEY) '1'
     Chk "W128: positive-control for declared pairs (>=3)" $(if ((SpmPairs $CONV) -ge 3) { 'ok' } else { 'no' }) 'ok'
     # (W118-W120) MAIN CHECKS -- is each branch item the one line assembled from the declaration: exactly one
     # item per key, byte-equal to the expected line, no continuation lines ("1 yes no").
@@ -7354,9 +7233,6 @@ try {
     Chk "W137: the start-point branches stand as the block assembled from the declarations" (CycBlock $CYC_SKILL) (SpName 'B' '1 yes yes yes yes yes 3')
     # (W138-W140) declaration side -- the parent declaration is unique, and both tails carry no forbidden separator
     # (same shape as the other declaration lines, W26 etc.).
-    Chk "W138: no forbidden separator in the start-point-map declaration tail" (BadSeps $CONV $SPM_KEY) '0'
-    Chk "W139: exactly one start-point-parent declaration line" (DeclCount $CONV $SPP_KEY) '1'
-    Chk "W140: no forbidden separator in the start-point-parent declaration tail" (BadSeps $CONV $SPP_KEY) '0'
     # (W141-W145) controls -- the round 0 review's mutations promoted to fixtures. The base fixture's parent and branch
     # lines are assembled FROM THE DECLARATIONS.
     $blkBase = New-Object System.Collections.Generic.List[string]
@@ -7399,8 +7275,6 @@ try {
     # copies. The pointer line must now equal the line assembled from `start-point-pointer:`. Both declaration values get
     # an extraction positive-control (same shape as W128 -- an empty value makes the expected line empty and the probe vacuous).
     Chk "W147: positive-control for the start-point-parent value" $(if ($cycWantParent -ne '' -and $cycWantParent -ne '- ') { 'ok' } else { 'no' }) 'ok'
-    Chk "W148: exactly one start-point-pointer declaration line" (DeclCount $CONV $SPT_KEY) '1'
-    Chk "W149: no forbidden separator in the start-point-pointer declaration tail" (BadSeps $CONV $SPT_KEY) '0'
     Chk "W150: positive-control for the start-point-pointer value" $(if ($cycWantPointer -ne '') { 'ok' } else { 'no' }) 'ok'
     $fxPtr = BlkFx 'blk-ptr.md' { param($l) $l[4] = '    -- this condition and the branches below are retired; regardless of the verdict it always goes **milestone ' + $STEP_WORD + '** (how to read the verdict: the `review-report` row)' }
     Chk "W151: control -- a parent condition flipped by the pointer line's prose is caught" (CycBlock $fxPtr) (SpName 'B' '1 yes no yes yes yes 3')
@@ -7409,20 +7283,19 @@ try {
     # exactly one definition item per name, and wiring (renaming in the declaration changes the output). The meaning of the
     # definition prose, and whether a name order changed together with the definitions matches the value positions, are not asked
     # (the conventions write that boundary -- definition item order = declaration order is W162 below).
-    Chk "W152: exactly one start-point-block-predicates declaration line" (DeclCount $CONV $SPB_KEY) '1'
-    Chk "W153: exactly one start-point-form-predicates declaration line" (DeclCount $CONV $SPF_KEY) '1'
-    Chk "W154: both predicate declarations extract names (positive-control, >=1)" $(if (@(SpNames 'B').Count -ge 1 -and @(SpNames 'F').Count -ge 1) { 'ok' } else { 'no' }) 'ok'
-    Chk "W155: no forbidden separator in either predicate declaration tail" ((BadSeps $CONV $SPB_KEY) + (BadSeps $CONV $SPF_KEY)) '00'
+    Chk "W154: both predicate declarations extract names (positive-control, >=1)" $(if ([int](SpCount 'B') -ge 1 -and [int](SpCount 'F') -ge 1) { 'ok' } else { 'no' }) 'ok'
     Chk "W156: main check -- block predicate name count equals the number of values the block verdict emits" (SpCount 'B') ([string]@(((CycBlockRaw $CYC_SKILL).Trim(' ')) -split ' +').Count)
     Chk "W157: main check -- form predicate name count equals the number of values the form verdict emits" (SpCount 'F') ([string]@(((FormProbe $CYC_SKILL $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail).Trim(' ')) -split ' +').Count)
-    Chk "W158: main check -- exactly one definition item per predicate name" (SpDefBad) '0'
     # (W160/W161, M75 review blocker 1) REVERSE DIRECTION AND UNIQUENESS -- W158 only went declaration -> definition.
-    Chk "W160: main check -- every definition item has a declared name (orphan definitions 0)" (SpDefOrphan) '0'
-    Chk "W161: main check -- names are unique across both predicate declarations" (SpNameDup) '0'
     # (W162/W163, M76) DEFINITION ITEM ORDER -- reordering only the declaration or only the definitions turns W162 red. Whether a
     # name matches its value position by meaning is not asked.
-    Chk "W162: main check -- definition item order equals the declaration name order" (SpDefOrder) '0'
-    Chk "W163: control -- a synthetic conventions file with only its first two definitions swapped adds exactly one order violation" ([string]([int](SpDefOrder (SpOrderFixture 'swap')) - [int](SpDefOrder (SpOrderFixture 'in')))) '1'
+    Chk "W163: control -- a synthetic conventions file with only its first two definitions swapped adds exactly one order violation" ([string]([int](DnDefOrder $SP_KEYS (SpOrderFixture 'swap')) - [int](DnDefOrder $SP_KEYS (SpOrderFixture 'in')))) '1'
+    # (W164, M86 round 1) SEVERAL-KEY INPUT CONTROL -- one cell per widened input conversion of DnNames/DnDefs (rf-88): names of both
+    # keys minus names of the first key (the second key's 1) / definitions counted past a deeper indent and a column-0 prose line (3) /
+    # definition violations of that copy (0) / one deeper-indented orphan definition (1). Round 0's same-depth window gave 1 and 0 in
+    # cells two and four (review blocker 1).
+    $spDf = SpOrderFixture 'deep'
+    Chk "W164: control -- several-key input: second-key names / depth-free definitions / definition violations / indented orphan" ([string](@(DnNames $SP_KEYS $spDf).Count - @(DnNames $SPB_KEY $spDf).Count) + '|' + [string]@(DnDefs $SP_KEYS $spDf).Count + '|' + [string](DnDefBad $SP_KEYS $spDf) + '|' + [string](DnDefOrphan $SP_KEYS (SpOrderFixture 'deepx'))) '1|3|0|1'
     # (W159) wiring control -- feeding a conventions copy whose first block name is renamed must show that new name (delta 1).
     Chk "W159: control -- renaming in the declaration changes the output" ([string](@((SpName 'B' '1' (SpWireFixture)) -split ' ' | Where-Object { $_.StartsWith('zzz-wired=', [System.StringComparison]::Ordinal) }).Count - @((SpName 'B' '1') -split ' ' | Where-Object { $_.StartsWith('zzz-wired=', [System.StringComparison]::Ordinal) }).Count)) '1'
     }
@@ -7521,8 +7394,6 @@ try {
     }
     $NAXT = @(AxisSiteTokens).Count
     $MA_WF = Join-Path $ROOT '.github\workflows\tests.yml'
-    Chk "W31: measure-axis declaration line is exactly 1" (DeclCount $CONV $MA_KEY) '1'
-    Chk "W32: measure-axis-job declaration line is exactly 1" (DeclCount $CONV $MJ_KEY) '1'
     # (W33-W35) three extraction positive-controls -- at 0 each check below passes VACUOUSLY (0 == 0).
     # `W35` is the SITE side: if the token shape (the `axis-` prefix) changes and nothing is scraped,
     # `W37` is vacuous.
@@ -7540,8 +7411,6 @@ try {
     # `W36` would stay green.
     Chk "W39: wiring -- a value outside the declaration does not satisfy the site binding" (AxisSitesHave 'zzz-other-axis') 'no'
     # (W40-W41) tail separators -- same helper and same reason as `W26`-`W29`.
-    Chk "W40: no forbidden separator in the measure-axis declaration tail" (BadSeps $CONV $MA_KEY) '0'
-    Chk "W41: no forbidden separator in the measure-axis-job declaration tail" (BadSeps $CONV $MJ_KEY) '0'
     # (W42) MAIN CHECK -- the three sites never write an axis name in backticks (the scope).
     Chk "W42: the three sites never name an axis in backticks" (AxisNameSites) '0'
     # (W43) CONTROL -- the same verdict function catches one fixture line. It asks the DIFFERENCE between
@@ -7557,7 +7426,6 @@ try {
     $MN_VALS = @()
     $mnTail = DeclTail $CONV $MN_KEY
     if ($null -ne $mnTail) { $MN_VALS = @($mnTail -split '[ \t]+' | Where-Object { $_ -cmatch '^[a-z][a-z0-9-]*$' }) }
-    Chk "W44: measure-axis-names declaration line is exactly 1" (DeclCount $CONV $MN_KEY) '1'
     # (W45) extraction positive-control -- at 0, `W46` would count the job name alone (half a check).
     Chk "W45: reference axis-name extraction positive-control (>0)" $(if ($MN_VALS.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
     # (W46) MAIN CHECK.
@@ -7570,7 +7438,261 @@ try {
     $axtFirst = if ($MN_VALS.Count -gt 0) { $MN_VALS[0] } else { '' }
     [System.IO.File]::WriteAllText($axtFix, ([string](ReadUtf8 $IMPL_TPL)) + "`n| " + (Uni 0xB85C,0xCEEC) + ' `' + $axtFirst + '` |' + "`n" + '| CI `' + $MJ_JOB + '` |' + "`n", (New-Object System.Text.UTF8Encoding $false))
     Chk "W47: control -- the verdict function catches a declared-name backticked-token fixture" ([string]((AxisNameTokenHits $axtFix) - (AxisNameTokenHits $IMPL_TPL))) '2'
-    Chk "W48: no forbidden separator in the measure-axis-names declaration tail" (BadSeps $CONV $MN_KEY) '0'
+    }
+
+    # --- DECLARATION VERDICT REGISTRY (M86) ---------------------------------------------------------------------
+    # Declaration hygiene and the name-declaration main checks come from ONE row of this table -- "part|case ID|check|conventions
+    # file|keys|label". Checks: count (exactly one declaration line) / seps (no forbidden separator per key; several keys concatenate
+    # the values) / dup def orphan order (the shared Dn* helpers; several keys are read as one name list) / their -sum forms (summed
+    # per key -- the two docs-commit declarations). IDs, labels and expected values equal the hand-written case lines they replace
+    # (M86 impl report T02/T03 -- label lists compared before and after). Rows run only in their own part (PartOn). `cover` rows emit
+    # no case; they only list a declaration key this harness knows -- the coverage check (F27) compares the key set discovered in the
+    # conventions document set with this table's key set. Part N's declaration cases are NOT in this table: CaseIds reads the runner
+    # source case lines to check the `floor-ask-cases:` mapping (those keys are `cover` rows). The keys are literals in source and the
+    # declaration's original is the conventions line itself -- the table only decides WHICH case ID asks WHICH key.
+    $DECL_REG = @'
+I|I7|count|CONV|state-neg:|exactly one state-neg declaration line in the convention
+I|I8|count|CONV|state-past:|exactly one state-past declaration line in the convention
+I|I10|seps|CONV|state-neg:|no forbidden separator in the state-neg declaration tail
+I|I11|seps|CONV|state-past:|no forbidden separator in the state-past declaration tail
+I|I18|count|CONV|sep-cps:|exactly one sep-cps declaration line in the convention
+I|I19|count|CONV|sep-ok-cps:|exactly one sep-ok-cps declaration line in the convention
+L|L1|count|CONV|count-word:|exactly one count-word declaration line
+L|L2|count|CONV|count-copula:|exactly one count-copula declaration line
+M|M1|count|CONV|epic-status:|epic-status declaration line is exactly 1
+M|M2|count|CONV|epic-since:|epic-since declaration line is exactly 1
+M|M11|count|CONV|epic-members:|epic-members declaration line is exactly 1
+O|O1|count|CONV|retro-status:|retro-status declaration line is exactly 1
+O|O2|count|CONV|retro-block:|retro-block declaration line is exactly 1
+O|O15|count|CONV|retro-cadence:|retro-cadence declaration line is exactly 1
+O|O16|count|CONV|retro-pick:|retro-pick declaration line is exactly 1
+O|O26|seps|CONV|retro-cadence:|no forbidden separator in the retro-cadence declaration tail
+O|O27|seps|CONV|retro-pick:|no forbidden separator in the retro-pick declaration tail
+O|O46|count|CONV|retro-release-mark:|retro-release-mark declaration line is exactly 1
+O|O47|count|CONV|retro-mark-since:|retro-mark-since declaration line is exactly 1
+O|O52|seps|CONV|retro-release-mark: retro-mark-since: retro-mark-derive:|no forbidden separator in the three declaration tails
+O|O58|count|CONV|retro-mark-derive:|retro-mark-derive declaration line is exactly 1
+O|O60|count|CONV|retro-order-branches:|retro-order-branches declaration line is exactly 1
+O|O61|count|CONV|retro-order-verdict:|retro-order-verdict declaration line is exactly 1
+O|O63|seps|CONV|retro-order-branches: retro-order-verdict:|no forbidden separator in the tails of the two branch declarations
+O|O64|dup|CONV|retro-order-branches:|main check -- branch names are unique
+O|O65|def|CONV|retro-order-branches:|main check -- every branch name has exactly one definition item
+O|O66|orphan|CONV|retro-order-branches:|main check -- every branch definition item has a declared name (0 orphans)
+O|O67|order|CONV|retro-order-branches:|main check -- branch definition order equals declaration name order
+P|P1|count|CONV|criteria-verdict:|criteria-verdict declaration line is exactly 1
+P|P2|count|CONV|criteria-since:|criteria-since declaration line is exactly 1
+P|P20|count|CONV|metrics-filled-since:|exactly one metrics-filled-since declaration line
+R|R1|count|CONV|coverage-bookkeeping:|coverage-bookkeeping declaration line is exactly 1
+S|S1|count|CONV_REL|push-availability:|push-availability declaration line is exactly 1
+S|S2|count|CONV_REL|terminal-state:|terminal-state declaration line is exactly 1
+S|S8|count|CONV_REL|docs-commit-paths:|exactly one docs-commit-paths declaration line
+S|S9|seps|CONV_REL|docs-commit-paths:|no forbidden separator in the docs-commit-paths declaration tail
+S|S20|count|CONV_REL|docs-commit-deny:|exactly one docs-commit-deny declaration line
+S|S22|seps|CONV_REL|docs-commit-deny:|no forbidden separator in the docs-commit-deny declaration tail
+S|S23|count|CONV_REL|docs-commit-parts:|exactly one docs-commit-parts declaration line
+S|S24|seps|CONV_REL|docs-commit-parts:|no forbidden separator in the docs-commit-parts declaration tail
+S|S31|count|CONV_REL|docs-commit-preconds:|exactly one docs-commit-preconds declaration line
+S|S32|count|CONV_REL|docs-commit-epic-cases:|exactly one docs-commit-epic-cases declaration line
+S|S35|dup-sum|CONV_REL|docs-commit-preconds: docs-commit-epic-cases:|main check -- names of both declarations are unique
+S|S36|def-sum|CONV_REL|docs-commit-preconds: docs-commit-epic-cases:|main check -- every name has exactly one definition item
+S|S37|orphan-sum|CONV_REL|docs-commit-preconds: docs-commit-epic-cases:|main check -- no definition item outside the declarations
+S|S38|order-sum|CONV_REL|docs-commit-preconds: docs-commit-epic-cases:|main check -- definition order equals declaration name order
+S|S48|count|CONV|release-preflights:|exactly one release-preflights declaration line
+S|S49|seps|CONV|release-preflights:|no forbidden separator in the release-preflights declaration tail
+S|S51|dup|CONV|release-preflights:|main check -- preflight names are unique
+S|S52|def|CONV|release-preflights:|main check -- every name has exactly one definition item
+S|S53|orphan|CONV|release-preflights:|main check -- no definition item outside the declaration
+S|S54|order|CONV|release-preflights:|main check -- definition order equals declaration name order
+T|T1|count|CONV|source-eol:|source-eol declaration line is exactly 1
+U|U1|count|CONV|measure-order:|measure-order declaration line is exactly 1
+V|V1|count|CONV|control-form:|control-form declaration line is exactly 1
+V|V2|count|CONV|reversal-block:|reversal-block declaration line is exactly 1
+V|V3|count|CONV|reversal-columns:|reversal-columns declaration line is exactly 1
+V|V4|count|CONV|reversal-sep:|reversal-sep declaration line is exactly 1
+V|V5|count|CONV|reversal-since:|reversal-since declaration line is exactly 1
+W|W1|count|CONV|scope-decl:|scope-decl declaration line is exactly 1
+W|W7|count|CONV|scope-limits:|scope-limits declaration line is exactly 1
+W|W13|count|CONV|measure-cache:|measure-cache declaration line is exactly 1
+W|W19|count|CONV|verify-scope:|verify-scope declaration line is exactly 1
+W|W26|seps|CONV|scope-decl:|no forbidden separator in the scope-decl declaration tail
+W|W49|count|CONV|infeasible-decl:|infeasible-decl declaration line is exactly 1
+W|W57|seps|CONV|infeasible-decl:|no forbidden separator in the infeasible-decl declaration tail
+W|W58|count|CONV|lean-decl:|lean-decl declaration line is exactly 1
+W|W66|seps|CONV|lean-decl:|no forbidden separator in the lean-decl declaration tail
+W|W67|count|CONV|scan-control:|scan-control declaration line is exactly 1
+W|W72|seps|CONV|scan-control:|no forbidden separator in the scan-control declaration tail
+W|W73|count|CONV|absent-job:|absent-job declaration line is exactly 1
+W|W78|seps|CONV|absent-job:|no forbidden separator in the absent-job declaration tail
+W|W79|count|CONV|scan-control-anchor:|scan-control-anchor declaration line is exactly 1
+W|W84|seps|CONV|scan-control-anchor:|no forbidden separator in the scan-control-anchor declaration tail
+W|W85|count|CONV|absent-job-anchor:|absent-job-anchor declaration line is exactly 1
+W|W90|seps|CONV|absent-job-anchor:|no forbidden separator in the absent-job-anchor declaration tail
+W|W91|count|CONV|lifecycle-decl:|lifecycle-decl declaration line is exactly 1
+W|W98|seps|CONV|lifecycle-decl:|no forbidden separator in the lifecycle-decl declaration tail
+W|W99|count|CONV|lifecycle-transitions:|lifecycle-transitions declaration line is exactly 1
+W|W101|seps|CONV|lifecycle-transitions:|no forbidden separator in the lifecycle-transitions declaration tail
+W|W27|seps|CONV|measure-cache:|no forbidden separator in the measure-cache declaration tail
+W|W28|seps|CONV|scope-limits:|no forbidden separator in the scope-limits declaration tail
+W|W29|seps|CONV|verify-scope:|no forbidden separator in the verify-scope declaration tail
+W|W127|count|CONV|start-point-map:|exactly one start-point-map declaration line
+W|W138|seps|CONV|start-point-map:|no forbidden separator in the start-point-map declaration tail
+W|W139|count|CONV|start-point-parent:|exactly one start-point-parent declaration line
+W|W140|seps|CONV|start-point-parent:|no forbidden separator in the start-point-parent declaration tail
+W|W148|count|CONV|start-point-pointer:|exactly one start-point-pointer declaration line
+W|W149|seps|CONV|start-point-pointer:|no forbidden separator in the start-point-pointer declaration tail
+W|W152|count|CONV|start-point-block-predicates:|exactly one start-point-block-predicates declaration line
+W|W153|count|CONV|start-point-form-predicates:|exactly one start-point-form-predicates declaration line
+W|W155|seps|CONV|start-point-block-predicates: start-point-form-predicates:|no forbidden separator in either predicate declaration tail
+W|W158|def|CONV|start-point-block-predicates: start-point-form-predicates:|main check -- exactly one definition item per predicate name
+W|W160|orphan|CONV|start-point-block-predicates: start-point-form-predicates:|main check -- every definition item has a declared name (orphan definitions 0)
+W|W161|dup|CONV|start-point-block-predicates: start-point-form-predicates:|main check -- names are unique across both predicate declarations
+W|W162|order|CONV|start-point-block-predicates: start-point-form-predicates:|main check -- definition item order equals the declaration name order
+W|W31|count|CONV|measure-axis:|measure-axis declaration line is exactly 1
+W|W32|count|CONV|measure-axis-job:|measure-axis-job declaration line is exactly 1
+W|W40|seps|CONV|measure-axis:|no forbidden separator in the measure-axis declaration tail
+W|W41|seps|CONV|measure-axis-job:|no forbidden separator in the measure-axis-job declaration tail
+W|W44|count|CONV|measure-axis-names:|measure-axis-names declaration line is exactly 1
+W|W48|seps|CONV|measure-axis-names:|no forbidden separator in the measure-axis-names declaration tail
+-|-|cover|CONV|status-items:|-
+-|-|cover|CONV|autonomy-level:|-
+-|-|cover|CONV|autonomy-default:|-
+-|-|cover|CONV|autonomy-lines:|-
+-|-|cover|CONV|floor-marks:|-
+-|-|cover|CONV|floor-items:|-
+-|-|cover|CONV|floor-mark-map:|-
+-|-|cover|CONV|floor-unmarked:|-
+-|-|cover|CONV|floor-excluded:|-
+-|-|cover|CONV|floor-asks:|-
+-|-|cover|CONV|floor-ask-cases:|-
+-|-|cover|CONV|floor-ask-from:|-
+-|-|cover|CONV|retro-flow:|-
+-|-|cover|CONV|retro-flow-sites:|-
+-|-|cover|CONV|retro-gate-since:|-
+-|-|cover|CONV|retro-review-after:|-
+-|-|cover|CONV|tr-draft:|-
+-|-|cover|CONV|tr-impl:|-
+-|-|cover|CONV|tr-review:|-
+-|-|cover|CONV|tr-release-commit:|-
+-|-|cover|CONV|tr-tag:|-
+-|-|cover|CONV|tr-retro:|-
+-|-|cover|CONV|tr-retro-skip:|-
+-|-|cover|CONV|tr-forced:|-
+-|-|cover|CONV|tr-debug-open:|-
+-|-|cover|CONV|tr-debug-done:|-
+-|-|cover|CONV|tr-debug-release:|-
+-|-|cover|CONV|tr-pr-create:|-
+-|-|cover|CONV|tr-pr-finalize:|-
+-|-|cover|CONV|tr-continuous-stop:|-
+-|-|cover|CONV|tr-downstream:|-
+-|-|cover|CONV|tr-part-select:|-
+-|-|cover|CONV|mutation-axes:|-
+'@
+    function DeclReg { return @($DECL_REG -split "`r?`n" | Where-Object { $_ -ne '' }) }
+    foreach ($rgRow in (DeclReg)) {
+        $rg = $rgRow -split '\|', 6
+        if ($rg[2] -eq 'cover') { continue }
+        if (-not (PartOn $rg[0])) { continue }
+        $rgFile = if ($rg[3] -eq 'CONV_REL') { $CONV_REL } else { $CONV }
+        $rgKeys = @($rg[4] -split ' ' | Where-Object { $_ -ne '' })
+        $rgFn = @{ 'dup' = 'DnDup'; 'def' = 'DnDefBad'; 'orphan' = 'DnDefOrphan'; 'order' = 'DnDefOrder' }
+        $rgBase = $rg[2] -replace '-sum$', ''
+        if ($rg[2] -eq 'count') { $rgGot = DeclCount $rgFile $rg[4]; $rgWant = '1' }
+        elseif ($rg[2] -eq 'seps') { $rgGot = ''; $rgWant = ''; foreach ($k in $rgKeys) { $rgGot += [string](BadSeps $rgFile $k); $rgWant += '0' } }
+        elseif ($rg[2].EndsWith('-sum', [System.StringComparison]::Ordinal) -and $rgFn.ContainsKey($rgBase)) {
+            $rgN = 0; foreach ($k in $rgKeys) { $rgN += [int](& $rgFn[$rgBase] $k $rgFile) }; $rgGot = [string]$rgN; $rgWant = '0' }
+        elseif ($rgFn.ContainsKey($rg[2])) { $rgGot = [string](& $rgFn[$rg[2]] $rg[4] $rgFile); $rgWant = '0' }
+        else { $rgGot = 'unknown-check:' + $rg[2]; $rgWant = '0' }
+        Chk ($rg[1] + ': ' + $rg[5]) $rgGot $rgWant
+    }
+
+    # (F24-F28, M86) COVERAGE -- discover the declaration lines of the conventions document set (glob 'docs/conventions*.md') in ONE
+    # pass and ask that each key has exactly one declaration line, that no tail carries a forbidden separator, and that the
+    # discovered key set equals this table's key set. The line shape equals DeclLines (leading spaces/tabs, '-', one or more
+    # spaces/tabs, the backticked key); only keys of the form [a-z][a-z0-9-]*: are counted.
+    function DeclDiscFiles([string]$dir) {
+        $fs = @(Get-ChildItem $dir -File -Force -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name.StartsWith('conventions', [System.StringComparison]::Ordinal) -and
+                               $_.Name.EndsWith('.md', [System.StringComparison]::Ordinal) } | ForEach-Object { $_.FullName })
+        $lst = New-Object 'System.Collections.Generic.List[string]'
+        foreach ($f in $fs) { [void]$lst.Add($f) }
+        $lst.Sort([System.StringComparer]::Ordinal)
+        return @($lst.ToArray())
+    }
+    function DeclDisc([string]$dir = '', [string]$what = 'k') {
+        if ($dir -eq '') { $dir = Join-Path $ROOT 'docs' }
+        $out = New-Object System.Collections.Generic.List[string]
+        foreach ($f in (DeclDiscFiles $dir)) {
+            $raw = ReadUtf8 $f
+            if ($null -eq $raw) { continue }
+            foreach ($ln in ($raw -split "`r?`n")) {
+                $m = [regex]::Match($ln, '^[ \t]*-[ \t]+`([a-z][a-z0-9-]*:)`(.*)$')
+                if ($m.Success) { if ($what -eq 'k') { $out.Add($m.Groups[1].Value) } else { $out.Add($m.Groups[2].Value) } }
+            }
+        }
+        return @($out)
+    }
+    function DeclRegKeys {
+        $s = New-Object 'System.Collections.Generic.SortedSet[string]'([System.StringComparer]::Ordinal)
+        foreach ($row in (DeclReg)) { foreach ($k in (($row -split '\|', 6)[4] -split ' ')) { if ($k -ne '') { [void]$s.Add($k) } } }
+        return @($s)
+    }
+    function DeclDiscDup([string]$dir = '') {
+        $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        $dup = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($k in (DeclDisc $dir 'k')) { if (-not $seen.Add($k)) { [void]$dup.Add($k) } }
+        return [string]$dup.Count
+    }
+    function DeclDiscSeps([string]$dir = '') {
+        return [string]@(DeclDisc $dir 't' | Where-Object { [regex]::IsMatch($_, $SEP_RE) }).Count
+    }
+    function DeclDiscUnreg([string]$dir = '') {
+        $d = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($k in (DeclDisc $dir 'k')) { [void]$d.Add($k) }
+        $r = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($k in (DeclRegKeys)) { [void]$r.Add($k) }
+        $n = 0
+        foreach ($k in $d) { if (-not $r.Contains($k)) { $n++ } }
+        foreach ($k in $r) { if (-not $d.Contains($k)) { $n++ } }
+        return [string]$n
+    }
+    function DeclFixture([string]$mode) {
+        $fx = Join-Path $sbx ('declfx-' + $mode)
+        if (Test-Path $fx) { Remove-Item -Recurse -Force $fx }
+        [void](New-Item -ItemType Directory -Path $fx)
+        foreach ($f in (DeclDiscFiles (Join-Path $ROOT 'docs'))) { Copy-Item $f $fx }
+        $fc = Join-Path $fx 'conventions.md'
+        $bt = [string][char]0x60
+        $enc = New-Object System.Text.UTF8Encoding($false)
+        $lines = New-Object System.Collections.Generic.List[string]
+        foreach ($l in ((ReadUtf8 $fc) -split "`r?`n")) { $lines.Add($l) }
+        $k = '- ' + $bt + 'retro-status:' + $bt
+        $out = New-Object System.Collections.Generic.List[string]
+        foreach ($l in $lines) {
+            $t = $l.TrimStart([char[]]@([char]0x20, [char]0x09))
+            $hit = $t.StartsWith($k, [System.StringComparison]::Ordinal)
+            if ($mode -eq 'drop' -and $hit) { continue }
+            if ($mode -eq 'sep' -and $hit) {
+                $w = $bt + 'retro-status:' + $bt + ' '
+                $i = $l.IndexOf($w, [System.StringComparison]::Ordinal)
+                if ($i -ge 0) { $l = $l.Substring(0, $i + $w.Length - 1) + [string][char]0x09 + $l.Substring($i + $w.Length) }
+            }
+            $out.Add($l)
+            if ($mode -eq 'dup' -and $hit) { $out.Add($l) }
+        }
+        if ($mode -eq 'add') { $out.Add(''); $out.Add('  - ' + $bt + 'zz-m86-unreg:' + $bt + ' zz') }
+        [System.IO.File]::WriteAllText($fc, ($out -join "`n"), $enc)
+        if ($mode -eq 'frag') {
+            [System.IO.File]::WriteAllText((Join-Path $fx 'conventions-zz-m86.md'), ('# fixture' + "`n`n" + '  - ' + $bt + 'zz-m86-frag:' + $bt + ' zz' + "`n"), $enc)
+        }
+        return $fx
+    }
+    if (PartOn 'F') {
+    Chk "F24: declaration-line discovery positive-control (>0) and registry key extraction (>0)" $(if (@(DeclDisc '' 'k').Count -gt 0 -and @(DeclRegKeys).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "F25: main check -- no key with two or more declaration lines in the conventions document set" (DeclDiscDup) '0'
+    Chk "F26: main check -- no forbidden separator in any declaration tail of the conventions document set" (DeclDiscSeps) '0'
+    Chk "F27: main check -- the discovered declaration key set and the registry key set have an empty symmetric difference" (DeclDiscUnreg) '0'
+    $dfb27 = [int](DeclDiscUnreg); $dfb25 = [int](DeclDiscDup); $dfb26 = [int](DeclDiscSeps)
+    Chk "F28: control -- in copies, an unregistered declaration added / a registered one dropped / a new fragment / a duplicated line / a TAB in a tail each add exactly one" ([string]([int](DeclDiscUnreg (DeclFixture 'add')) - $dfb27) + '|' + [string]([int](DeclDiscUnreg (DeclFixture 'drop')) - $dfb27) + '|' + [string]([int](DeclDiscUnreg (DeclFixture 'frag')) - $dfb27) + '|' + [string]([int](DeclDiscDup (DeclFixture 'dup')) - $dfb25) + '|' + [string]([int](DeclDiscSeps (DeclFixture 'sep')) - $dfb26)) '1|1|1|1|1'
     }
 
     # `F1` RUNS ONLY IN A FULL RUN (M64-T03) -- in a partial run the cross-check is red by construction
