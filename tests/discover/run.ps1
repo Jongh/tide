@@ -2703,8 +2703,20 @@ try {
         if ($a.Count -gt 0) { return [string]$a[0] }
         return ''
     }
+    # (M87, retro rf-109) The `epic-since:` value is split on EVERY whitespace kind (space, tab, VT, FF, CR) -- the same split as
+    # the .sh twin's epic_since_of. While the twin split on a single space, a tab-separated tail reddened M9/M12/M14 on the sh side
+    # only (M86 reversal `tab-epic-since`). A tab tail itself is still reddened by F26 -- this only makes both copies answer alike.
+    # Control: M15.
+    function EpicSinceOf([string]$esFile = '') {
+        if ($esFile -eq '') { $esFile = $CONV }
+        $t = DeclTail $esFile 'epic-since:'
+        if ($null -eq $t) { return '' }
+        $a = @(($t -replace '[`*]', '') -split '[ \t\v\f\r]+' | Where-Object { $_ -ne '' })
+        if ($a.Count -gt 0) { return [string]$a[0] }
+        return ''
+    }
     if (PartOn 'M') {
-    $epicSince = EpicFirstMarker 'epic-since:'
+    $epicSince = EpicSinceOf
     $epicMemberMark = EpicFirstMarker 'epic-members:'
     $epicSinceNum = 0
     if ($epicSince -ne '') { $epicSinceNum = [int](($epicSince -replace '[^0-9]', '')) }
@@ -2917,6 +2929,21 @@ try {
     # the past exception and the second does.
     Chk "M14: negative control -- prose outside the block / a past milestone entry stay green" `
         ("{0}/{1}" -f (EpicBadIn (EpicFixture 'prose')), (EpicBadIn (EpicFixture 'past'))) '0/0'
+    # (M15, M87, rf-109) SPLIT-WIDTH CONTROL -- a copy with a tab after the key and a copy with a tab after the value read the
+    # same value as the real file. The .sh twin answers the same two copies alike (reversal table -- both runners' Part M).
+    $esLines = [System.IO.File]::ReadAllLines($CONV)
+    $esKey = '`epic-since:` '
+    $esSep = New-Object System.Collections.Generic.List[string]; $esEnd = New-Object System.Collections.Generic.List[string]
+    foreach ($l in $esLines) {
+        $i = $l.IndexOf($esKey, [System.StringComparison]::Ordinal)
+        if ($i -ge 0) { $esSep.Add($l.Substring(0, $i + $esKey.Length - 1) + "`t" + $l.Substring($i + $esKey.Length)) } else { $esSep.Add($l) }
+        if ($l.TrimStart([char[]]@([char]0x20, [char]0x09)).StartsWith('- `epic-since:`', [System.StringComparison]::Ordinal)) { $esEnd.Add($l + "`t") } else { $esEnd.Add($l) }
+    }
+    $esFxSep = Join-Path $sbx 'conv-es-sep.md'; $esFxEnd = Join-Path $sbx 'conv-es-end.md'
+    [System.IO.File]::WriteAllLines($esFxSep, $esSep.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+    [System.IO.File]::WriteAllLines($esFxEnd, $esEnd.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+    Chk "M15: split-width control -- a tab after the key and a tab after the value still read the epic-since value of the real file" `
+        ((@($(if ($epicSince -ne '') { 'ok' } else { 'no' }), (EpicSinceOf $esFxSep), (EpicSinceOf $esFxEnd))) -join '|') ('ok|' + $epicSince + '|' + $epicSince)
     }
 
     # === Part N (M52) -- status-item declaration consistency ==================
@@ -3392,7 +3419,7 @@ try {
         [System.IO.File]::WriteAllLines($f, [string[]]@($ln), (New-Object System.Text.UTF8Encoding($false)))
         return $f
     }
-    # Order control fixture -- SYNTHETIC (same reason as SpOrderFixture); 'swap' reverses only the first two definitions.
+    # Order control fixture -- SYNTHETIC (same reason as DnOrderFixture); 'swap' reverses only the first two definitions.
     function FlOrderFixture([string]$mode) {
         $f = Join-Path $sbx ('conv-flo-' + $mode + '.md')
         if ($mode -eq 'swap') { $d1 = 'zz-fb'; $d2 = 'zz-fa' } else { $d1 = 'zz-fa'; $d2 = 'zz-fb' }
@@ -4347,11 +4374,11 @@ try {
     # harness never runs there).
     $RSMIN = MarkSince $MDIR
     $rsEff = if ($RSMIN -eq '') { $RSINCE } else { $RSMIN }
-    Chk "O56: main check -- when a mark exists the lowest marked number equals the declared since-number" $(if ($RSINCE -ne '' -and $rsEff -eq $RSINCE) { 'ok' } else { 'no' }) 'ok'
+    Chk "O56: main check (ms-min-mark) -- when a mark exists the lowest marked number equals the declared since-number" $(if ($RSINCE -ne '' -and $rsEff -eq $RSINCE) { 'ok' } else { 'no' }) 'ok'
     $nomk = Join-Path $sbx 'nomark-milestones'
     New-Item -ItemType Directory -Force -Path $nomk | Out-Null
     [System.IO.File]::WriteAllLines((Join-Path $nomk 'M1.md'), [string[]]@('# M1'), (New-Object System.Text.UTF8Encoding($false)))
-    Chk "O57: control -- lowest marked number (clean 5, gap 6, no mark empty)" ((MarkSince (Join-Path $GPCL 'm')) + '|' + (MarkSince (Join-Path $GPFX 'm')) + '|' + (MarkSince $nomk)) '5|6|'
+    Chk "O57: control (ms-min-mark) -- lowest marked number (clean 5, gap 6, no mark empty)" ((MarkSince (Join-Path $GPCL 'm')) + '|' + (MarkSince (Join-Path $GPFX 'm')) + '|' + (MarkSince $nomk)) '5|6|'
     Chk "O59: the since-derivation co-term is present at all three restatement sites" ((ScopeTok (Join-Path $ROOT 'skills/release/SKILL.md') $RDERIVE) + (ScopeTok (Join-Path $ROOT 'skills/retro/SKILL.md') $RDERIVE) + (ScopeTok (Join-Path $ROOT 'docs/commands.md') $RDERIVE)) 'yesyesyes'
     # (O60-O83 / M82) THE ORDER VERDICT'S BRANCH NAMES ARE DECLARED -- the old prose list is `retro-order-branches:` +
     # `retro-order-verdict:` + one definition item per name. O60-O69 are the same declaration checks as the M78/M79 floor
@@ -4627,6 +4654,188 @@ try {
     Chk "O98: main check -- every row carrying a bare review-due in its where cell is open or pending" (RtReviewBad) '0'
     $rtv0 = [int](RtReviewBad)
     Chk "O99: transform control -- a bare review-due on a done row adds one; on an open row, backticked, or in the item cell adds none" (([string]([int](RtReviewBad (RtRetroFixture 'revdone')) - $rtv0)) + '|' + ([string]([int](RtReviewBad (RtRetroFixture 'revopen')) - $rtv0)) + '|' + ([string]([int](RtReviewBad (RtRetroFixture 'revquoted')) - $rtv0)) + '|' + ([string]([int](RtReviewBad (RtRetroFixture 'revitem')) - $rtv0))) '1|0|0|0'
+    # (O100-O117, M87, retro rf-107) SINCE-DERIVATION STEP NAMES -- the conventions' `mark-since-steps:` name declaration and its per-name
+    # definition items. Declaration hygiene (O100-O105) comes from registry rows. The three restatement sites (release / retro skills and
+    # the command catalog) point at the steps BY NAME; per site the window runs from just after the FIRST occurrence of the backticked
+    # co-term token mark-since-derived to just before the first following occurrence of the backticked declaration-key token
+    # mark-since-steps: . Anchors are a main check first -- present, one, in order (O107, conventions checklist item on controlling the window inside/before/after). Only tokens
+    # wrapped in ONE backtick pair of the shape ms-[a-z0-9-]+ count. The step this runner implements is named by the O56 / O57 labels
+    # (ms-min-mark today) and O116 asks that every ms- name in either runner's case labels is declared. Not asked: what a definition
+    # sentence means, and whether the steps the runner does not implement really run in target repos. Same functions as the .sh twin.
+    $MSS_KEY = 'mark-since-steps:'
+    $MSS_A = '`mark-since-derived`'
+    $MSS_B = '`mark-since-steps:`'
+    $MS_TOK_RE = '`(ms-[a-z0-9-]+)`'
+    $MS_O = [System.StringComparison]::Ordinal
+    function MsToksOfLines($lines) {
+        $out = New-Object System.Collections.Generic.List[string]
+        foreach ($l in @($lines)) { foreach ($m in [regex]::Matches([string]$l, $MS_TOK_RE)) { $out.Add($m.Groups[1].Value) } }
+        return @($out)
+    }
+    # The text both the window and the anchor verdicts read -- lines joined with LF (the .sh twin strips one trailing CR per line).
+    function MsText([string]$f) {
+        if (-not (Test-Path -LiteralPath $f)) { return '' }
+        $ls = [System.IO.File]::ReadAllLines($f)
+        if ($ls.Count -eq 0) { return '' }
+        return ([string]::Join("`n", $ls) + "`n")
+    }
+    function MsWindow([string]$f, [string]$a = '', [string]$b = '') {
+        if ($a -eq '') { $a = $MSS_A }
+        if ($b -eq '') { $b = $MSS_B }
+        $t = MsText $f
+        $i = $t.IndexOf($a, $MS_O); if ($i -lt 0) { return '' }
+        $r = $t.Substring($i + $a.Length)
+        $j = $r.IndexOf($b, $MS_O); if ($j -lt 0) { return '' }
+        return $r.Substring(0, $j)
+    }
+    function MsCountOf([string]$s, [string]$x) {
+        $n = 0; $i = 0
+        while ($i -le $s.Length) { $k = $s.IndexOf($x, $i, $MS_O); if ($k -lt 0) { break }; $n++; $i = $k + $x.Length }
+        return $n
+    }
+    # "start-anchor count, end-anchor count, order" (order: both present and the first start precedes the first end -> 1).
+    function MsAnchor([string]$f) {
+        $t = MsText $f
+        $ia = $t.IndexOf($MSS_A, $MS_O); $ib = $t.IndexOf($MSS_B, $MS_O)
+        $ord = if ($ia -ge 0 -and $ib -ge 0 -and $ia -lt $ib) { 1 } else { 0 }
+        return ([string](MsCountOf $t $MSS_A) + ' ' + [string](MsCountOf $t $MSS_B) + ' ' + [string]$ord)
+    }
+    # Symmetric difference of the window's ms- name set and the declared name set, plus the number of names appearing twice or more (normal 0).
+    function MsCoverBad([string]$f, [string]$msConv = '') {
+        $decl = OrdSet @(DnNames $MSS_KEY $msConv)
+        $win = @(MsToksOfLines @((MsWindow $f) -split "`n"))
+        $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        $dup = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($w in $win) { if (-not $seen.Add($w)) { [void]$dup.Add($w) } }
+        $n = 0
+        foreach ($d in $decl) { if (-not $seen.Contains($d)) { $n++ } }
+        foreach ($w in $seen) { if (-not $decl.Contains($w)) { $n++ } }
+        return [string]($n + $dup.Count)
+    }
+    function MsSites([string]$msRoot = '') {
+        if ($msRoot -eq '') { $msRoot = $ROOT }
+        return @((Join-Path $msRoot 'skills/release/SKILL.md'), (Join-Path $msRoot 'skills/retro/SKILL.md'), (Join-Path $msRoot 'docs/commands.md'))
+    }
+    function MsCoverEach([string]$msRoot = '', [string]$msConv = '') { return ((@(MsSites $msRoot) | ForEach-Object { MsCoverBad $_ $msConv }) -join '|') }
+    function MsAnchorEach([string]$msRoot = '') { return ((@(MsSites $msRoot) | ForEach-Object { MsAnchor $_ }) -join '|') }
+    # Backticked ms- tokens in the given conventions file (the whole conventions set when none) and the three sites that are not declared names.
+    function MsStray([string]$convFile = '', [string]$msRoot = '', [string]$msConv = '') {
+        $decl = OrdSet @(DnNames $MSS_KEY $msConv)
+        $files = New-Object System.Collections.Generic.List[string]
+        if ($convFile -ne '') { [void]$files.Add($convFile) } else {
+            $cf = @(Get-ChildItem (Join-Path $ROOT 'docs') -File -Force -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name.StartsWith('conventions', $MS_O) -and $_.Name.EndsWith('.md', $MS_O) } | ForEach-Object { $_.FullName })
+            foreach ($c in $cf) { [void]$files.Add($c) }
+        }
+        foreach ($s in (MsSites $msRoot)) { [void]$files.Add($s) }
+        $toks = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($f in $files) { if (Test-Path -LiteralPath $f) { foreach ($k in (MsToksOfLines ([System.IO.File]::ReadAllLines($f)))) { [void]$toks.Add($k) } } }
+        $n = 0
+        foreach ($k in $toks) { if (-not $decl.Contains($k)) { $n++ } }
+        return [string]$n
+    }
+    # ms- names appearing AS WORDS in the first quoted span of case lines (space/tab-stripped text starts with chk " / Chk "; comments excluded).
+    function MsLabelToks([string]$src) {
+        $q = [string][char]0x22
+        $out = New-Object System.Collections.Generic.List[string]
+        foreach ($ln in [System.IO.File]::ReadAllLines($src)) {
+            $t = $ln.TrimStart([char[]]@([char]0x20, [char]0x09))
+            if (-not ($t.StartsWith('chk ' + $q, $MS_O) -or $t.StartsWith('Chk ' + $q, $MS_O))) { continue }
+            $r = $t.Substring(5); $j = $r.IndexOf($q, $MS_O); if ($j -ge 0) { $r = $r.Substring(0, $j) }
+            foreach ($m in [regex]::Matches($r, '(?<![a-z0-9-])ms-[a-z0-9-]+')) { $out.Add($m.Value) }
+        }
+        return @($out)
+    }
+    # "sh source|ps1 source": per source, label ms- names not in the declaration (distinct names).
+    function MsLabelBad([string]$shSrc = '', [string]$psSrc = '', [string]$msConv = '') {
+        if ($shSrc -eq '') { $shSrc = $RUN_SH }
+        if ($psSrc -eq '') { $psSrc = $RUN_PS1 }
+        $decl = OrdSet @(DnNames $MSS_KEY $msConv)
+        $parts = New-Object System.Collections.Generic.List[string]
+        foreach ($s in @($shSrc, $psSrc)) {
+            $u = OrdSet @(MsLabelToks $s); $n = 0
+            foreach ($k in $u) { if (-not $decl.Contains($k)) { $n++ } }
+            $parts.Add([string]$n)
+        }
+        return ($parts -join '|')
+    }
+    # addname: a conventions copy whose declaration tail gains one name ms-zz-add; stray: a copy with an undeclared backticked token at the end.
+    function MsFixture([string]$mode) {
+        $f = Join-Path $sbx ('conv-ms-' + $mode + '.md')
+        $k = '`' + $MSS_KEY + '`'
+        $out = New-Object System.Collections.Generic.List[string]
+        foreach ($l in [System.IO.File]::ReadAllLines($CONV)) { if ($mode -eq 'addname' -and $l.IndexOf($k, $MS_O) -ge 0) { $out.Add($l + ' ms-zz-add') } else { $out.Add($l) } }
+        if ($mode -eq 'stray') { $out.Add(''); $out.Add('  - see `ms-zz-stray`') }
+        [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    # A root holding copies of the three sites; only the first site (the release skill) is changed, per mode.
+    function MsSiteFixture([string]$mode) {
+        $r = Join-Path $sbx ('mssk-' + $mode)
+        foreach ($d in @('skills/release', 'skills/retro', 'docs')) { [void](New-Item -ItemType Directory -Force -Path (Join-Path $r $d)) }
+        Copy-Item -LiteralPath (Join-Path $ROOT 'skills/retro/SKILL.md') -Destination (Join-Path $r 'skills/retro/SKILL.md') -Force
+        Copy-Item -LiteralPath (Join-Path $ROOT 'docs/commands.md') -Destination (Join-Path $r 'docs/commands.md') -Force
+        $n1 = @(DnNames $MSS_KEY) | Select-Object -First 1
+        $tk = '`' + $n1 + '`'; $z = '`ms-zz-plant`'
+        $out = New-Object System.Collections.Generic.List[string]
+        $dn = $false; $pa = $false; $pin = $false; $pb = $false
+        foreach ($l in [System.IO.File]::ReadAllLines((Join-Path $ROOT 'skills/release/SKILL.md'))) {
+            if (($mode -eq 'drop' -or $mode -eq 'out-before' -or $mode -eq 'out-after') -and -not $dn) { $i = $l.IndexOf($tk, $MS_O); if ($i -ge 0) { $l = $l.Substring(0, $i) + 'zz' + $l.Substring($i + $tk.Length); $dn = $true } }
+            if (($mode -eq 'before' -or $mode -eq 'out-before') -and -not $pa -and $l.IndexOf($MSS_A, $MS_O) -ge 0) { $out.Add('  ' + $(if ($mode -eq 'before') { $z } else { $tk })); $pa = $true }
+            if ($mode -eq 'in' -and -not $pin) { $i = $l.IndexOf($MSS_A, $MS_O); if ($i -ge 0) { $l = $l.Substring(0, $i + $MSS_A.Length) + ' ' + $z + $l.Substring($i + $MSS_A.Length); $pin = $true } }
+            if ($mode -eq 'bare' -and -not $pin) { $i = $l.IndexOf($MSS_A, $MS_O); if ($i -ge 0) { $l = $l.Substring(0, $i + $MSS_A.Length) + ' ms-zz-plant' + $l.Substring($i + $MSS_A.Length); $pin = $true } }
+            $out.Add($l)
+            if (($mode -eq 'after' -or $mode -eq 'out-after') -and -not $pb -and $l.IndexOf($MSS_B, $MS_O) -ge 0) { $out.Add('  ' + $(if ($mode -eq 'after') { $z } else { $tk })); $pb = $true }
+        }
+        [System.IO.File]::WriteAllLines((Join-Path $r 'skills/release/SKILL.md'), $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $r
+    }
+    # A synthetic copy of the SH runner source (the same copy the twin builds): relabel -- one more case line whose label names an
+    # undeclared step; comment -- an undeclared token on a comment line; inword -- ms- inside a word. Lines are ADDED, real lines are not
+    # changed -- a real label going off does not leak into the control.
+    function MsRunnerFixture([string]$mode) {
+        $f = Join-Path $sbx ('runner-ms-' + $mode + '.sh')
+        $out = New-Object System.Collections.Generic.List[string]
+        foreach ($l in [System.IO.File]::ReadAllLines($RUN_SH)) {
+            $out.Add($l)
+        }
+        if ($mode -eq 'relabel') { $out.Add('chk "Z1: (ms-zz-relabel) x" "x" "x"') }
+        if ($mode -eq 'comment') { $out.Add('# chk "Z1: ms-zz-comment"') }
+        if ($mode -eq 'inword') { $out.Add('chk "Z1: forms-zz-inword" "x" "x"') }
+        [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    $nmsd = @(DnNames $MSS_KEY).Count
+    $msRel = Join-Path $ROOT 'skills/release/SKILL.md'
+    Chk "O106: step-name extraction and site-window token extraction positive-control (>0)" $(if ($nmsd -gt 0 -and @(MsToksOfLines @((MsWindow $msRel) -split "`n")).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "O107: main check -- every one of the three sites has its window anchors present, one each, in order (start count, end count, order)" (MsAnchorEach) '1 1 1|1 1 1|1 1 1'
+    Chk "O108: main check -- per site the window's ms- name set equals the declared set and each name appears once" (MsCoverEach) '0|0|0'
+    $ms0 = [int](MsCoverBad $msRel)
+    function MsRelOf([string]$mode) { return (Join-Path (MsSiteFixture $mode) 'skills/release/SKILL.md') }
+    # Per site, "value with the copy as the declaration minus the real value" (a baseline already off does not leak into the control).
+    function MsCoverDelta([string]$fx) { return ((@(MsSites) | ForEach-Object { [string]([int](MsCoverBad $_ $fx) - [int](MsCoverBad $_)) }) -join '|') }
+    Chk "O109: transform control -- a conventions copy with one more declared name adds one per site" (MsCoverDelta (MsFixture 'addname')) '1|1|1'
+    Chk "O110: transform control -- the first site with one name deleted, moved before the window and moved after it each add one" (([string]([int](MsCoverBad (MsRelOf 'drop')) - $ms0)) + '|' + ([string]([int](MsCoverBad (MsRelOf 'out-before')) - $ms0)) + '|' + ([string]([int](MsCoverBad (MsRelOf 'out-after')) - $ms0))) '1|1|1'
+    Chk "O111: window control -- an undeclared token planted inside the window adds one; before, after and a bare word without backticks add none" (([string]([int](MsCoverBad (MsRelOf 'in')) - $ms0)) + '|' + ([string]([int](MsCoverBad (MsRelOf 'before')) - $ms0)) + '|' + ([string]([int](MsCoverBad (MsRelOf 'after')) - $ms0)) + '|' + ([string]([int](MsCoverBad (MsRelOf 'bare')) - $ms0))) '1|0|0|0'
+    # A synthetic file holding only the two anchors and one name (only the fixture is read, so the baseline is constant by construction
+    # -- a real site going off does not leak into the control).
+    function MsAnchorFixture([string]$mode) {
+        $f = Join-Path $sbx ('ms-anchor-' + $mode + '.md')
+        $l2 = 'pre `mark-since-derived` mid'; $l3 = '`ms-zz` tail `mark-since-steps:` end'
+        if ($mode -eq 'a-off') { $l2 = 'pre `mark-since-derivedx` mid' }
+        if ($mode -eq 'b-off') { $l3 = '`ms-zz` tail `mark-since-stepz:` end' }
+        if ($mode -eq 'a-dup') { $l3 = '`ms-zz` tail `mark-since-steps:` end `mark-since-derived`' }
+        if ($mode -eq 'swap') { $l2 = 'pre `mark-since-steps:` `mark-since-derived` mid' }
+        [System.IO.File]::WriteAllLines($f, [string[]]@('head', $l2, $l3), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    Chk "O112: anchor control -- on a synthetic file: normal, start phrase changed, end phrase changed, start anchor doubled, end placed before start" ((MsAnchor (MsAnchorFixture 'base')) + '|' + (MsAnchor (MsAnchorFixture 'a-off')) + '|' + (MsAnchor (MsAnchorFixture 'b-off')) + '|' + (MsAnchor (MsAnchorFixture 'a-dup')) + '|' + (MsAnchor (MsAnchorFixture 'swap'))) '1 1 1|0 1 0|1 0 0|2 1 1|1 2 0'
+    Chk "O113: main check -- every backticked ms- token in the conventions set and the three sites is a declared name" (MsStray) '0'
+    Chk "O114: transform control -- an undeclared backticked ms- token planted in a conventions copy and in a site copy is counted" (([string]([int](MsStray (MsFixture 'stray')) - [int](MsStray $CONV))) + '|' + ([string]([int](MsStray '' (MsSiteFixture 'in')) - [int](MsStray)))) '1|1'
+    Chk "O115: runner-label positive-control -- at least one ms- name is read from the case labels of both runner sources" $(if (@(MsLabelToks $RUN_SH).Count -gt 0 -and @(MsLabelToks $RUN_PS1).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "O116: main check -- every ms- name in the case labels of both runner sources is declared (no runner claims an undeclared step)" (MsLabelBad) '0|0'
+    $msl0 = [int](((MsLabelBad) -split '\|')[0])
+    Chk "O117: transform control -- a synthetic runner with a case label naming an undeclared step adds one; a comment-line token and ms- inside a word add none" (([string]([int]((MsLabelBad (MsRunnerFixture 'relabel')) -split '\|')[0] - $msl0)) + '|' + ([string]([int]((MsLabelBad (MsRunnerFixture 'comment')) -split '\|')[0] - $msl0)) + '|' + ([string]([int]((MsLabelBad (MsRunnerFixture 'inword')) -split '\|')[0] - $msl0))) '1|0|0'
     }
 
     # --- Part P: completion-criteria cross-check (M55) ----------------------
@@ -6347,11 +6556,13 @@ try {
     # declared count differs from the number of values a verdict emits. Helpers live OUTSIDE the part guard (rf-60).
     $SPB_KEY = 'start-point-block-predicates:'
     $SPF_KEY = 'start-point-form-predicates:'
+    # (M87, rest of retro rf-104) The old Sp* wrappers (three) and fixtures (two) moved to shared name-declaration helper names (Dn*)
+    # -- they take the KEY as an argument, so any other name declaration labels its values with the same function. Bodies are the old
+    # ones; only the names and the "B|F letter -> key" argument changed (same input, same output -- M87 impl report T06 copy check).
     # Parameter is NOT named `$conv` -- PowerShell variables are case-insensitive, so it would shadow the global `$CONV`.
-    function SpKey([string]$which) { if ($which -eq 'B') { return $SPB_KEY } else { return $SPF_KEY } }
-    function SpCount([string]$which) { return [string](@(DnNames (SpKey $which)).Count) }
-    function SpName([string]$which, [string]$vals, [string]$spConv = '') {
-        $n = @(DnNames (SpKey $which) $spConv)
+    function DnCount([string]$key, [string]$dcConv = '') { return [string](@(DnNames $key $dcConv).Count) }
+    function DnLabel([string]$key, [string]$vals, [string]$spConv = '') {
+        $n = @(DnNames $key $spConv)
         $v = @(($vals.Trim(' ')) -split ' +' | Where-Object { $_ -ne '' })
         $k = [Math]::Max($n.Count, $v.Count)
         $parts = New-Object System.Collections.Generic.List[string]
@@ -6370,26 +6581,26 @@ try {
     # Order control fixture -- a SYNTHETIC conventions file holding only the two declaration lines and three definition items;
     # 'swap' reverses the first two definitions. Not a copy of the real conventions: if the real order is already broken, swapping
     # its first two items can REDUCE the violations and the control would measure the baseline (M76 reversal measurement).
-    function SpOrderFixture([string]$mode) {
+    function DnOrderFixture([string]$mode, [string]$k1, [string]$k2) {
         # (M86 round 1) 'deep' indents the second definition deeper and puts a column-0 prose line before it -- the control that
         # the several-key window ignores depth (W164). 'deepx' adds one deeper-indented orphan definition 'zz-od'.
         $f = Join-Path $sbx ('conv-spo-' + $mode + '.md')
         if ($mode -eq 'swap') { $d1 = 'zz-ob'; $d2 = 'zz-oa' } else { $d1 = 'zz-oa'; $d2 = 'zz-ob' }
         $bt = [string][char]0x60
-        $lines = @('## fixture', '', ('  - ' + $bt + $SPB_KEY + $bt + ' zz-oa zz-ob'), '', ('  - ' + $bt + $SPF_KEY + $bt + ' zz-oc'), '',
+        $lines = @('## fixture', '', ('  - ' + $bt + $k1 + $bt + ' zz-oa zz-ob'), '', ('  - ' + $bt + $k2 + $bt + ' zz-oc'), '',
             ('  - **' + $bt + $d1 + $bt + '** - x'), ('  - **' + $bt + $d2 + $bt + '** - x'), ('  - **' + $bt + 'zz-oc' + $bt + '** - x'))
         if ($mode -eq 'deep' -or $mode -eq 'deepx') {
-            $lines = @('## fixture', '', ('  - ' + $bt + $SPB_KEY + $bt + ' zz-oa zz-ob'), '', ('  - ' + $bt + $SPF_KEY + $bt + ' zz-oc'), '',
+            $lines = @('## fixture', '', ('  - ' + $bt + $k1 + $bt + ' zz-oa zz-ob'), '', ('  - ' + $bt + $k2 + $bt + ' zz-oc'), '',
                 ('  - **' + $bt + 'zz-oa' + $bt + '** - x'), 'zz prose', ('      - **' + $bt + 'zz-ob' + $bt + '** - x'), ('  - **' + $bt + 'zz-oc' + $bt + '** - x'))
             if ($mode -eq 'deepx') { $lines += ('      - **' + $bt + 'zz-od' + $bt + '** - x') }
         }
         [System.IO.File]::WriteAllLines($f, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
         return $f
     }
-    function SpWireFixture {
+    function DnWireFixture([string]$key) {
         $f = Join-Path $sbx 'conv-spw.md'
-        $first = @(DnNames $SPB_KEY) | Select-Object -First 1
-        $w = '`' + $SPB_KEY + '`'
+        $first = @(DnNames $key) | Select-Object -First 1
+        $w = '`' + $key + '`'
         $lines = New-Object System.Collections.ArrayList
         foreach ($l in [System.IO.File]::ReadAllLines($CONV)) {
             $i = $l.IndexOf($w, [System.StringComparison]::Ordinal)
@@ -7112,9 +7323,9 @@ try {
     Chk "W128: positive-control for declared pairs (>=3)" $(if ((SpmPairs $CONV) -ge 3) { 'ok' } else { 'no' }) 'ok'
     # (W118-W120) MAIN CHECKS -- is each branch item the one line assembled from the declaration: exactly one
     # item per key, byte-equal to the expected line, no continuation lines ("1 yes no").
-    Chk "W118: the not-possible branch is the line assembled from the declaration" (SpName 'F' (FormProbe $CYC_SKILL $CYC_SEC_ANCHOR $KEY_FAIL (SpmLine $CONV $VERDICT_FAIL $KEY_FAIL))) (SpName 'F' '1 yes no')
-    Chk "W119: the possible branch is the line assembled from the declaration" (SpName 'F' (FormProbe $CYC_SKILL $CYC_SEC_ANCHOR $KEY_OK (SpmLine $CONV $VERDICT_OK $KEY_OK))) (SpName 'F' '1 yes no')
-    Chk "W120: the unreadable-verdict branch is the line assembled from the declaration" (SpName 'F' (FormProbe $CYC_SKILL $CYC_SEC_ANCHOR $KEY_UNREAD (SpmLine $CONV $VERDICT_UNREAD $KEY_UNREAD))) (SpName 'F' '1 yes no')
+    Chk "W118: the not-possible branch is the line assembled from the declaration" (DnLabel $SPF_KEY (FormProbe $CYC_SKILL $CYC_SEC_ANCHOR $KEY_FAIL (SpmLine $CONV $VERDICT_FAIL $KEY_FAIL))) (DnLabel $SPF_KEY '1 yes no')
+    Chk "W119: the possible branch is the line assembled from the declaration" (DnLabel $SPF_KEY (FormProbe $CYC_SKILL $CYC_SEC_ANCHOR $KEY_OK (SpmLine $CONV $VERDICT_OK $KEY_OK))) (DnLabel $SPF_KEY '1 yes no')
+    Chk "W120: the unreadable-verdict branch is the line assembled from the declaration" (DnLabel $SPF_KEY (FormProbe $CYC_SKILL $CYC_SEC_ANCHOR $KEY_UNREAD (SpmLine $CONV $VERDICT_UNREAD $KEY_UNREAD))) (DnLabel $SPF_KEY '1 yes no')
     # (W121) MAIN CHECK -- do the two skills use the same verdict value set. The notation differs, so the
     # VALUES are extracted and sorted ORDINALLY (Sort-Object is culture-aware -- see OrdinalSortUnique).
     function VerdictSet([string]$path) {
@@ -7161,13 +7372,13 @@ try {
     CycFx3 $fxDupe $lineFail $lineFail
     CycFx3 $fxRetro ('    ' + $KEY_FAIL + ' ' + $ARROW + ' it used to be **impl ' + $STEP_WORD + '** but now it stops') ''
     CycFx3 $fxSibling $lineFail ('    - explanation of the branch above -- `' + $VERDICT_FAIL + '` is rework on that milestone')
-    Chk "W132: control -- prose on the tail of a branch line is caught" (SpName 'F' (FormProbe $fxTail $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail)) (SpName 'F' '1 no no')
-    Chk "W133: control -- a continuation line under a branch is caught" (SpName 'F' (FormProbe $fxCont $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail)) (SpName 'F' '1 yes yes')
-    Chk "W134: control -- a duplicated branch is caught" (SpName 'F' (FormProbe $fxDupe $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail)) (SpName 'F' '2 no no')
-    Chk "W135: control -- a retrospective inside the branch (M72 residual) is caught" (SpName 'F' (FormProbe $fxRetro $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail)) (SpName 'F' '1 no no')
+    Chk "W132: control -- prose on the tail of a branch line is caught" (DnLabel $SPF_KEY (FormProbe $fxTail $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail)) (DnLabel $SPF_KEY '1 no no')
+    Chk "W133: control -- a continuation line under a branch is caught" (DnLabel $SPF_KEY (FormProbe $fxCont $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail)) (DnLabel $SPF_KEY '1 yes yes')
+    Chk "W134: control -- a duplicated branch is caught" (DnLabel $SPF_KEY (FormProbe $fxDupe $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail)) (DnLabel $SPF_KEY '2 no no')
+    Chk "W135: control -- a retrospective inside the branch (M72 residual) is caught" (DnLabel $SPF_KEY (FormProbe $fxRetro $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail)) (DnLabel $SPF_KEY '1 no no')
     # (W136) FALSE-POSITIVE DIRECTION -- a sibling explanation item is not a branch. If it were counted, moving the
     # explanations out of the branch would go falsely red.
-    Chk "W136: false-positive direction -- a sibling explanation item is not counted as a branch" (SpName 'F' (FormProbe $fxSibling $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail)) (SpName 'F' '1 yes no')
+    Chk "W136: false-positive direction -- a sibling explanation item is not counted as a branch" (DnLabel $SPF_KEY (FormProbe $fxSibling $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail)) (DnLabel $SPF_KEY '1 yes no')
     # (W137-W146 / M73 round 1) BRANCHES STAND AS A BLOCK (`start-point-block`). Round 0 asserted only the single
     # branch LINE, and the review measured four ordinary edits that erase the behaviour without touching that line --
     # a same-indent continuation under a branch, a changed parent condition, a comment/fence wrapped around the
@@ -7228,9 +7439,9 @@ try {
     $cycWantOk = SpmLine $CONV $VERDICT_OK $KEY_OK
     $cycWantUnread = SpmLine $CONV $VERDICT_UNREAD $KEY_UNREAD
     function CycBlockRaw([string]$path) { return (BlockProbe $path $CYC_SEC_ANCHOR $cycWantParent $cycWantPointer $cycWantOk $cycWantFail $cycWantUnread) }
-    function CycBlock([string]$path) { return (SpName 'B' (CycBlockRaw $path)) }  # the block verdict under the declared names (M75)
+    function CycBlock([string]$path) { return (DnLabel $SPB_KEY (CycBlockRaw $path)) }  # the block verdict under the declared names (M75)
     # (W137) MAIN CHECK -- the branch block. Normal is "1 yes yes yes yes yes 3" (seven values from round 2 -- the pointer line is the third).
-    Chk "W137: the start-point branches stand as the block assembled from the declarations" (CycBlock $CYC_SKILL) (SpName 'B' '1 yes yes yes yes yes 3')
+    Chk "W137: the start-point branches stand as the block assembled from the declarations" (CycBlock $CYC_SKILL) (DnLabel $SPB_KEY '1 yes yes yes yes yes 3')
     # (W138-W140) declaration side -- the parent declaration is unique, and both tails carry no forbidden separator
     # (same shape as the other declaration lines, W26 etc.).
     # (W141-W145) controls -- the round 0 review's mutations promoted to fixtures. The base fixture's parent and branch
@@ -7262,14 +7473,14 @@ try {
     $fxCmt = BlkFx 'blk-cmt.md' { param($l) $l.Insert(5, '<!-- retired branches:'); $l.Insert(9, '-->') }
     $fxStar = BlkFx 'blk-star.md' { param($l) $l.Insert(9, '    * ' + $VERDICT_WORD + ' `' + $VERDICT_FAIL + '` ' + $ARROW + ' **milestone ' + $STEP_WORD + '**') }
     $fxHead = BlkFx 'blk-head.md' { param($l) $l.Insert(3, '### retired rules') }
-    Chk "W141: control -- a same-indent continuation line after the block is caught" (CycBlock $fxLazy) (SpName 'B' '1 yes yes yes no yes 3')
-    Chk "W142: control -- a changed parent condition is caught" (CycBlock $fxParent) (SpName 'B' '1 no yes yes yes yes 3')
-    Chk "W143: control -- a comment wrapped around the branches is caught" (CycBlock $fxCmt) (SpName 'B' '1 yes yes no yes yes 3')
-    Chk "W144: control -- a conflicting branch under another list marker is caught" (CycBlock $fxStar) (SpName 'B' '1 yes yes yes yes yes 4')
-    Chk "W145: control -- a sub-heading right before the parent line is caught" (CycBlock $fxHead) (SpName 'B' '1 yes yes yes yes no 3')
+    Chk "W141: control -- a same-indent continuation line after the block is caught" (CycBlock $fxLazy) (DnLabel $SPB_KEY '1 yes yes yes no yes 3')
+    Chk "W142: control -- a changed parent condition is caught" (CycBlock $fxParent) (DnLabel $SPB_KEY '1 no yes yes yes yes 3')
+    Chk "W143: control -- a comment wrapped around the branches is caught" (CycBlock $fxCmt) (DnLabel $SPB_KEY '1 yes yes no yes yes 3')
+    Chk "W144: control -- a conflicting branch under another list marker is caught" (CycBlock $fxStar) (DnLabel $SPB_KEY '1 yes yes yes yes yes 4')
+    Chk "W145: control -- a sub-heading right before the parent line is caught" (CycBlock $fxHead) (DnLabel $SPB_KEY '1 yes yes yes yes no 3')
     # (W146) FALSE-POSITIVE DIRECTION -- the base fixture (a normal block with a sibling explanation and a next item)
     # must stay green.
-    Chk "W146: false-positive direction -- a normal block with an explanation item and a next item stays green" (CycBlock $fxBlk) (SpName 'B' '1 yes yes yes yes yes 3')
+    Chk "W146: false-positive direction -- a normal block with an explanation item and a next item stays green" (CycBlock $fxBlk) (DnLabel $SPB_KEY '1 yes yes yes yes yes 3')
     # (W147-W151 / M73 round 2) THE POINTER LINE IS PINNED TOO -- the round 1 review measured that rewriting the prose of
     # the pointer line (inside the block, checked only for its token) flips the parent condition at 141/0 GREEN in both
     # copies. The pointer line must now equal the line assembled from `start-point-pointer:`. Both declaration values get
@@ -7277,27 +7488,27 @@ try {
     Chk "W147: positive-control for the start-point-parent value" $(if ($cycWantParent -ne '' -and $cycWantParent -ne '- ') { 'ok' } else { 'no' }) 'ok'
     Chk "W150: positive-control for the start-point-pointer value" $(if ($cycWantPointer -ne '') { 'ok' } else { 'no' }) 'ok'
     $fxPtr = BlkFx 'blk-ptr.md' { param($l) $l[4] = '    -- this condition and the branches below are retired; regardless of the verdict it always goes **milestone ' + $STEP_WORD + '** (how to read the verdict: the `review-report` row)' }
-    Chk "W151: control -- a parent condition flipped by the pointer line's prose is caught" (CycBlock $fxPtr) (SpName 'B' '1 yes no yes yes yes 3')
+    Chk "W151: control -- a parent condition flipped by the pointer line's prose is caught" (CycBlock $fxPtr) (DnLabel $SPB_KEY '1 yes no yes yes yes 3')
     # (W152-W159, M75) PREDICATE NAME DECLARATIONS -- the conventions hold the value names of the block and form verdicts and the
     # runner only reads them. Bound: uniqueness, extraction, forbidden separators, NAME COUNT = number of values the verdict emits,
     # exactly one definition item per name, and wiring (renaming in the declaration changes the output). The meaning of the
     # definition prose, and whether a name order changed together with the definitions matches the value positions, are not asked
     # (the conventions write that boundary -- definition item order = declaration order is W162 below).
-    Chk "W154: both predicate declarations extract names (positive-control, >=1)" $(if ([int](SpCount 'B') -ge 1 -and [int](SpCount 'F') -ge 1) { 'ok' } else { 'no' }) 'ok'
-    Chk "W156: main check -- block predicate name count equals the number of values the block verdict emits" (SpCount 'B') ([string]@(((CycBlockRaw $CYC_SKILL).Trim(' ')) -split ' +').Count)
-    Chk "W157: main check -- form predicate name count equals the number of values the form verdict emits" (SpCount 'F') ([string]@(((FormProbe $CYC_SKILL $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail).Trim(' ')) -split ' +').Count)
+    Chk "W154: both predicate declarations extract names (positive-control, >=1)" $(if ([int](DnCount $SPB_KEY) -ge 1 -and [int](DnCount $SPF_KEY) -ge 1) { 'ok' } else { 'no' }) 'ok'
+    Chk "W156: main check -- block predicate name count equals the number of values the block verdict emits" (DnCount $SPB_KEY) ([string]@(((CycBlockRaw $CYC_SKILL).Trim(' ')) -split ' +').Count)
+    Chk "W157: main check -- form predicate name count equals the number of values the form verdict emits" (DnCount $SPF_KEY) ([string]@(((FormProbe $CYC_SKILL $CYC_SEC_ANCHOR $KEY_FAIL $cycWantFail).Trim(' ')) -split ' +').Count)
     # (W160/W161, M75 review blocker 1) REVERSE DIRECTION AND UNIQUENESS -- W158 only went declaration -> definition.
     # (W162/W163, M76) DEFINITION ITEM ORDER -- reordering only the declaration or only the definitions turns W162 red. Whether a
     # name matches its value position by meaning is not asked.
-    Chk "W163: control -- a synthetic conventions file with only its first two definitions swapped adds exactly one order violation" ([string]([int](DnDefOrder $SP_KEYS (SpOrderFixture 'swap')) - [int](DnDefOrder $SP_KEYS (SpOrderFixture 'in')))) '1'
+    Chk "W163: control -- a synthetic conventions file with only its first two definitions swapped adds exactly one order violation" ([string]([int](DnDefOrder $SP_KEYS (DnOrderFixture 'swap' $SPB_KEY $SPF_KEY)) - [int](DnDefOrder $SP_KEYS (DnOrderFixture 'in' $SPB_KEY $SPF_KEY)))) '1'
     # (W164, M86 round 1) SEVERAL-KEY INPUT CONTROL -- one cell per widened input conversion of DnNames/DnDefs (rf-88): names of both
     # keys minus names of the first key (the second key's 1) / definitions counted past a deeper indent and a column-0 prose line (3) /
     # definition violations of that copy (0) / one deeper-indented orphan definition (1). Round 0's same-depth window gave 1 and 0 in
     # cells two and four (review blocker 1).
-    $spDf = SpOrderFixture 'deep'
-    Chk "W164: control -- several-key input: second-key names / depth-free definitions / definition violations / indented orphan" ([string](@(DnNames $SP_KEYS $spDf).Count - @(DnNames $SPB_KEY $spDf).Count) + '|' + [string]@(DnDefs $SP_KEYS $spDf).Count + '|' + [string](DnDefBad $SP_KEYS $spDf) + '|' + [string](DnDefOrphan $SP_KEYS (SpOrderFixture 'deepx'))) '1|3|0|1'
+    $spDf = DnOrderFixture 'deep' $SPB_KEY $SPF_KEY
+    Chk "W164: control -- several-key input: second-key names / depth-free definitions / definition violations / indented orphan" ([string](@(DnNames $SP_KEYS $spDf).Count - @(DnNames $SPB_KEY $spDf).Count) + '|' + [string]@(DnDefs $SP_KEYS $spDf).Count + '|' + [string](DnDefBad $SP_KEYS $spDf) + '|' + [string](DnDefOrphan $SP_KEYS (DnOrderFixture 'deepx' $SPB_KEY $SPF_KEY))) '1|3|0|1'
     # (W159) wiring control -- feeding a conventions copy whose first block name is renamed must show that new name (delta 1).
-    Chk "W159: control -- renaming in the declaration changes the output" ([string](@((SpName 'B' '1' (SpWireFixture)) -split ' ' | Where-Object { $_.StartsWith('zzz-wired=', [System.StringComparison]::Ordinal) }).Count - @((SpName 'B' '1') -split ' ' | Where-Object { $_.StartsWith('zzz-wired=', [System.StringComparison]::Ordinal) }).Count)) '1'
+    Chk "W159: control -- renaming in the declaration changes the output" ([string](@((DnLabel $SPB_KEY '1' (DnWireFixture $SPB_KEY)) -split ' ' | Where-Object { $_.StartsWith('zzz-wired=', [System.StringComparison]::Ordinal) }).Count - @((DnLabel $SPB_KEY '1') -split ' ' | Where-Object { $_.StartsWith('zzz-wired=', [System.StringComparison]::Ordinal) }).Count)) '1'
     }
 
     # (W31-W41 / M64-T04) MEASUREMENT ALLOCATION -- the convention plants two declaration lines that
@@ -7479,6 +7690,12 @@ O|O64|dup|CONV|retro-order-branches:|main check -- branch names are unique
 O|O65|def|CONV|retro-order-branches:|main check -- every branch name has exactly one definition item
 O|O66|orphan|CONV|retro-order-branches:|main check -- every branch definition item has a declared name (0 orphans)
 O|O67|order|CONV|retro-order-branches:|main check -- branch definition order equals declaration name order
+O|O100|count|CONV|mark-since-steps:|mark-since-steps declaration line is exactly 1
+O|O101|seps|CONV|mark-since-steps:|no forbidden separator in the mark-since-steps declaration tail
+O|O102|dup|CONV|mark-since-steps:|main check -- since-derivation step names are unique
+O|O103|def|CONV|mark-since-steps:|main check -- every step name has exactly one definition item
+O|O104|orphan|CONV|mark-since-steps:|main check -- every step definition item has a declared name (0 orphans)
+O|O105|order|CONV|mark-since-steps:|main check -- step definition order equals declaration name order
 P|P1|count|CONV|criteria-verdict:|criteria-verdict declaration line is exactly 1
 P|P2|count|CONV|criteria-since:|criteria-since declaration line is exactly 1
 P|P20|count|CONV|metrics-filled-since:|exactly one metrics-filled-since declaration line
@@ -7553,39 +7770,39 @@ W|W40|seps|CONV|measure-axis:|no forbidden separator in the measure-axis declara
 W|W41|seps|CONV|measure-axis-job:|no forbidden separator in the measure-axis-job declaration tail
 W|W44|count|CONV|measure-axis-names:|measure-axis-names declaration line is exactly 1
 W|W48|seps|CONV|measure-axis-names:|no forbidden separator in the measure-axis-names declaration tail
--|-|cover|CONV|status-items:|-
--|-|cover|CONV|autonomy-level:|-
--|-|cover|CONV|autonomy-default:|-
--|-|cover|CONV|autonomy-lines:|-
--|-|cover|CONV|floor-marks:|-
--|-|cover|CONV|floor-items:|-
--|-|cover|CONV|floor-mark-map:|-
--|-|cover|CONV|floor-unmarked:|-
--|-|cover|CONV|floor-excluded:|-
--|-|cover|CONV|floor-asks:|-
--|-|cover|CONV|floor-ask-cases:|-
--|-|cover|CONV|floor-ask-from:|-
--|-|cover|CONV|retro-flow:|-
--|-|cover|CONV|retro-flow-sites:|-
--|-|cover|CONV|retro-gate-since:|-
--|-|cover|CONV|retro-review-after:|-
--|-|cover|CONV|tr-draft:|-
--|-|cover|CONV|tr-impl:|-
--|-|cover|CONV|tr-review:|-
--|-|cover|CONV|tr-release-commit:|-
--|-|cover|CONV|tr-tag:|-
--|-|cover|CONV|tr-retro:|-
--|-|cover|CONV|tr-retro-skip:|-
--|-|cover|CONV|tr-forced:|-
--|-|cover|CONV|tr-debug-open:|-
--|-|cover|CONV|tr-debug-done:|-
--|-|cover|CONV|tr-debug-release:|-
--|-|cover|CONV|tr-pr-create:|-
--|-|cover|CONV|tr-pr-finalize:|-
--|-|cover|CONV|tr-continuous-stop:|-
--|-|cover|CONV|tr-downstream:|-
--|-|cover|CONV|tr-part-select:|-
--|-|cover|CONV|mutation-axes:|-
+-|-|cover|CONV|status-items:|N1
+-|-|cover|CONV|autonomy-level:|N2
+-|-|cover|CONV|autonomy-default:|N10
+-|-|cover|CONV|autonomy-lines:|N11 N12
+-|-|cover|CONV|floor-marks:|N18
+-|-|cover|CONV|floor-items:|N30
+-|-|cover|CONV|floor-mark-map:|N31
+-|-|cover|CONV|floor-unmarked:|N32
+-|-|cover|CONV|floor-excluded:|N33
+-|-|cover|CONV|floor-asks:|N46
+-|-|cover|CONV|floor-ask-cases:|N47
+-|-|cover|CONV|floor-ask-from:|N48
+-|-|cover|CONV|retro-flow:|O88
+-|-|cover|CONV|retro-flow-sites:|O88
+-|-|cover|CONV|retro-gate-since:|O88
+-|-|cover|CONV|retro-review-after:|O88
+-|-|cover|CONV|tr-draft:|W102 W103 W106
+-|-|cover|CONV|tr-impl:|W102 W103 W106
+-|-|cover|CONV|tr-review:|W102 W103 W106
+-|-|cover|CONV|tr-release-commit:|W102 W103 W106
+-|-|cover|CONV|tr-tag:|W102 W103 W106
+-|-|cover|CONV|tr-retro:|W102 W103 W106
+-|-|cover|CONV|tr-retro-skip:|W102 W103 W106
+-|-|cover|CONV|tr-forced:|W102 W103 W106
+-|-|cover|CONV|tr-debug-open:|W102 W103 W106
+-|-|cover|CONV|tr-debug-done:|W102 W103 W106
+-|-|cover|CONV|tr-debug-release:|W102 W103 W106
+-|-|cover|CONV|tr-pr-create:|W102 W103 W106
+-|-|cover|CONV|tr-pr-finalize:|W102 W103 W106
+-|-|cover|CONV|tr-continuous-stop:|W102 W103 W106
+-|-|cover|CONV|tr-downstream:|W102 W103 W106
+-|-|cover|CONV|tr-part-select:|W102 W103 W106
+-|-|cover|CONV|mutation-axes:|N24
 '@
     function DeclReg { return @($DECL_REG -split "`r?`n" | Where-Object { $_ -ne '' }) }
     foreach ($rgRow in (DeclReg)) {
@@ -7686,7 +7903,67 @@ W|W48|seps|CONV|measure-axis-names:|no forbidden separator in the measure-axis-n
         }
         return $fx
     }
+    # (F29-F31, M87, retro rf-108) A `cover` row names the case IDs that ask its key -- one or more, space-separated, in the row's last
+    # field (the label field of a case row). No field is added, so rows of the other check kinds read unchanged. Every ID must have a case
+    # in BOTH runner sources -- a case is a line whose space/tab-stripped text starts with `chk "ID:` / `Chk "ID:`, or a case row of that
+    # source's registry ("part|ID|check|..."); comment lines are not cases. What is re-checked is that the ID EXISTS -- whether that case
+    # really asks that key (its meaning) is not asked (the conventions' "what the machine asks" item).
+    function SrcCaseIds([string]$src) {
+        $q = [string][char]0x22
+        $O = [System.StringComparison]::Ordinal
+        $s = New-Object 'System.Collections.Generic.SortedSet[string]'([System.StringComparer]::Ordinal)
+        foreach ($ln in [System.IO.File]::ReadAllLines($src)) {
+            $t = $ln.TrimStart([char[]]@([char]0x20, [char]0x09))
+            if ($t.StartsWith('chk ' + $q, $O) -or $t.StartsWith('Chk ' + $q, $O)) {
+                $r = $t.Substring(5); $j = $r.IndexOf(':', $O)
+                if ($j -gt 0) { $id = $r.Substring(0, $j); if ([regex]::IsMatch($id, '^[A-Z][0-9]+[a-z]*$')) { [void]$s.Add($id) } }
+                continue
+            }
+            if ([regex]::IsMatch($t, '^[A-Z]\|[A-Z][0-9]+[a-z]*\|[a-z-]+\|')) { [void]$s.Add(($t -split '\|')[1]) }
+        }
+        return @($s)
+    }
+    function CoverIdBad([string]$regFile = '', [string]$shSrc = '', [string]$psSrc = '') {
+        if ($shSrc -eq '') { $shSrc = $RUN_SH }
+        if ($psSrc -eq '') { $psSrc = $RUN_PS1 }
+        $rows = if ($regFile -ne '') { @([System.IO.File]::ReadAllLines($regFile) | Where-Object { $_ -ne '' }) } else { @(DeclReg) }
+        $S = OrdSet @(SrcCaseIds $shSrc); $P = OrdSet @(SrcCaseIds $psSrc)
+        $c = 0
+        foreach ($row in $rows) {
+            $f = $row -split '\|', 6
+            if ($f.Count -lt 6 -or $f[2] -cne 'cover') { continue }
+            $k = 0; $bad = $false
+            foreach ($id in ($f[5] -split ' +')) {
+                if ($id -eq '' -or $id -eq '-') { continue }
+                $k++
+                if (-not $S.Contains($id) -or -not $P.Contains($id)) { $bad = $true }
+            }
+            if ($k -eq 0 -or $bad) { $c++ }
+        }
+        return [string]$c
+    }
+    # noid / empty / oneside: a registry copy (the real rows + one synthetic cover row -- oneside names F29). oneside-src: a ps1 source copy
+    # without the F29 case line (no real row is relied on -- a real row going off does not leak into the control).
+    function CoverFixture([string]$mode) {
+        $enc = New-Object System.Text.UTF8Encoding($false)
+        if ($mode -eq 'oneside-src') {
+            $pfx = 'Chk "F29:'
+            $out = New-Object System.Collections.Generic.List[string]
+            foreach ($l in [System.IO.File]::ReadAllLines($RUN_PS1)) { if (-not $l.TrimStart([char[]]@([char]0x20, [char]0x09)).StartsWith($pfx, [System.StringComparison]::Ordinal)) { $out.Add($l) } }
+            $fx = Join-Path $sbx 'cov-fx-ps1.txt'
+            [System.IO.File]::WriteAllLines($fx, $out.ToArray(), $enc)
+            return $fx
+        }
+        $extra = if ($mode -eq 'noid') { '-|-|cover|CONV|zz-cov:|Z999' } elseif ($mode -eq 'oneside') { '-|-|cover|CONV|zz-cov:|F29' } else { '-|-|cover|CONV|zz-cov:|' }
+        $fx = Join-Path $sbx ('cov-fx-' + $mode + '.txt')
+        [System.IO.File]::WriteAllLines($fx, [string[]](@(DeclReg) + $extra), $enc)
+        return $fx
+    }
     if (PartOn 'F') {
+    Chk "F29: cover row extraction and case-ID extraction from both runner sources positive-control (>0)" $(if (@(DeclReg | Where-Object { ($_ -split '\|', 6)[2] -ceq 'cover' }).Count -gt 0 -and @(SrcCaseIds $RUN_SH).Count -gt 0 -and @(SrcCaseIds $RUN_PS1).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "F30: main check -- every cover row carries case IDs and each ID exists in both runner sources" (CoverIdBad) '0'
+    $cvb = [int](CoverIdBad)
+    Chk "F31: control -- a row naming a missing ID, an ID present in one runner only and an empty ID field each add one" (([string]([int](CoverIdBad (CoverFixture 'noid')) - $cvb)) + '|' + ([string]([int](CoverIdBad (CoverFixture 'oneside') '' (CoverFixture 'oneside-src')) - $cvb)) + '|' + ([string]([int](CoverIdBad (CoverFixture 'empty')) - $cvb))) '1|1|1'
     Chk "F24: declaration-line discovery positive-control (>0) and registry key extraction (>0)" $(if (@(DeclDisc '' 'k').Count -gt 0 -and @(DeclRegKeys).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
     Chk "F25: main check -- no key with two or more declaration lines in the conventions document set" (DeclDiscDup) '0'
     Chk "F26: main check -- no forbidden separator in any declaration tail of the conventions document set" (DeclDiscSeps) '0'
