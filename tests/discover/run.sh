@@ -2484,10 +2484,16 @@ fi
 #   **묻지 않는 것**: 「이 마일스톤이 그 줄기에 정말 속하는가」는 의미 판정이라 정적으로 물을 수
 #   없다(M49의 「머리 위치」·M50의 「while-read 루프」와 같은 부류). 거짓 참조는 문서에 남는 눈에
 #   보이는 진술이라 리뷰의 영역이다.
+# (M87 · 회고 `rf-109`) **`epic-since:` 값은 공백류 전부(공백 · 탭 · VT · FF · CR)로 가른다** — ps1 사본과 같은 분리다. `markers_of`의
+# 공백 하나 분리로 읽던 동안 꼬리 탭 사본에서 sh만 앞 탭이 붙은 값을 읽어 `M9` · `M12` · `M14`가 붉고 ps1은 초록이었다(M86 되돌림
+# `tab-epic-since`). 탭 꼬리 자체는 `F26`이 붉힌다 — 이 함수는 두 사본이 같은 답을 내게 할 뿐 탭을 허용하지 않는다. 통제는 `M15`.
+epic_since_of() { # [규약 파일] → `epic-since:` 꼬리의 첫 토큰(백틱 · 강조 제거)
+    decl_tail "${1:-$CONV}" 'epic-since:' | tr -d '`*' | LC_ALL=C tr ' \011\013\014\015' '\n\n\n\n\n' | grep -v '^$' | head -1
+}
 if part_on M; then
 EPIC_STATUSES=$(markers_of 'epic-status:')
 EPIC_MEMBER_MARK=$(markers_of 'epic-members:' | head -1)
-EPIC_SINCE=$(markers_of 'epic-since:' | head -1)
+EPIC_SINCE=$(epic_since_of)
 NEPICSTAT=$(printf '%s\n' "$EPIC_STATUSES" | grep -c .)
 fi
 epic_list_into() { # <에픽목록 경로> <마일스톤목록 경로> <트리 루트>
@@ -2673,6 +2679,13 @@ chk "M13: 픽스처 통제 — 에픽이 남의 마일스톤을 등재하면 잡
 # 창을 지우면 앞자리가, 과거 예외를 지우면 뒷자리가 어긋난다.
 chk "M14: 음성 통제 — 블록 밖 산문 / 과거 마일스톤 등재는 붉지 않는다" \
     "$(epic_bad_in "$(epic_fixture prose)")/$(epic_bad_in "$(epic_fixture past)")" "0/0"
+# (M15 · M87 · `rf-109`) **분리 폭 통제** — 키 뒤 공백을 탭으로 바꾼 사본과 값 뒤에 탭을 붙인 사본에서 실물과 같은 값을 읽는다.
+# ps1 사본이 같은 두 사본에 같은 답을 낸다(되돌림 표 — 두 러너의 Part M 결과 대조).
+ESFX_SEP="$SBX/conv-es-sep.md"; ESFX_END="$SBX/conv-es-end.md"
+LC_ALL=C awk -v k='`epic-since:` ' -v tb="$(printf '\t')" '{ i = index($0, k); if (i > 0) $0 = substr($0, 1, i + length(k) - 2) tb substr($0, i + length(k)); print }' "$CONV" > "$ESFX_SEP"
+LC_ALL=C awk -v k='- `epic-since:`' -v tb="$(printf '\t')" '{ t = $0; sub(/^[ \t]+/, "", t); sub(/\r$/, ""); if (substr(t, 1, length(k)) == k) $0 = $0 tb; print }' "$CONV" > "$ESFX_END"
+chk "M15: 분리 폭 통제 - 키 뒤 탭 · 값 뒤 탭 사본에서 epic-since 값을 실물과 같게 읽는다" \
+    "$([ -n "$EPIC_SINCE" ] && echo ok || echo no)|$(epic_since_of "$ESFX_SEP")|$(epic_since_of "$ESFX_END")" "ok|$EPIC_SINCE|$EPIC_SINCE"
 fi
 
 # === Part N (M52) — 상태 확인 항목 선언 정합 =============================
@@ -3048,7 +3061,7 @@ fa_suffix_fixture() { # <sh|ps1> → 접미 ID 케이스 하나만 든 합성 �
     if [ "$1" = ps1 ]; then printf '%s\n' '    Chk "N98b: suffixed"' > "$_fasf"; else printf '%s\n' 'chk "N98b: suffixed"' > "$_fasf"; fi
     printf '%s' "$_fasf"
 }
-fl_order_fixture() { # <in|swap> → 이름 선언과 정의 항목 셋만 든 합성 규약(순서 통제). `swap`은 정의 첫 둘의 순서만 바꾼다(`sp_order_fixture`와 같은 까닭으로 실제 규약을 쓰지 않는다).
+fl_order_fixture() { # <in|swap> → 이름 선언과 정의 항목 셋만 든 합성 규약(순서 통제). `swap`은 정의 첫 둘의 순서만 바꾼다(`dn_order_fixture`와 같은 까닭으로 실제 규약을 쓰지 않는다).
     _flxf="$SBX/conv-flo-$1.md"
     if [ "$1" = swap ]; then _flx1=zz-fb; _flx2=zz-fa; else _flx1=zz-fa; _flx2=zz-fb; fi
     printf '%s\n' "## fixture" "" "  - \`$FLI_KEY\` zz-fa zz-fb zz-fc" "" \
@@ -3825,10 +3838,10 @@ chk "O55: 음성 통제 - M5·M7에도 표지가 있으면 0이다" "$(mark_gap 
 # 통제는 clean(표지 M5·M6·M7·M9) · gap(표지 M6·M9) · 표지 없는 디렉터리에 **같은 함수**를 먹인다 — 가장 큰 표지를
 # 쓰면 9·9, 추출을 죽이면 빈 값이 나온다. 대상 레포에서 파생이 실제로 도는가는 묻지 않는다(하니스가 거기서 돌지 않는다).
 RSMIN=$(mark_since "$MDIR")
-chk "O56: 본 검사 - 표지가 있으면 가장 작은 표지 번호가 선언된 도입 번호와 같다" "$([ -n "$RSINCE" ] && [ "${RSMIN:-$RSINCE}" = "$RSINCE" ] && echo ok || echo no)" "ok"
+chk "O56: 본 검사 - (ms-min-mark) 표지가 있으면 가장 작은 표지 번호가 선언된 도입 번호와 같다" "$([ -n "$RSINCE" ] && [ "${RSMIN:-$RSINCE}" = "$RSINCE" ] && echo ok || echo no)" "ok"
 mkdir -p "$SBX/nomark-milestones"
 printf '%s\n' '# M1' > "$SBX/nomark-milestones/M1.md"
-chk "O57: 통제 - 가장 작은 표지 번호(clean 5 · gap 6 · 표지 없음 빈 값)" "$(mark_since "$GPCL/m")|$(mark_since "$GPFX/m")|$(mark_since "$SBX/nomark-milestones")" "5|6|"
+chk "O57: 통제 - (ms-min-mark) 가장 작은 표지 번호(clean 5 · gap 6 · 표지 없음 빈 값)" "$(mark_since "$GPCL/m")|$(mark_since "$GPFX/m")|$(mark_since "$SBX/nomark-milestones")" "5|6|"
 chk "O59: 도입 번호 파생 병기어가 재서술처 셋에 공존" "$(scope_tok "$ROOT/skills/release/SKILL.md" "$RDERIVE")$(scope_tok "$ROOT/skills/retro/SKILL.md" "$RDERIVE")$(scope_tok "$ROOT/docs/commands.md" "$RDERIVE")" "yesyesyes"
 # (O60~O83 · M82) **순서 판정 갈래의 이름 선언** — 옛 산문 ⑴~⑷가 `retro-order-branches:` · `retro-order-verdict:`와 이름별 정의 항목이다.
 # 선언 정합(O60~O69)은 M78 · M79의 바닥 · 고지 선언과 같은 판정이다. 갈래 고정(O70~O74)은 갈래마다 그 갈래로 떨어지는 합성 입력이
@@ -4023,6 +4036,129 @@ chk "O97: 변환 통제 - 표지를 다 든 행 0 · next: 없음 1 · kin: 없�
 chk "O98: 본 검사 - 반영 위치 셀에 맨 토큰 review-due를 든 행의 상태가 미반영 · 미결이다" "$(rt_review_bad)" "0"
 _rtv0=$(rt_review_bad)
 chk "O99: 변환 통제 - 반영 행의 맨 토큰 review-due는 하나 늘고 미반영 행 · 백틱 언급 · 항목 셀의 것은 늘지 않는다" "$(( $(rt_review_bad "$(rt_retro_fixture revdone)") - _rtv0 ))|$(( $(rt_review_bad "$(rt_retro_fixture revopen)") - _rtv0 ))|$(( $(rt_review_bad "$(rt_retro_fixture revquoted)") - _rtv0 ))|$(( $(rt_review_bad "$(rt_retro_fixture revitem)") - _rtv0 ))" "1|0|0|0"
+# (O100~O117 · M87 · 회고 `rf-107`) **도입 번호 파생의 갈래 이름** — 규약의 `mark-since-steps:` 이름 선언과 이름별 정의 항목이다.
+# 선언 정합(O100~O105)은 아래 등록표 행이 낸다. 재서술처 셋(release · retro 스킬 · 커맨드 카탈로그)은 갈래를 이름으로 가리키고, 자리마다
+# 창은 병기어 토큰 `` `mark-since-derived` ``의 첫 등장 뒤부터 그 뒤 선언 키 토큰 `` `mark-since-steps:` ``의 첫 등장 앞까지다. 창 앵커는
+# 「있다 · 하나다 · 차례가 맞다」를 본 검사로 먼저 둔다(O107 — 규약 체크리스트 「집합을 대조하는 판정은 창의 안 · 앞 · 뒤를 함께 통제한다」 항목). 토큰은 백틱 하나로 감싼 `ms-[a-z0-9-]+` 꼴만 센다.
+# 러너가 구현하는 갈래는 `O56` · `O57` 라벨이 이름으로 내고(지금 `ms-min-mark` 하나), 두 러너 소스의 케이스 라벨에 나온 ms- 이름이
+# 선언 집합의 부분집합인지 묻는다(O116). 정의 문장의 뜻 · 러너가 구현하지 않는 갈래가 대상 레포에서 실제로 도는가는 묻지 않는다.
+MSS_KEY='mark-since-steps:'
+MSS_A='`mark-since-derived`'
+MSS_B='`mark-since-steps:`'
+ms_toks() { # [파일 …] → 입력(파일 또는 표준 입력)에서 백틱 하나로 감싼 `ms-…` 토큰 한 줄씩(등장 순서 · 중복 그대로 · 줄 끝 CR 하나를 벗긴다)
+    LC_ALL=C awk -v q='`' '{ sub(/\r$/, ""); s = $0; re = q "ms-[a-z0-9-]+" q
+        while (match(s, re)) { print substr(s, RSTART + 1, RLENGTH - 2); s = substr(s, RSTART + RLENGTH) } }' "$@"
+}
+ms_text() { # <파일> → 줄 끝 CR 하나를 벗기고 줄마다 개행으로 이은 문면 하나(창과 앵커 판정이 같은 문면을 읽는다)
+    LC_ALL=C awk '{ sub(/\r$/, ""); print }' "$1"
+}
+ms_window() { # <파일> [시작 앵커] [끝 앵커] → 시작 앵커 첫 등장 뒤부터 그 뒤 끝 앵커 첫 등장 앞까지의 문면(어느 하나가 없으면 빈 출력)
+    ms_text "$1" | LC_ALL=C awk -v a="${2:-$MSS_A}" -v b="${3:-$MSS_B}" '{ t = t $0 "\n" }
+        END { i = index(t, a); if (i == 0) exit; r = substr(t, i + length(a)); j = index(r, b); if (j == 0) exit; printf "%s", substr(r, 1, j - 1) }'
+}
+ms_anchor() { # <파일> [시작 앵커] [끝 앵커] → 「시작 앵커 수 끝 앵커 수 차례」(차례: 둘 다 있고 시작의 첫 등장이 끝의 첫 등장보다 앞이면 1)
+    ms_text "$1" | LC_ALL=C awk -v a="${2:-$MSS_A}" -v b="${3:-$MSS_B}" '{ t = t $0 "\n" }
+        function cnt(s, x,   n, i) { n = 0; while ((i = index(s, x)) > 0) { n++; s = substr(s, i + length(x)) } return n }
+        END { ia = index(t, a); ib = index(t, b); print cnt(t, a) " " cnt(t, b) " " ((ia > 0 && ib > 0 && ia < ib) ? 1 : 0) }'
+}
+ms_cover_bad() { # <파일> [규약 파일] [시작 앵커] [끝 앵커] → 창의 ms- 이름 집합과 선언 이름 집합의 대칭차 크기 + 창에서 두 번 이상 나온 이름의 수(정상 0)
+    dn_names "$MSS_KEY" "${2:-}" | LC_ALL=C sort -u > "$SBX/ms-decl.txt"
+    ms_window "$1" "${3:-$MSS_A}" "${4:-$MSS_B}" | ms_toks > "$SBX/ms-win.txt"
+    LC_ALL=C sort -u "$SBX/ms-win.txt" > "$SBX/ms-winu.txt"
+    _msdup=$(LC_ALL=C sort "$SBX/ms-win.txt" | LC_ALL=C uniq -d | grep -c .)
+    echo $(( $(LC_ALL=C comm -3 "$SBX/ms-decl.txt" "$SBX/ms-winu.txt" | grep -c .) + _msdup ))
+}
+ms_sites() { # [루트] → 재서술처 셋의 경로(한 줄에 하나 · 차례 고정)
+    printf '%s\n' "${1:-$ROOT}/skills/release/SKILL.md" "${1:-$ROOT}/skills/retro/SKILL.md" "${1:-$ROOT}/docs/commands.md"
+}
+ms_each() { # <함수> [루트] [규약 파일] → 재서술처 셋마다 함수 값을 「|」로 이음(함수는 <파일> [규약 파일]을 받는다)
+    ms_sites "${2:-}" | { _mse=; while IFS= read -r _msf; do _mse="$_mse${_mse:+|}$("$1" "$_msf" "${3:-}")"; done; printf '%s' "$_mse"; }
+}
+ms_anchor_each() { ms_sites "${1:-}" | { _mse=; while IFS= read -r _msf; do _mse="$_mse${_mse:+|}$(ms_anchor "$_msf")"; done; printf '%s' "$_mse"; }; }   # [루트]
+ms_stray() { # [규약 파일 목록(줄마다 하나)] [루트] [선언 규약 파일] → 그 목록과 재서술처 셋의 백틱 ms- 토큰 중 선언에 없는 것의 수(서로 다른 토큰)
+    _msxn=$(dn_names "$MSS_KEY" "${3:-}")
+    if [ -n "${1:-}" ]; then _msxl=$1; else _msxl=$(conv_files); fi
+    { printf '%s\n' "$_msxl"; ms_sites "${2:-}"; } | while IFS= read -r _msxp; do [ -f "$_msxp" ] && ms_toks "$_msxp"; done |
+        LC_ALL=C sort -u | { _msx=0; while IFS= read -r _msxv; do [ -n "$_msxv" ] || continue
+            printf '%s\n' "$_msxn" | LC_ALL=C grep -qxF -- "$_msxv" || _msx=$((_msx + 1)); done; echo "$_msx"; }
+}
+ms_label_toks() { # <러너 소스> → 케이스 줄(공백을 벗긴 문면이 `chk "` 또는 `Chk "`로 시작 · 주석 줄 제외)의 첫 따옴표 구획에 낱말로 나온 `ms-…` 이름 한 줄씩
+    LC_ALL=C awk -v q='"' '{ sub(/\r$/, ""); t = $0; sub(/^[ \t]+/, "", t)
+        if (substr(t, 1, 5) != "chk " q && substr(t, 1, 5) != "Chk " q) next
+        r = substr(t, 6); j = index(r, q); if (j > 0) r = substr(r, 1, j - 1)
+        while (match(r, /(^|[^a-z0-9-])ms-[a-z0-9-]+/)) { k = substr(r, RSTART, RLENGTH); if (substr(k, 1, 3) != "ms-") k = substr(k, 2); print k; r = substr(r, RSTART + RLENGTH) } }' "$1"
+}
+ms_label_bad() { # [sh 소스] [ps1 소스] [규약 파일] → 「sh 소스 | ps1 소스」마다 라벨의 ms- 이름 중 선언에 없는 것의 수(서로 다른 이름)
+    _msln=$(dn_names "$MSS_KEY" "${3:-}")
+    _mslo=
+    for _msls in "${1:-$RUN_SH}" "${2:-$RUN_PS1}"; do
+        _mslc=$(ms_label_toks "$_msls" | LC_ALL=C sort -u | { _msl=0; while IFS= read -r _mslv; do [ -n "$_mslv" ] || continue
+            printf '%s\n' "$_msln" | LC_ALL=C grep -qxF -- "$_mslv" || _msl=$((_msl + 1)); done; echo "$_msl"; })
+        _mslo="$_mslo${_mslo:+|}$_mslc"
+    done
+    printf '%s' "$_mslo"
+}
+ms_fixture() { # <addname|stray> → 실제 규약의 사본(addname: 선언 꼬리에 이름 ms-zz-add 하나를 더함 · stray: 끝에 선언 밖 토큰 `ms-zz-stray`를 심음)
+    _msff="$SBX/conv-ms-$1.md"
+    case $1 in
+        addname) LC_ALL=C awk -v k="\`$MSS_KEY\`" '{ i = index($0, k); if (i > 0) { sub(/\r$/, ""); $0 = $0 " ms-zz-add" } print }' "$CONV" > "$_msff" ;;
+        stray) { cat "$CONV"; printf '%s\n' '' '  - see `ms-zz-stray`'; } > "$_msff" ;;
+    esac
+    printf '%s' "$_msff"
+}
+ms_site_fixture() { # <drop|before|after|in|out-before|out-after|bare> → 재서술처 셋 사본의 루트(첫 자리 = release 스킬만 바꾼다)
+    _msr="$SBX/mssk-$1"; mkdir -p "$_msr/skills/release" "$_msr/skills/retro" "$_msr/docs"
+    cp "$ROOT/skills/retro/SKILL.md" "$_msr/skills/retro/"; cp "$ROOT/docs/commands.md" "$_msr/docs/"
+    _msn1=$(dn_names "$MSS_KEY" | head -1)
+    LC_ALL=C awk -v m="$1" -v a="$MSS_A" -v b="$MSS_B" -v t="\`$_msn1\`" -v z='`ms-zz-plant`' '
+        { sub(/\r$/, "") }
+        m == "drop" || m == "out-before" || m == "out-after" { if (!d && (i = index($0, t)) > 0) { $0 = substr($0, 1, i - 1) "zz" substr($0, i + length(t)); d = 1 } }
+        (m == "before" || m == "out-before") && !pa && index($0, a) > 0 { print "  " (m == "before" ? z : t); pa = 1 }
+        m == "in" && !pi && (i = index($0, a)) > 0 { $0 = substr($0, 1, i + length(a) - 1) " " z substr($0, i + length(a)); pi = 1 }
+        m == "bare" && !pi && (i = index($0, a)) > 0 { $0 = substr($0, 1, i + length(a) - 1) " ms-zz-plant" substr($0, i + length(a)); pi = 1 }
+        { print }
+        (m == "after" || m == "out-after") && !pb && index($0, b) > 0 { print "  " (m == "after" ? z : t); pb = 1 }' \
+        "$ROOT/skills/release/SKILL.md" > "$_msr/skills/release/SKILL.md"
+    printf '%s' "$_msr"
+}
+ms_runner_fixture() { # <relabel|comment|inword> → sh 러너 소스의 합성 사본(relabel: 라벨에 선언 밖 ms- 이름을 든 케이스 줄 · comment: 주석 줄에 선언 밖 토큰 · inword: 낱말 안의 ms-). 실물 줄을 바꾸지 않고 줄을 더한다 — 실물 라벨이 어긋나도 통제가 기준선을 재지 않는다
+    _msrf="$SBX/runner-ms-$1.sh"
+    case $1 in
+        relabel) { cat "$RUN_SH"; printf '%s\n' 'chk "Z1: (ms-zz-relabel) x" "x" "x"'; } > "$_msrf" ;;
+        comment) { cat "$RUN_SH"; printf '%s\n' '# chk "Z1: ms-zz-comment"'; } > "$_msrf" ;;
+        inword) { cat "$RUN_SH"; printf '%s\n' 'chk "Z1: forms-zz-inword" "x" "x"'; } > "$_msrf" ;;
+    esac
+    printf '%s' "$_msrf"
+}
+NMSD=$(dn_names "$MSS_KEY" | grep -c .)
+chk "O106: 갈래 이름 추출 · 재서술처 창 토큰 추출 positive-control(>0)" "$([ "$NMSD" -gt 0 ] && [ "$(ms_window "$ROOT/skills/release/SKILL.md" | ms_toks | grep -c .)" -gt 0 ] && echo ok || echo no)" "ok"
+chk "O107: 본 검사 - 재서술처 셋마다 창 앵커가 있다 · 하나다 · 차례가 맞다(시작 수 끝 수 차례)" "$(ms_anchor_each)" "1 1 1|1 1 1|1 1 1"
+chk "O108: 본 검사 - 재서술처 셋마다 창의 ms- 이름 집합이 선언 집합과 같고 이름마다 한 번이다" "$(ms_each ms_cover_bad)" "0|0|0"
+_ms0=$(ms_cover_bad "$ROOT/skills/release/SKILL.md")
+ms_each_delta() { # <규약 사본> → 재서술처 셋마다 「사본을 선언으로 읽은 값 - 실물 값」을 「|」로 이음(기준선이 이미 어긋나도 통제가 기준선을 재지 않는다)
+    ms_sites | { _msdl=; while IFS= read -r _msf; do _msdl="$_msdl${_msdl:+|}$(( $(ms_cover_bad "$_msf" "$1") - $(ms_cover_bad "$_msf") ))"; done; printf '%s' "$_msdl"; }
+}
+chk "O109: 변환 통제 - 선언에 이름 하나를 더한 규약 사본에서 자리마다 덮음 대조가 하나씩 는다" "$(ms_each_delta "$(ms_fixture addname)")" "1|1|1"
+chk "O110: 변환 통제 - 첫 자리에서 이름 하나를 지운 사본 · 창 앞으로 옮긴 사본 · 창 뒤로 옮긴 사본이 각자 하나씩 는다" "$(( $(ms_cover_bad "$(ms_site_fixture drop)/skills/release/SKILL.md") - _ms0 ))|$(( $(ms_cover_bad "$(ms_site_fixture out-before)/skills/release/SKILL.md") - _ms0 ))|$(( $(ms_cover_bad "$(ms_site_fixture out-after)/skills/release/SKILL.md") - _ms0 ))" "1|1|1"
+chk "O111: 창 통제 - 창 안에 심은 선언 밖 토큰은 하나 늘고 창 앞 · 창 뒤 · 백틱 없는 맨 낱말은 늘지 않는다" "$(( $(ms_cover_bad "$(ms_site_fixture in)/skills/release/SKILL.md") - _ms0 ))|$(( $(ms_cover_bad "$(ms_site_fixture before)/skills/release/SKILL.md") - _ms0 ))|$(( $(ms_cover_bad "$(ms_site_fixture after)/skills/release/SKILL.md") - _ms0 ))|$(( $(ms_cover_bad "$(ms_site_fixture bare)/skills/release/SKILL.md") - _ms0 ))" "1|0|0|0"
+ms_anchor_fixture() { # <base|a-off|b-off|a-dup|swap> → 앵커 둘과 이름 하나만 든 합성 파일(읽는 대상이 픽스처뿐이라 기준선이 구조로 상수 — 실물 자리가 어긋나도 통제가 기준선을 재지 않는다)
+    _msaf="$SBX/ms-anchor-$1.md"
+    case $1 in
+        a-off) printf '%s\n' 'head' 'pre `mark-since-derivedx` mid' '`ms-zz` tail `mark-since-steps:` end' > "$_msaf" ;;
+        b-off) printf '%s\n' 'head' 'pre `mark-since-derived` mid' '`ms-zz` tail `mark-since-stepz:` end' > "$_msaf" ;;
+        a-dup) printf '%s\n' 'head' 'pre `mark-since-derived` mid' '`ms-zz` tail `mark-since-steps:` end `mark-since-derived`' > "$_msaf" ;;
+        swap) printf '%s\n' 'head' 'pre `mark-since-steps:` `mark-since-derived` mid' '`ms-zz` tail `mark-since-steps:` end' > "$_msaf" ;;
+        *) printf '%s\n' 'head' 'pre `mark-since-derived` mid' '`ms-zz` tail `mark-since-steps:` end' > "$_msaf" ;;
+    esac
+    printf '%s' "$_msaf"
+}
+chk "O112: 앵커 통제 - 합성 파일에서 정상 · 시작 앵커 문구를 바꿈 · 끝 앵커 문구를 바꿈 · 시작 앵커를 하나 더 둠 · 끝을 시작 앞에 둠" "$(ms_anchor "$(ms_anchor_fixture base)")|$(ms_anchor "$(ms_anchor_fixture a-off)")|$(ms_anchor "$(ms_anchor_fixture b-off)")|$(ms_anchor "$(ms_anchor_fixture a-dup)")|$(ms_anchor "$(ms_anchor_fixture swap)")" "1 1 1|0 1 0|1 0 0|2 1 1|1 2 0"
+chk "O113: 본 검사 - 규약 문서 집합과 재서술처 셋의 백틱 ms- 토큰이 전부 선언된 이름이다" "$(ms_stray)" "0"
+chk "O114: 변환 통제 - 규약 사본 · 재서술처 사본에 심은 선언 밖 백틱 ms- 토큰을 센다" "$(( $(ms_stray "$(ms_fixture stray)") - $(ms_stray "$CONV") ))|$(( $(ms_stray "" "$(ms_site_fixture in)") - $(ms_stray) ))" "1|1"
+chk "O115: 러너 라벨 positive-control - 두 러너 소스의 케이스 라벨에서 ms- 이름을 하나 이상 읽는다" "$([ "$(ms_label_toks "$RUN_SH" | grep -c .)" -gt 0 ] && [ "$(ms_label_toks "$RUN_PS1" | grep -c .)" -gt 0 ] && echo ok || echo no)" "ok"
+chk "O116: 본 검사 - 두 러너 소스의 케이스 라벨에 나온 ms- 이름이 전부 선언된 이름이다(러너가 선언 밖 갈래를 구현했다고 주장하지 않는다)" "$(ms_label_bad)" "0|0"
+_msl0=$(ms_label_bad | LC_ALL=C cut -d'|' -f1)
+chk "O117: 변환 통제 - 케이스 라벨에 선언 밖 갈래 이름을 든 합성 러너는 하나 늘고 주석 줄의 토큰 · 낱말 안의 ms- 는 늘지 않는다" "$(( $(ms_label_bad "$(ms_runner_fixture relabel)" | LC_ALL=C cut -d'|' -f1) - _msl0 ))|$(( $(ms_label_bad "$(ms_runner_fixture comment)" | LC_ALL=C cut -d'|' -f1) - _msl0 ))|$(( $(ms_label_bad "$(ms_runner_fixture inword)" | LC_ALL=C cut -d'|' -f1) - _msl0 ))" "1|0|0"
 fi
 
 # --- Part P: 완료 기준 대조 (M55) --------------------------------------------
@@ -5469,10 +5605,12 @@ marks_used_in() { # <파일> <선언 키> <표지들> → 그 **선언 줄이 �
 # 값 수가 어긋나면 `W156` · `W157`이 붉다. 헬퍼는 파트 가드 **밖**에서 정의한다(`rf-60`).
 SPB_KEY='start-point-block-predicates:'
 SPF_KEY='start-point-form-predicates:'
-sp_key() { case $1 in B) printf '%s' "$SPB_KEY" ;; *) printf '%s' "$SPF_KEY" ;; esac; }   # <B|F> → 선언 키
-sp_count() { dn_names "$(sp_key "$1")" | grep -c .; }
-sp_name() { # <B|F> <값들> [규약 파일] → "이름=값 …"(위치로 짝짓는다 · 이름이 모자라면 `?=값` · 값이 모자라면 `이름=?`)
-    _spn=$(dn_names "$(sp_key "$1")" "${3:-}" | LC_ALL=C tr '\n' ' ')
+# (M87 · 회고 `rf-104`의 나머지) 옛 `sp_*` 래퍼 셋과 픽스처 둘은 공용 이름 선언 헬퍼(`dn_*`)로 옮겼다 — 키를 인자로 받으므로 다른 이름
+# 선언도 같은 함수로 이름을 붙인다. 본문은 옛 함수 그대로이고 바뀐 것은 이름과 「B|F 기호 → 키」 인자뿐이다(같은 입력에서 같은 출력 —
+# M87 impl 보고서 T06의 사본 대조).
+dn_count() { dn_names "$1" "${2:-}" | grep -c .; }   # <키 …> [규약 파일] → 선언된 이름의 수
+dn_label() { # <키 …> <값들> [규약 파일] → "이름=값 …"(위치로 짝짓는다 · 이름이 모자라면 `?=값` · 값이 모자라면 `이름=?`)
+    _spn=$(dn_names "$1" "${3:-}" | LC_ALL=C tr '\n' ' ')
     LC_ALL=C awk -v names="$_spn" -v vals="$2" 'BEGIN {
         sub(/ +$/, "", names); sub(/^ +/, "", vals); sub(/ +$/, "", vals)
         n = (names == "") ? 0 : split(names, N, / +/); m = (vals == "") ? 0 : split(vals, V, / +/)
@@ -5484,7 +5622,7 @@ sp_name() { # <B|F> <값들> [규약 파일] → "이름=값 …"(위치로 짝�
 # 정의 창은 키가 여럿일 때의 `dn_defs` 창(블록 술어 선언 줄 다음부터 다음 제목 직전까지 · **깊이를 가리지 않는다**)이고, 흡수한 옛 `sp_defs`의
 # 창과 같다(M86 리뷰 차단 1 — 같은 깊이만 세게 좁혔던 라운드 0은 들여쓴 고아 정의를 초록으로 남겼다). 통제는 `W164`.
 SP_KEYS="$SPB_KEY $SPF_KEY"
-sp_order_fixture() { # <in|swap|deep|deepx> → 선언 두 줄과 정의 항목 셋만 든 합성 규약(순서 통제). `swap`은 정의 첫 둘의 순서만 바꾼다.
+dn_order_fixture() { # <in|swap|deep|deepx> <키1> <키2> → 선언 두 줄과 정의 항목 셋만 든 합성 규약(순서 통제). `swap`은 정의 첫 둘의 순서만 바꾼다.
     # 실제 규약을 쓰지 않는다 — 실제 규약의 순서가 이미 어긋나 있으면 맞바꾼 사본이 위반을 **줄여** 통제가 기준선을 재게 된다(M76 되돌림 실측).
     # (M86 라운드 1) `deep`은 둘째 정의를 더 깊이 들이고 그 앞에 0열 산문 한 줄을 둔다 — 키 여럿의 창이 깊이를 가리지 않음의 통제(`W164`).
     # `deepx`는 거기에 더 깊이 들인 고아 정의 `zz-od` 하나를 더한다.
@@ -5492,20 +5630,20 @@ sp_order_fixture() { # <in|swap|deep|deepx> → 선언 두 줄과 정의 항목 
     if [ "$1" = swap ]; then _spx1=zz-ob; _spx2=zz-oa; else _spx1=zz-oa; _spx2=zz-ob; fi
     case $1 in
         deep|deepx)
-            printf '%s\n' "## fixture" "" "  - \`$SPB_KEY\` zz-oa zz-ob" "" "  - \`$SPF_KEY\` zz-oc" "" \
+            printf '%s\n' "## fixture" "" "  - \`$2\` zz-oa zz-ob" "" "  - \`$3\` zz-oc" "" \
                 "  - **\`zz-oa\`** - x" "zz prose" "      - **\`zz-ob\`** - x" "  - **\`zz-oc\`** - x" > "$_spxf"
             [ "$1" = deepx ] && printf '%s\n' "      - **\`zz-od\`** - x" >> "$_spxf" ;;
         *)
-            printf '%s\n' "## fixture" "" "  - \`$SPB_KEY\` zz-oa zz-ob" "" "  - \`$SPF_KEY\` zz-oc" "" \
+            printf '%s\n' "## fixture" "" "  - \`$2\` zz-oa zz-ob" "" "  - \`$3\` zz-oc" "" \
                 "  - **\`$_spx1\`** - x" "  - **\`$_spx2\`** - x" "  - **\`zz-oc\`** - x" > "$_spxf" ;;
     esac
     printf '%s' "$_spxf"
 }
-sp_wire_fixture() { # → 블록 선언의 첫 이름을 바꾼 규약 사본(배선 통제 — 이름을 박지 않았다면 출력이 따라 바뀐다)
+dn_wire_fixture() { # <키> → 그 선언의 첫 이름을 바꾼 규약 사본(배선 통제 — 이름을 박지 않았다면 출력이 따라 바뀐다)
     _spwf="$SBX/conv-spw.md"
-    _spw1=$(dn_names "$SPB_KEY" | head -1)
+    _spw1=$(dn_names "$1" | head -1)
     if [ -n "$_spw1" ]; then
-        LC_ALL=C awk -v k="\`$SPB_KEY\`" -v o="$_spw1" '{ i = index($0, k); if (i > 0) { t = substr($0, i + length(k)); j = index(t, " " o); if (j > 0) $0 = substr($0, 1, i + length(k) - 1) substr(t, 1, j) "zzz-wired" substr(t, j + 1 + length(o)) } print }' "$CONV" > "$_spwf"
+        LC_ALL=C awk -v k="\`$1\`" -v o="$_spw1" '{ i = index($0, k); if (i > 0) { t = substr($0, i + length(k)); j = index(t, " " o); if (j > 0) $0 = substr($0, 1, i + length(k) - 1) substr(t, 1, j) "zzz-wired" substr(t, j + 1 + length(o)) } print }' "$CONV" > "$_spwf"
     else
         cat "$CONV" > "$_spwf"
     fi
@@ -5958,9 +6096,9 @@ chk "W117: 시작점 절 갈래 줄 추출 positive-control(>=2)" "$([ "${CYC_BR
 chk "W128: 선언 쌍 추출 positive-control(>=3)" "$([ "$(spm_pairs "$CONV")" -ge 3 ] && echo ok || echo no)" "ok"
 # (W118~W120) **본 검사 — 갈래 항목이 선언에서 조립한 한 줄과 같은가.** 키마다 항목이 정확히 하나이고, 그 줄이 기대
 # 줄과 바이트 같으며, 이어진 줄이 없어야 한다(`1 yes no`).
-chk "W118: 불가 갈래가 선언에서 조립한 한 줄이다" "$(sp_name F "$(form_probe "$CYC_SKILL" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$(spm_line "$CONV" '불가' "$KEY_FAIL")")")" "$(sp_name F '1 yes no')"
-chk "W119: 가능 갈래가 선언에서 조립한 한 줄이다" "$(sp_name F "$(form_probe "$CYC_SKILL" "$CYC_SEC_ANCHOR" "$KEY_OK" "$(spm_line "$CONV" '가능' "$KEY_OK")")")" "$(sp_name F '1 yes no')"
-chk "W120: 읽지 못한 갈래가 선언에서 조립한 한 줄이다" "$(sp_name F "$(form_probe "$CYC_SKILL" "$CYC_SEC_ANCHOR" "$KEY_UNREAD" "$(spm_line "$CONV" '읽지못함' "$KEY_UNREAD")")")" "$(sp_name F '1 yes no')"
+chk "W118: 불가 갈래가 선언에서 조립한 한 줄이다" "$(dn_label "$SPF_KEY" "$(form_probe "$CYC_SKILL" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$(spm_line "$CONV" '불가' "$KEY_FAIL")")")" "$(dn_label "$SPF_KEY" '1 yes no')"
+chk "W119: 가능 갈래가 선언에서 조립한 한 줄이다" "$(dn_label "$SPF_KEY" "$(form_probe "$CYC_SKILL" "$CYC_SEC_ANCHOR" "$KEY_OK" "$(spm_line "$CONV" '가능' "$KEY_OK")")")" "$(dn_label "$SPF_KEY" '1 yes no')"
+chk "W120: 읽지 못한 갈래가 선언에서 조립한 한 줄이다" "$(dn_label "$SPF_KEY" "$(form_probe "$CYC_SKILL" "$CYC_SEC_ANCHOR" "$KEY_UNREAD" "$(spm_line "$CONV" '읽지못함' "$KEY_UNREAD")")")" "$(dn_label "$SPF_KEY" '1 yes no')"
 # (W121) **본 검사 — 두 스킬의 판정 값 집합이 같은가**(M72-T03의 「무는 것」 ③). 표기가 갈려 있으므로
 # (status는 곧은 따옴표 · cycle은 백틱) **값 자체**를 뽑아 **ordinal**로 정렬해 비교한다.
 verdict_set() { # <파일> → 그 파일이 쓰는 판정 값을 ordinal 정렬해 한 줄로
@@ -5999,12 +6137,12 @@ _cyc_fx3 "$SBX/cycfx/cont.md" "$CYC_FX_FAIL" '      (재작업 — 판정이 요
 _cyc_fx3 "$SBX/cycfx/dup.md" "$CYC_FX_FAIL" "$CYC_FX_FAIL"
 _cyc_fx3 "$SBX/cycfx/retro.md" '    - 판정 `불가` → 예전에는 **impl 단계부터**였지만 이제는 멈춘다'
 _cyc_fx3 "$SBX/cycfx/sibling.md" "$CYC_FX_FAIL" '    - 위 갈래의 설명 — `불가`는 그 마일스톤의 재작업이다'
-chk "W132: 통제 - 갈래 줄 꼬리의 산문을 잡는다" "$(sp_name F "$(form_probe "$SBX/cycfx/tail.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$CYC_WANT_FAIL")")" "$(sp_name F '1 no no')"
-chk "W133: 통제 - 갈래에 붙은 이어진 줄을 잡는다" "$(sp_name F "$(form_probe "$SBX/cycfx/cont.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$CYC_WANT_FAIL")")" "$(sp_name F '1 yes yes')"
-chk "W134: 통제 - 복제된 갈래를 잡는다" "$(sp_name F "$(form_probe "$SBX/cycfx/dup.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$CYC_WANT_FAIL")")" "$(sp_name F '2 no no')"
-chk "W135: 통제 - 갈래 안의 회고 문구(M72 잔여)를 잡는다" "$(sp_name F "$(form_probe "$SBX/cycfx/retro.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$CYC_WANT_FAIL")")" "$(sp_name F '1 no no')"
+chk "W132: 통제 - 갈래 줄 꼬리의 산문을 잡는다" "$(dn_label "$SPF_KEY" "$(form_probe "$SBX/cycfx/tail.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$CYC_WANT_FAIL")")" "$(dn_label "$SPF_KEY" '1 no no')"
+chk "W133: 통제 - 갈래에 붙은 이어진 줄을 잡는다" "$(dn_label "$SPF_KEY" "$(form_probe "$SBX/cycfx/cont.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$CYC_WANT_FAIL")")" "$(dn_label "$SPF_KEY" '1 yes yes')"
+chk "W134: 통제 - 복제된 갈래를 잡는다" "$(dn_label "$SPF_KEY" "$(form_probe "$SBX/cycfx/dup.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$CYC_WANT_FAIL")")" "$(dn_label "$SPF_KEY" '2 no no')"
+chk "W135: 통제 - 갈래 안의 회고 문구(M72 잔여)를 잡는다" "$(dn_label "$SPF_KEY" "$(form_probe "$SBX/cycfx/retro.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$CYC_WANT_FAIL")")" "$(dn_label "$SPF_KEY" '1 no no')"
 # (W136) **오탐 방향** — 형제 설명 항목은 갈래가 아니다. 설명 항목이 갈래로 세어지면 설명을 옮긴 자리가 거짓으로 붉는다.
-chk "W136: 오탐 방향 - 형제 설명 항목은 갈래로 세지 않는다" "$(sp_name F "$(form_probe "$SBX/cycfx/sibling.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$CYC_WANT_FAIL")")" "$(sp_name F '1 yes no')"
+chk "W136: 오탐 방향 - 형제 설명 항목은 갈래로 세지 않는다" "$(dn_label "$SPF_KEY" "$(form_probe "$SBX/cycfx/sibling.md" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$CYC_WANT_FAIL")")" "$(dn_label "$SPF_KEY" '1 yes no')"
 # (W137~W146 · M73 라운드 1) **갈래는 블록으로 선다**(`start-point-block`). 라운드 0은 갈래 **한 줄**만 단언했고, 리뷰가
 # 그 줄을 건드리지 않고 동작을 지우는 정상 편집 넷을 쟀다 — 갈래 아래 같은 깊이의 이어지는 줄 · 부모 조건 문구 교체 · 갈래를
 # 감싼 주석/펜스 · 다른 목록 기호의 상충 갈래(전부 두 사본 131/0 초록). 금지를 하나씩 더하지 않고 **블록 전체**를 단언한다 —
@@ -6051,9 +6189,9 @@ CYC_WANT_UNREAD=$(spm_line "$CONV" '읽지못함' "$KEY_UNREAD")
 _cyc_block_raw() { # <대상 파일> → 블록 판정 한 줄(위치 값)
     block_probe "$1" "$CYC_SEC_ANCHOR" "$CYC_WANT_PARENT" "$CYC_WANT_POINTER" "$CYC_WANT_OK" "$CYC_WANT_FAIL" "$CYC_WANT_UNREAD"
 }
-_cyc_block() { sp_name B "$(_cyc_block_raw "$1")"; } # <대상 파일> → 블록 판정을 선언의 이름으로(M75)
+_cyc_block() { dn_label "$SPB_KEY" "$(_cyc_block_raw "$1")"; } # <대상 파일> → 블록 판정을 선언의 이름으로(M75)
 # (W137) **본 검사 — 갈래 블록.** 정상은 `1 yes yes yes yes yes 3`이다(라운드 2부터 일곱 값 — 포인터 줄이 셋째 값).
-chk "W137: 시작점 갈래가 선언에서 조립한 블록으로 선다" "$(_cyc_block "$CYC_SKILL")" "$(sp_name B '1 yes yes yes yes yes 3')"
+chk "W137: 시작점 갈래가 선언에서 조립한 블록으로 선다" "$(_cyc_block "$CYC_SKILL")" "$(dn_label "$SPB_KEY" '1 yes yes yes yes yes 3')"
 # (W138~W140) 선언 쪽 — 부모 선언 줄의 유일성과, 두 선언 꼬리의 금지 구분자(다른 선언 줄과 같은 형태 · `W26` 등).
 # (W141~W145) 통제 — 라운드 0 리뷰가 잰 변이를 픽스처로 승격한다. 바탕 픽스처의 부모 · 갈래 줄은 **선언에서 조립**한다.
 _fx_ins() { LC_ALL=C awk -v n="$3" -v t="$4" '{ print } NR == n { print t }' "$1" > "$2"; }   # <원본> <대상> <줄 번호> <넣을 줄>
@@ -6077,37 +6215,37 @@ _fx_ins "$SBX/cycfx/blk.md" "$SBX/cycfx/blk-cmt1.md" 5 '<!-- 폐기된 갈래:'
 _fx_ins "$SBX/cycfx/blk-cmt1.md" "$SBX/cycfx/blk-cmt.md" 9 '-->'
 _fx_ins "$SBX/cycfx/blk.md" "$SBX/cycfx/blk-star.md" 9 '    * 판정 `불가` → **milestone 단계부터**'
 _fx_ins "$SBX/cycfx/blk.md" "$SBX/cycfx/blk-head.md" 3 '### 폐기된 규칙'
-chk "W141: 통제 - 블록 뒤 같은 깊이의 이어지는 줄을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-lazy.md")" "$(sp_name B '1 yes yes yes no yes 3')"
-chk "W142: 통제 - 바뀐 부모 조건을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-parent.md")" "$(sp_name B '1 no yes yes yes yes 3')"
-chk "W143: 통제 - 갈래를 감싼 주석을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-cmt.md")" "$(sp_name B '1 yes yes no yes yes 3')"
-chk "W144: 통제 - 다른 목록 기호의 상충 갈래를 잡는다" "$(_cyc_block "$SBX/cycfx/blk-star.md")" "$(sp_name B '1 yes yes yes yes yes 4')"
-chk "W145: 통제 - 부모 줄 바로 앞의 소제목을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-head.md")" "$(sp_name B '1 yes yes yes yes no 3')"
+chk "W141: 통제 - 블록 뒤 같은 깊이의 이어지는 줄을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-lazy.md")" "$(dn_label "$SPB_KEY" '1 yes yes yes no yes 3')"
+chk "W142: 통제 - 바뀐 부모 조건을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-parent.md")" "$(dn_label "$SPB_KEY" '1 no yes yes yes yes 3')"
+chk "W143: 통제 - 갈래를 감싼 주석을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-cmt.md")" "$(dn_label "$SPB_KEY" '1 yes yes no yes yes 3')"
+chk "W144: 통제 - 다른 목록 기호의 상충 갈래를 잡는다" "$(_cyc_block "$SBX/cycfx/blk-star.md")" "$(dn_label "$SPB_KEY" '1 yes yes yes yes yes 4')"
+chk "W145: 통제 - 부모 줄 바로 앞의 소제목을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-head.md")" "$(dn_label "$SPB_KEY" '1 yes yes yes yes no 3')"
 # (W146) **오탐 방향** — 바탕 픽스처(형제 설명 항목과 다음 항목이 있는 정상 블록)는 초록이어야 한다.
-chk "W146: 오탐 방향 - 설명 항목과 다음 항목이 붙은 정상 블록은 초록이다" "$(_cyc_block "$SBX/cycfx/blk.md")" "$(sp_name B '1 yes yes yes yes yes 3')"
+chk "W146: 오탐 방향 - 설명 항목과 다음 항목이 붙은 정상 블록은 초록이다" "$(_cyc_block "$SBX/cycfx/blk.md")" "$(dn_label "$SPB_KEY" '1 yes yes yes yes yes 3')"
 # (W147~W151 · M73 라운드 2) **포인터 줄까지 못박는다** — 라운드 1 리뷰가 블록 안에서 토큰만 보던 포인터 줄의 산문으로 부모 조건을
 # 뒤집는 편집이 두 사본 141/0 초록임을 쟀다. 포인터 줄도 선언(`start-point-pointer:`)에서 조립한 줄과 줄 전체가 같아야 한다. 두 선언 값에는
 # 추출 positive-control을 둔다(`W128`과 같은 형태 — 값이 비면 기대 줄이 비어 판정이 공허하다).
 chk "W147: start-point-parent 값 추출 positive-control" "$([ -n "$CYC_WANT_PARENT" ] && [ "$CYC_WANT_PARENT" != '- ' ] && echo ok || echo no)" "ok"
 chk "W150: start-point-pointer 값 추출 positive-control" "$([ -n "$CYC_WANT_POINTER" ] && echo ok || echo no)" "ok"
 _fx_rep "$SBX/cycfx/blk.md" "$SBX/cycfx/blk-ptr.md" 5 '    — 이 조건과 아래 갈래는 폐기됐다. 판정과 무관하게 언제나 **milestone 단계부터** 간다 (판정을 읽는 법은 `review-report` 행)'
-chk "W151: 통제 - 포인터 줄 산문으로 뒤집은 부모 조건을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-ptr.md")" "$(sp_name B '1 yes no yes yes yes 3')"
+chk "W151: 통제 - 포인터 줄 산문으로 뒤집은 부모 조건을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-ptr.md")" "$(dn_label "$SPB_KEY" '1 yes no yes yes yes 3')"
 # (W152~W159 · M75) **판정 술어의 이름 선언** — 블록 · 형태 판정의 값 이름은 규약의 두 선언이 들고 러너는 읽기만 한다. 무는 것은 선언의 유일성 ·
 # 추출 · 금지 구분자 · **이름 수 = 판정이 내는 값 수** · 이름마다 정의 항목 정확히 하나 · 배선(선언을 바꾸면 출력이 따라 바뀐다)까지다. 정의 문장의
 # 뜻과, 선언과 정의를 함께 바꾼 이름 순서가 값의 위치와 맞는가는 묻지 않는다(규약이 적는 경계 — 정의 항목의 순서 = 선언 순서는 아래 `W162`가 문다).
-chk "W154: 두 술어 선언의 이름 추출 positive-control(>=1)" "$([ "$(sp_count B)" -ge 1 ] && [ "$(sp_count F)" -ge 1 ] && echo ok || echo no)" "ok"
-chk "W156: 본 검사 - 블록 술어 이름 수가 블록 판정이 내는 값 수와 같다" "$(sp_count B)" "$(_cyc_block_raw "$CYC_SKILL" | LC_ALL=C awk '{ print NF }')"
-chk "W157: 본 검사 - 형태 술어 이름 수가 형태 판정이 내는 값 수와 같다" "$(sp_count F)" "$(form_probe "$CYC_SKILL" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$CYC_WANT_FAIL" | LC_ALL=C awk '{ print NF }')"
+chk "W154: 두 술어 선언의 이름 추출 positive-control(>=1)" "$([ "$(dn_count "$SPB_KEY")" -ge 1 ] && [ "$(dn_count "$SPF_KEY")" -ge 1 ] && echo ok || echo no)" "ok"
+chk "W156: 본 검사 - 블록 술어 이름 수가 블록 판정이 내는 값 수와 같다" "$(dn_count "$SPB_KEY")" "$(_cyc_block_raw "$CYC_SKILL" | LC_ALL=C awk '{ print NF }')"
+chk "W157: 본 검사 - 형태 술어 이름 수가 형태 판정이 내는 값 수와 같다" "$(dn_count "$SPF_KEY")" "$(form_probe "$CYC_SKILL" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$CYC_WANT_FAIL" | LC_ALL=C awk '{ print NF }')"
 # (W160 · W161 · M75 리뷰 차단 1) **역방향과 유일성** — `W158`은 선언 → 정의 한 방향이라, 선언되지 않은 정의 항목을 더하거나 선언에 같은 이름을
 # 두 번 쓰는 편집이 초록이었다(반증 실측). 정의 → 선언(고아 정의 항목)과 두 선언을 통틀은 이름 유일성을 함께 묻는다.
 # (W162 · W163 · M76) **정의 항목의 순서** — 선언만 또는 정의만 순서를 바꾸면 `W162`가 붉다. 이름이 값의 위치와 뜻으로 맞는가는 묻지 않는다.
-chk "W163: 통제 - 정의 항목 첫 둘만 맞바꾼 합성 규약에서 순서 위반이 하나 는다" "$(( $(dn_def_order "$SP_KEYS" "$(sp_order_fixture swap)") - $(dn_def_order "$SP_KEYS" "$(sp_order_fixture in)") ))" "1"
+chk "W163: 통제 - 정의 항목 첫 둘만 맞바꾼 합성 규약에서 순서 위반이 하나 는다" "$(( $(dn_def_order "$SP_KEYS" "$(dn_order_fixture swap "$SPB_KEY" "$SPF_KEY")") - $(dn_def_order "$SP_KEYS" "$(dn_order_fixture in "$SPB_KEY" "$SPF_KEY")") ))" "1"
 # (W164 · M86 라운드 1) **키 여럿 입력의 통제** — 넓힌 `dn_names` · `dn_defs`(키를 공백으로 이은 목록)의 입력 변환마다 칸 하나(`rf-88`):
 # 두 키의 이름 수 − 첫 키의 이름 수(둘째 키의 이름 수 1) · 더 깊이 들인 정의와 0열 산문을 지나도 세는 정의 수(3) · 그 사본의 정의 위반(0) ·
 # 더 깊이 들인 고아 정의 하나(1). 라운드 0의 같은 깊이 창은 둘째 · 넷째 칸이 1 · 0이었다(리뷰 차단 1).
-_spdf=$(sp_order_fixture deep)
-chk "W164: 통제 - 키 여럿 입력: 둘째 키 이름 수 · 깊이 무관 정의 수 · 정의 위반 · 들여쓴 고아" "$(( $(dn_names "$SP_KEYS" "$_spdf" | grep -c .) - $(dn_names "$SPB_KEY" "$_spdf" | grep -c .) ))|$(dn_defs "$SP_KEYS" "$_spdf" | grep -c .)|$(dn_def_bad "$SP_KEYS" "$_spdf")|$(dn_def_orphan "$SP_KEYS" "$(sp_order_fixture deepx)")" "1|3|0|1"
+_spdf=$(dn_order_fixture deep "$SPB_KEY" "$SPF_KEY")
+chk "W164: 통제 - 키 여럿 입력: 둘째 키 이름 수 · 깊이 무관 정의 수 · 정의 위반 · 들여쓴 고아" "$(( $(dn_names "$SP_KEYS" "$_spdf" | grep -c .) - $(dn_names "$SPB_KEY" "$_spdf" | grep -c .) ))|$(dn_defs "$SP_KEYS" "$_spdf" | grep -c .)|$(dn_def_bad "$SP_KEYS" "$_spdf")|$(dn_def_orphan "$SP_KEYS" "$(dn_order_fixture deepx "$SPB_KEY" "$SPF_KEY")")" "1|3|0|1"
 # (W159) 배선 통제 — 블록 선언의 첫 이름을 바꾼 규약 사본을 같은 헬퍼에 먹이면 출력에 그 바뀐 이름이 나타나야 한다(차이 1). 러너가 이름을 박아 두면 0이다.
-chk "W159: 통제 - 선언의 이름을 바꾸면 출력이 따라 바뀐다" "$(( $(sp_name B '1' "$(sp_wire_fixture)" | LC_ALL=C grep -c 'zzz-wired=') - $(sp_name B '1' | LC_ALL=C grep -c 'zzz-wired=') ))" "1"
+chk "W159: 통제 - 선언의 이름을 바꾸면 출력이 따라 바뀐다" "$(( $(dn_label "$SPB_KEY" '1' "$(dn_wire_fixture "$SPB_KEY")" | LC_ALL=C grep -c 'zzz-wired=') - $(dn_label "$SPB_KEY" '1' | LC_ALL=C grep -c 'zzz-wired=') ))" "1"
 fi
 
 # (W31~W41 · M64-T04) **측정 배당** — 규약이 `sh` 축 판정의 책임처와 보고서 값의 출처를 가르는 선언
@@ -6239,7 +6377,7 @@ fi
 # `dn_*` — 키 여럿이면 한 선언 목록으로 읽는다) · 그 넷의 `-sum`(키마다 돌린 합 — 문서 커밋 두 선언)이다. ID · 라벨 · 기대값은 손으로
 # 적던 케이스 줄과 같다(M86 impl 보고서 T02 · T03 — 옮기기 전후의 라벨 목록 대조). 케이스는 자기 파트에서만 낸다(`part_on`).
 # `cover` 행은 케이스를 내지 않고 **이 하니스가 아는 선언 키**로만 든다 — 덮음 판정(`F27`)이 규약 문서 집합에서 발견한 선언 키 집합과
-# 이 표의 키 집합을 견준다. **Part N의 선언 케이스는 이 표에 두지 않는다** — `case_ids`가 러너 소스의 케이스 줄을 읽어
+# 이 표의 키 집합을 견준다. (M87) `cover` 행의 마지막 칸은 그 키를 묻는 케이스 ID(공백으로 가른 하나 이상)이고, ID의 실재를 `F30`이 묻는다. **Part N의 선언 케이스는 이 표에 두지 않는다** — `case_ids`가 러너 소스의 케이스 줄을 읽어
 # `floor-ask-cases:` 대응을 묻기 때문이다(그 키들은 `cover` 행이다). 키는 소스의 리터럴이고 선언의 원본은 규약 줄 자체다 — 표가 정하는
 # 것은 「어느 키를 어느 케이스 ID로 묻는가」뿐이다.
 decl_reg() { # → 등록표 행(한 줄씩)
@@ -6272,6 +6410,12 @@ O|O64|dup|CONV|retro-order-branches:|본 검사 - 갈래 이름이 유일하다
 O|O65|def|CONV|retro-order-branches:|본 검사 - 갈래 이름마다 정의 항목이 정확히 하나
 O|O66|orphan|CONV|retro-order-branches:|본 검사 - 갈래 정의 항목마다 선언된 이름이 있다(고아 정의 0)
 O|O67|order|CONV|retro-order-branches:|본 검사 - 갈래 정의 항목의 순서가 선언의 이름 순서와 같다
+O|O100|count|CONV|mark-since-steps:|mark-since-steps 선언 줄 정확히 1개
+O|O101|seps|CONV|mark-since-steps:|mark-since-steps 선언 줄 꼬리에 금지 구분자 0건
+O|O102|dup|CONV|mark-since-steps:|본 검사 - 도입 번호 파생 갈래 이름이 유일하다
+O|O103|def|CONV|mark-since-steps:|본 검사 - 갈래 이름마다 정의 항목이 정확히 하나
+O|O104|orphan|CONV|mark-since-steps:|본 검사 - 갈래 정의 항목마다 선언된 이름이 있다(고아 정의 0)
+O|O105|order|CONV|mark-since-steps:|본 검사 - 갈래 정의 항목의 순서가 선언의 이름 순서와 같다
 P|P1|count|CONV|criteria-verdict:|criteria-verdict 선언 줄 정확히 1개
 P|P2|count|CONV|criteria-since:|criteria-since 선언 줄 정확히 1개
 P|P20|count|CONV|metrics-filled-since:|metrics-filled-since 선언 줄 정확히 1개
@@ -6346,39 +6490,39 @@ W|W40|seps|CONV|measure-axis:|measure-axis 선언 줄 꼬리에 금지 구분자
 W|W41|seps|CONV|measure-axis-job:|measure-axis-job 선언 줄 꼬리에 금지 구분자 0건
 W|W44|count|CONV|measure-axis-names:|measure-axis-names 선언 줄 정확히 1개
 W|W48|seps|CONV|measure-axis-names:|measure-axis-names 선언 줄 꼬리에 금지 구분자 0건
--|-|cover|CONV|status-items:|-
--|-|cover|CONV|autonomy-level:|-
--|-|cover|CONV|autonomy-default:|-
--|-|cover|CONV|autonomy-lines:|-
--|-|cover|CONV|floor-marks:|-
--|-|cover|CONV|floor-items:|-
--|-|cover|CONV|floor-mark-map:|-
--|-|cover|CONV|floor-unmarked:|-
--|-|cover|CONV|floor-excluded:|-
--|-|cover|CONV|floor-asks:|-
--|-|cover|CONV|floor-ask-cases:|-
--|-|cover|CONV|floor-ask-from:|-
--|-|cover|CONV|retro-flow:|-
--|-|cover|CONV|retro-flow-sites:|-
--|-|cover|CONV|retro-gate-since:|-
--|-|cover|CONV|retro-review-after:|-
--|-|cover|CONV|tr-draft:|-
--|-|cover|CONV|tr-impl:|-
--|-|cover|CONV|tr-review:|-
--|-|cover|CONV|tr-release-commit:|-
--|-|cover|CONV|tr-tag:|-
--|-|cover|CONV|tr-retro:|-
--|-|cover|CONV|tr-retro-skip:|-
--|-|cover|CONV|tr-forced:|-
--|-|cover|CONV|tr-debug-open:|-
--|-|cover|CONV|tr-debug-done:|-
--|-|cover|CONV|tr-debug-release:|-
--|-|cover|CONV|tr-pr-create:|-
--|-|cover|CONV|tr-pr-finalize:|-
--|-|cover|CONV|tr-continuous-stop:|-
--|-|cover|CONV|tr-downstream:|-
--|-|cover|CONV|tr-part-select:|-
--|-|cover|CONV|mutation-axes:|-
+-|-|cover|CONV|status-items:|N1
+-|-|cover|CONV|autonomy-level:|N2
+-|-|cover|CONV|autonomy-default:|N10
+-|-|cover|CONV|autonomy-lines:|N11 N12
+-|-|cover|CONV|floor-marks:|N18
+-|-|cover|CONV|floor-items:|N30
+-|-|cover|CONV|floor-mark-map:|N31
+-|-|cover|CONV|floor-unmarked:|N32
+-|-|cover|CONV|floor-excluded:|N33
+-|-|cover|CONV|floor-asks:|N46
+-|-|cover|CONV|floor-ask-cases:|N47
+-|-|cover|CONV|floor-ask-from:|N48
+-|-|cover|CONV|retro-flow:|O88
+-|-|cover|CONV|retro-flow-sites:|O88
+-|-|cover|CONV|retro-gate-since:|O88
+-|-|cover|CONV|retro-review-after:|O88
+-|-|cover|CONV|tr-draft:|W102 W103 W106
+-|-|cover|CONV|tr-impl:|W102 W103 W106
+-|-|cover|CONV|tr-review:|W102 W103 W106
+-|-|cover|CONV|tr-release-commit:|W102 W103 W106
+-|-|cover|CONV|tr-tag:|W102 W103 W106
+-|-|cover|CONV|tr-retro:|W102 W103 W106
+-|-|cover|CONV|tr-retro-skip:|W102 W103 W106
+-|-|cover|CONV|tr-forced:|W102 W103 W106
+-|-|cover|CONV|tr-debug-open:|W102 W103 W106
+-|-|cover|CONV|tr-debug-done:|W102 W103 W106
+-|-|cover|CONV|tr-debug-release:|W102 W103 W106
+-|-|cover|CONV|tr-pr-create:|W102 W103 W106
+-|-|cover|CONV|tr-pr-finalize:|W102 W103 W106
+-|-|cover|CONV|tr-continuous-stop:|W102 W103 W106
+-|-|cover|CONV|tr-downstream:|W102 W103 W106
+-|-|cover|CONV|tr-part-select:|W102 W103 W106
+-|-|cover|CONV|mutation-axes:|N24
 DECLREG
 }
 decl_reg_run() { # 등록표의 케이스 행을 파트 선택에 맞춰 낸다(파이프가 아니라 리다이렉트라 카운터가 같은 셸에 남는다)
@@ -6450,7 +6594,42 @@ decl_fixture() { # <add|drop|dup|sep|frag> → 규약 문서 집합 사본 디�
     esac
     printf '%s' "$_dfx"
 }
+# (F29~F31 · M87 · 회고 `rf-108`) **`cover` 행은 그 키를 묻는 케이스 ID를 든다** — 행의 마지막 칸(케이스 행의 라벨 자리)에 공백으로 가른
+# ID 하나 이상이다. 칸을 새로 더하지 않으므로 다른 판정 종류의 행은 그대로 읽힌다. ID마다 **두 러너 소스 모두**에 그 ID의 케이스가 있어야
+# 한다 — 케이스는 공백을 벗긴 문면이 `chk "ID:` · `Chk "ID:`로 시작하는 줄이거나 그 소스 등록표의 케이스 행(`파트|ID|판정|…`)이다(주석 줄 제외).
+# 덮였다는 주장을 되짚는 것은 **그 ID가 실재한다**까지다 — 그 케이스가 정말 그 키를 묻는가(뜻)는 묻지 않는다(규약 「기계가 묻는 것」).
+src_case_ids() { # <러너 소스> → 케이스 ID 한 줄씩(중복 없이)
+    LC_ALL=C awk -v q='"' '{ sub(/\r$/, ""); t = $0; sub(/^[ \t]+/, "", t)
+        if (substr(t, 1, 5) == "chk " q || substr(t, 1, 5) == "Chk " q) { r = substr(t, 6); j = index(r, ":"); if (j > 1) { id = substr(r, 1, j - 1); if (id ~ /^[A-Z][0-9]+[a-z]*$/) print id }; next }
+        if (t ~ /^[A-Z][|][A-Z][0-9]+[a-z]*[|][a-z-]+[|]/) { split(t, f, "|"); print f[2] } }' "$1" | LC_ALL=C sort -u
+}
+cover_id_bad() { # [등록표 파일] [sh 소스] [ps1 소스] → ID 칸이 비었거나(`-`만 있음 포함) 든 ID 하나라도 어느 러너 소스에 없는 `cover` 행의 수
+    if [ -n "${1:-}" ]; then cat "$1"; else decl_reg; fi > "$SBX/cov-reg.txt"
+    src_case_ids "${2:-$RUN_SH}" > "$SBX/cov-sh.txt"; src_case_ids "${3:-$RUN_PS1}" > "$SBX/cov-ps.txt"
+    LC_ALL=C awk -F'|' -v shf="$SBX/cov-sh.txt" -v psf="$SBX/cov-ps.txt" '
+        BEGIN { while ((getline l < shf) > 0) S[l] = 1; while ((getline l < psf) > 0) P[l] = 1 }
+        { sub(/\r$/, "") }
+        $3 == "cover" { n = split($6, a, / +/); k = 0; bad = 0
+            for (i = 1; i <= n; i++) { if (a[i] == "" || a[i] == "-") continue; k++; if (!(a[i] in S) || !(a[i] in P)) bad = 1 }
+            if (k == 0 || bad) c++ }
+        END { print c + 0 }' "$SBX/cov-reg.txt"
+}
+cover_fixture() { # <noid|empty|oneside|oneside-src> → 등록표 사본(실제 행 + 합성 cover 행 하나 — oneside는 `F29`를 든다) · oneside-src: `F29` 케이스 줄을 지운 ps1 소스 사본
+    # 실물 행에 기대지 않는다 — 실물 cover 행이 어긋나도 통제가 기준선을 재지 않는다(M87 되돌림 `cover-noid` · `cover-oneside`가 옛 꼴을 함께 붉혔다).
+    case $1 in
+        noid) { decl_reg; printf '%s\n' '-|-|cover|CONV|zz-cov:|Z999'; } > "$SBX/cov-fx-noid.txt"; printf '%s' "$SBX/cov-fx-noid.txt" ;;
+        empty) { decl_reg; printf '%s\n' '-|-|cover|CONV|zz-cov:|'; } > "$SBX/cov-fx-empty.txt"; printf '%s' "$SBX/cov-fx-empty.txt" ;;
+        oneside) { decl_reg; printf '%s\n' '-|-|cover|CONV|zz-cov:|F29'; } > "$SBX/cov-fx-oneside.txt"; printf '%s' "$SBX/cov-fx-oneside.txt" ;;
+        oneside-src)
+            LC_ALL=C awk -v p='Chk "F29:' '{ t = $0; sub(/^[ \t]+/, "", t); if (substr(t, 1, length(p)) == p) next; print }' "$RUN_PS1" > "$SBX/cov-fx-ps1.txt"
+            printf '%s' "$SBX/cov-fx-ps1.txt" ;;
+    esac
+}
 if part_on F; then
+chk "F29: cover 행 추출 · 두 러너 소스의 케이스 ID 추출 positive-control(>0)" "$([ "$(decl_reg | LC_ALL=C awk -F'|' '$3 == "cover"' | grep -c .)" -gt 0 ] && [ "$(src_case_ids "$RUN_SH" | grep -c .)" -gt 0 ] && [ "$(src_case_ids "$RUN_PS1" | grep -c .)" -gt 0 ] && echo ok || echo no)" "ok"
+chk "F30: 본 검사 - cover 행마다 케이스 ID가 있고 그 ID가 두 러너 소스 모두에 실재한다" "$(cover_id_bad)" "0"
+_cvb=$(cover_id_bad)
+chk "F31: 통제 - 없는 ID를 든 행 · 한 러너에만 있는 ID · 빈 ID 칸이 각자 하나씩 는다" "$(( $(cover_id_bad "$(cover_fixture noid)") - _cvb ))|$(( $(cover_id_bad "$(cover_fixture oneside)" "" "$(cover_fixture oneside-src)") - _cvb ))|$(( $(cover_id_bad "$(cover_fixture empty)") - _cvb ))" "1|1|1"
 chk "F24: 선언 줄 발견 positive-control(>0) · 등록표 키 추출(>0)" "$([ "$(decl_disc '' k | grep -c .)" -gt 0 ] && [ "$(decl_reg_keys | grep -c .)" -gt 0 ] && echo ok || echo no)" "ok"
 chk "F25: 본 검사 - 규약 문서 집합에서 선언 줄이 둘 이상인 키 0개" "$(decl_disc_dup)" "0"
 chk "F26: 본 검사 - 규약 문서 집합의 선언 꼬리에 금지 구분자 0건" "$(decl_disc_seps)" "0"
