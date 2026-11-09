@@ -379,15 +379,40 @@ rosters_disjoint() { # <file> → yes|no
     echo yes
 }
 
+# (M88) **명단 크기의 기대값은 규약 문장이 든 수에서 읽는다** — 손 상수 `6` · `11`을 러너에 두면 명단을 바꾸는 정상 편집이 규약과
+# 러너를 함께 고쳐야 초록이 된다(`rf-97` 부류). 수는 규약 본체에서 「접두 + 숫자 + 종」 꼴의 첫 등장으로 읽는다 — 접두는 셋이다:
+# 기록 명단 「**phase 기록 커맨드 」 · 비기록 명단 「**나머지 」 · stable 명단 「**커맨드 」. 수를 읽지 못하면 빈 값이고 아래
+# positive-control이 붉다(빈 기대값과 빈 실측이 같아 초록이 되는 `vacuous-pass`를 막는다).
+DN_WRITER='**phase 기록 커맨드 '
+DN_NONWRITER='**나머지 '
+DN_STABLE='**커맨드 '
+decl_n() { # <파일> <접두> → 접두의 **첫 등장** 바로 뒤가 숫자 + 「종」이면 그 숫자(아니면 빈 출력 — 뒤 절의 재서술로 미끄러지지 않는다)
+    LC_ALL=C awk -v p="$2" -v z="종" '{ i = index($0, p); if (i > 0) { r = substr($0, i + length(p)); if (match(r, /^[0-9]+/) && substr(r, RLENGTH + 1, length(z)) == z) print substr(r, 1, RLENGTH); exit } }' "$1"
+}
+decl_n_fixture() { # <grow|drop> → 규약 사본(grow: 기록 명단 줄에 이름 하나와 수 +1 · drop: 기록 수 문장의 숫자를 **모든 등장에서** 지움 — 같은 접두가 뒤 절에도 한 번 더 나온다)
+    _dnff="$SBX/conv-dn-$1.md"
+    _dnw=$(decl_n "$CONV" "$DN_WRITER")
+    case $1 in
+        grow) LC_ALL=C awk -v p="$DN_WRITER$_dnw" -v n="$DN_WRITER$((_dnw + 1))" '!d && (i = index($0, p)) > 0 { $0 = substr($0, 1, i - 1) n substr($0, i + length(p)); j = index($0, "`cycle`"); if (j > 0) $0 = substr($0, 1, j + 6) "·`zz-grow`" substr($0, j + 7); d = 1 } { print }' "$CONV" > "$_dnff" ;;
+        drop) LC_ALL=C awk -v p="$DN_WRITER$_dnw" -v n="$DN_WRITER" '{ o = ""; s = $0; while ((i = index(s, p)) > 0) { o = o substr(s, 1, i - 1) n; s = substr(s, i + length(p)) } print o s }' "$CONV" > "$_dnff" ;;
+    esac
+    printf '%s' "$_dnff"
+}
+NWRITER=$(decl_n "$CONV" "$DN_WRITER")
+NNONWRITER=$(decl_n "$CONV" "$DN_NONWRITER")
+NSTABLE=$(decl_n "$CONV" "$DN_STABLE")
+
 if part_on C; then
-chk "C3: 규약 명단 이름 6개"        "$(roster_count "$CONV")"     "6"
-chk "C3: 발행 페이지 명단 이름 6개" "$(roster_count "$CONCEPTS")" "6"
+chk "C3: 명단 크기 선언 추출 positive-control(기록 · 비기록 · stable 수를 규약 문장에서 읽는다)" "$([ -n "$NWRITER" ] && [ -n "$NNONWRITER" ] && [ -n "$NSTABLE" ] && echo ok || echo no)" "ok"
+chk "C3: 통제 - 기록 명단에 이름 하나와 수 +1을 함께 넣은 사본에서 개수가 선언 수와 같고, 수를 지운 사본에서 추출이 빈다" "$([ "$(roster_count "$(decl_n_fixture grow)")" = "$(decl_n "$(decl_n_fixture grow)" "$DN_WRITER")" ] && echo same || echo diff)|$(decl_n "$(decl_n_fixture drop)" "$DN_WRITER")" "same|"
+chk "C3: 규약 명단 이름 6개"        "$(roster_count "$CONV")"     "$NWRITER"
+chk "C3: 발행 페이지 명단 이름 6개" "$(roster_count "$CONCEPTS")" "$NWRITER"
 chk "C3: 두 명단 집합 일치"     "$(sets_equal "$(roster_set "$CONV")" "$(roster_set "$CONCEPTS")")" "yes"
 chk "C3: 열거 파일은 규약·발행 페이지 둘뿐" "$(roster_files)"     "docs/conventions.md site/docs/concepts.md"
 
 # 비기록 명단도 같은 넓이로 문다 — 규약의 선언이 두 목록을 함께 걸었다(리뷰 차단 #1).
-chk "C3: 규약 비기록 명단 이름 6개"        "$(nonwriter_count "$CONV")"     "6"
-chk "C3: 발행 페이지 비기록 명단 이름 6개" "$(nonwriter_count "$CONCEPTS")" "6"
+chk "C3: 규약 비기록 명단 이름 6개"        "$(nonwriter_count "$CONV")"     "$NNONWRITER"
+chk "C3: 발행 페이지 비기록 명단 이름 6개" "$(nonwriter_count "$CONCEPTS")" "$NNONWRITER"
 chk "C3: 두 비기록 명단 집합 일치" "$(sets_equal "$(nonwriter_set "$CONV")" "$(nonwriter_set "$CONCEPTS")")" "yes"
 chk "C3: 비기록 열거 파일은 규약·발행 페이지 둘뿐" "$(nonwriter_files)" "docs/conventions.md site/docs/concepts.md"
 chk "C3: 규약의 기록·비기록 명단은 서로소"        "$(rosters_disjoint "$CONV")"     "yes"
@@ -411,8 +436,8 @@ fi
 #      크게 FAIL한다(집행 경계이며 `run.ps1`과 같은 값).
 #      **탐침은 `` `/tide:<이름>` `` 형태로 닫는 백틱까지 포함한다** — 그래야 `` `/tide:fleet` `` 이
 #      `` `/tide:fleet-cycle` `` 안에 우연히 걸리지 않는다(B3의 경계 요구와 같은 이유).
-#      `/tide:debug`는 **동결 집합이 아니므로** 창에 섞여 들면 개수가 12가 되어 FAIL한다 —
-#      승격은 major 사안이고, 그때 규약·README·이 러너를 함께 고치는 것이 의도된 비용이다.
+#      `/tide:debug`는 **동결 집합이 아니므로** 창에 섞여 들면 개수가 선언 수보다 하나 많아져 FAIL한다 —
+#      승격은 major 사안이고, 그때 규약(명단과 수)·README를 함께 고치는 것이 의도된 비용이다(M88부터 기대값은 규약 문장에서 읽어 러너는 고치지 않는다).
 stable_window() { # <file> → 창 텍스트(없으면 빈 출력)
     [ -f "$1" ] || return 0
     awk 'BEGIN { W = 4 }
@@ -452,8 +477,8 @@ stable_files() { # → stable 명단 창을 가진 살아 있는 문서(레포 �
 }
 
 if part_on C; then
-chk "C4: 규약 stable 명단 이름 11개"   "$(stable_count "$CONV")"   "11"
-chk "C4: README stable 명단 이름 11개" "$(stable_count "$README")" "11"
+chk "C4: 규약 stable 명단 이름 11개"   "$(stable_count "$CONV")"   "$NSTABLE"
+chk "C4: README stable 명단 이름 11개" "$(stable_count "$README")" "$NSTABLE"
 chk "C4: 두 stable 명단 집합 일치" "$(sets_equal "$(stable_set "$CONV")" "$(stable_set "$README")")" "yes"
 chk "C4: stable 열거 파일은 규약·README 둘뿐" "$(stable_files)" "README.md docs/conventions.md"
 chk "C4: stable 명단 통제 — 규약에 phantom-stable 없음"   "$(stable_has "$CONV" phantom-stable)"   "no"
@@ -753,8 +778,8 @@ living_docs > "$SBX/living.txt"
 
 # 규약 문서 집합 — 글롭으로 **발견**한다. `LC_ALL=C sort`로 정렬해 ps1(ordinal 정렬)과 **같은 순서**로
 # 훑는다. 목록은 파일로 받는다(위와 같은 이유 — 공백이 든 경로에서 단어 분리를 타지 않게).
-conv_files() {
-    for f in "$ROOT"/docs/conventions*.md; do
+conv_files() { # [루트] → 그 루트의 규약 문서 집합(글롭 `docs/conventions*.md`) — 루트를 받는 것은 M88 조각 발견 통제(`O120`) 때문이다
+    for f in "${1:-$ROOT}"/docs/conventions*.md; do
         [ -f "$f" ] && printf '%s\n' "$f"
     done | LC_ALL=C sort
 }
@@ -3015,42 +3040,55 @@ fl_mark_extra() { # [규약 파일] → 대응의 표지 중 `floor-marks:`에 �
 # `#`로 시작하므로 세지 않는다. 대응이 묻는 것은 「이 판정에 이 케이스가 있다」까지이고 케이스의 넓이는 묻지 않는다.
 RUN_SH="$ROOT/tests/discover/run.sh"
 RUN_PS1="$ROOT/tests/discover/run.ps1"
-fa_pairs() { # [규약 파일] → `floor-ask-cases:`의 토큰 중 「이름=케이스」 꼴만 한 줄씩(첫 `=`로 가른다)
-    dn_names "$FAC_KEY" "${1:-}" | LC_ALL=C awk '{ j = index($0, "="); if (j > 1 && j < length($0)) print }'
+# (M88) 위 판정은 **축 하나에 묶이지 않는다** — 고지 · 대응 · 시작 키와 파트 표지를 인자로 받는 `ak_*`가 판정 본체이고, `fa_*`는 안전 바닥 축
+# (`floor-asks:` · Part N)을 고정한 얇은 포장이다. 공통 통제 축(`hc-asks:` · Part K)이 같은 본체를 쓴다. 옮기기 전후로 Part N의 판정 값이 같음은
+# impl 보고서의 「같은 창」 대조가 적는다(창 — 케이스 줄의 꼴 · 접미 ID · 시작 번호 견줌 — 은 파트 표지 하나만 인자로 바뀌었다).
+ak_pairs() { # <대응 키> [규약 파일] → 대응 선언의 토큰 중 「이름=케이스」 꼴만 한 줄씩(첫 `=`로 가른다)
+    dn_names "$1" "${2:-}" | LC_ALL=C awk '{ j = index($0, "="); if (j > 1 && j < length($0)) print }'
 }
-fa_from() { # [규약 파일] → `floor-ask-from:`의 첫 토큰이 `N`+숫자이면 그 숫자, 아니면 빈 출력
-    dn_names "$FAF_KEY" "${1:-}" | head -1 | LC_ALL=C awk '/^N[0-9]+$/ { print substr($0, 2) + 0 }'
+ak_from() { # <시작 키> <파트> [규약 파일] → 시작 선언의 첫 토큰이 <파트>+숫자이면 그 숫자, 아니면 빈 출력
+    dn_names "$1" "${3:-}" | head -1 | LC_ALL=C awk -v p="$2" '{ if (substr($0, 1, 1) == p && substr($0, 2) ~ /^[0-9]+$/) print substr($0, 2) + 0 }'
 }
-case_ids() { # <러너 파일> → Part N 케이스 줄의 ID 한 줄씩(공백을 벗긴 문면이 `chk "N…:` 또는 `Chk "N…:`로 시작 · 주석 줄 제외 ·
-    # ID는 `N`+숫자에 소문자 접미가 붙을 수 있다 — 이 하니스는 `F1b` · `G8a` 꼴을 쓴다. M79 리뷰 차단 1)
-    LC_ALL=C awk -v q='"' '{ sub(/\r$/, ""); t = $0; sub(/^[ \t]+/, "", t)
-        if (substr(t, 1, 5) == "chk " q || substr(t, 1, 5) == "Chk " q) { r = substr(t, 6); j = index(r, ":"); if (j > 1) { id = substr(r, 1, j - 1); if (id ~ /^N[0-9]+[a-z]*$/) print id } } }' "$1"
+ak_case_ids() { # <파트> <러너 파일> → 그 파트 케이스 줄의 ID 한 줄씩(공백을 벗긴 문면이 `chk "<파트>…:` 또는 `Chk "<파트>…:`로 시작 · 주석 줄 제외 ·
+    # ID는 <파트>+숫자에 소문자 접미가 붙을 수 있다 — 이 하니스는 `F1b` · `G8a` 꼴을 쓴다. M79 리뷰 차단 1)
+    # (M88) 선언 판정 등록표의 케이스 행(`<파트>|<ID>|<판정>|…`)도 케이스로 센다 — `src_case_ids`(F29)와 같은 꼴이다. 공통 통제 축의 선언 위생은
+    # 등록표 행이 내기 때문이다. Part N에는 등록표 케이스 행이 없어 안전 바닥 축의 값은 그대로다(impl 보고서의 「같은 창」 대조).
+    LC_ALL=C awk -v q='"' -v p="$1" '{ sub(/\r$/, ""); t = $0; sub(/^[ \t]+/, "", t)
+        if (substr(t, 1, 5) == "chk " q || substr(t, 1, 5) == "Chk " q) { r = substr(t, 6); j = index(r, ":"); if (j > 1) { id = substr(r, 1, j - 1); if (substr(id, 1, 1) == p && substr(id, 2) ~ /^[0-9]+[a-z]*$/) print id }; next }
+        if (substr(t, 1, 2) == p "|" && t ~ /^[A-Z][|][A-Z][0-9]+[a-z]*[|][a-z-]+[|]/) { split(t, f, "|"); if (substr(f[2], 1, 1) == p) print f[2] } }' "$2"
 }
-fa_ask_nocase() { # [규약 파일] → 대응하는 케이스가 하나도 없는 고지 이름의 수
-    _fanp=$(fa_pairs "${1:-}" | LC_ALL=C awk '{ print substr($0, 1, index($0, "=") - 1) }')
-    dn_names "$FAS_KEY" "${1:-}" | { _fan=0; while IFS= read -r _fav; do
-        printf '%s\n' "$_fanp" | LC_ALL=C grep -qxF -- "$_fav" || _fan=$((_fan + 1))
-    done; echo "$_fan"; }
+ak_ask_nocase() { # <고지 키> <대응 키> [규약 파일] → 대응하는 케이스가 하나도 없는 고지 이름의 수
+    _aknp=$(ak_pairs "$2" "${3:-}" | LC_ALL=C awk '{ print substr($0, 1, index($0, "=") - 1) }')
+    dn_names "$1" "${3:-}" | { _akn=0; while IFS= read -r _akv; do
+        printf '%s\n' "$_aknp" | LC_ALL=C grep -qxF -- "$_akv" || _akn=$((_akn + 1))
+    done; echo "$_akn"; }
 }
-fa_ask_unknown() { # [규약 파일] → 대응의 이름 중 `floor-asks:`에 없는 것의 수(서로 다른 이름으로 센다)
-    _faun=$(dn_names "$FAS_KEY" "${1:-}")
-    fa_pairs "${1:-}" | LC_ALL=C awk '{ print substr($0, 1, index($0, "=") - 1) }' | LC_ALL=C sort -u | { _fau=0; while IFS= read -r _fav; do
-        printf '%s\n' "$_faun" | LC_ALL=C grep -qxF -- "$_fav" || _fau=$((_fau + 1))
-    done; echo "$_fau"; }
+ak_ask_unknown() { # <고지 키> <대응 키> [규약 파일] → 대응의 이름 중 고지 선언에 없는 것의 수(서로 다른 이름으로 센다)
+    _akun=$(dn_names "$1" "${3:-}")
+    ak_pairs "$2" "${3:-}" | LC_ALL=C awk '{ print substr($0, 1, index($0, "=") - 1) }' | LC_ALL=C sort -u | { _aku=0; while IFS= read -r _akv; do
+        printf '%s\n' "$_akun" | LC_ALL=C grep -qxF -- "$_akv" || _aku=$((_aku + 1))
+    done; echo "$_aku"; }
 }
-fa_case_missing() { # [규약 파일] [sh 러너] [ps1 러너] → 대응의 케이스 중 두 러너 어느 한쪽에라도 케이스 줄이 없는 것의 수(서로 다른 케이스로 센다)
-    _facs=$(case_ids "${2:-$RUN_SH}"); _facp=$(case_ids "${3:-$RUN_PS1}")
-    fa_pairs "${1:-}" | LC_ALL=C awk '{ print substr($0, index($0, "=") + 1) }' | LC_ALL=C sort -u | { _fac=0; while IFS= read -r _fav; do
-        { printf '%s\n' "$_facs" | LC_ALL=C grep -qxF -- "$_fav" && printf '%s\n' "$_facp" | LC_ALL=C grep -qxF -- "$_fav"; } || _fac=$((_fac + 1))
-    done; echo "$_fac"; }
+ak_case_missing() { # <대응 키> <파트> [규약 파일] [sh 러너] [ps1 러너] → 대응의 케이스 중 두 러너 어느 한쪽에라도 케이스 줄이 없는 것의 수(서로 다른 케이스로 센다)
+    _akcs=$(ak_case_ids "$2" "${4:-$RUN_SH}"); _akcp=$(ak_case_ids "$2" "${5:-$RUN_PS1}")
+    ak_pairs "$1" "${3:-}" | LC_ALL=C awk '{ print substr($0, index($0, "=") + 1) }' | LC_ALL=C sort -u | { _akc=0; while IFS= read -r _akv; do
+        { printf '%s\n' "$_akcs" | LC_ALL=C grep -qxF -- "$_akv" && printf '%s\n' "$_akcp" | LC_ALL=C grep -qxF -- "$_akv"; } || _akc=$((_akc + 1))
+    done; echo "$_akc"; }
 }
-fa_case_unmapped() { # [규약 파일] [sh 러너] [ps1 러너] → 두 러너의 Part N 케이스 중 `floor-ask-from:` 이상인데 대응에 없는 것의 수(서로 다른 케이스로 센다)
-    _fafn=$(fa_from "${1:-}")
-    _famp=$(fa_pairs "${1:-}" | LC_ALL=C awk '{ print substr($0, index($0, "=") + 1) }')
-    { case_ids "${2:-$RUN_SH}"; case_ids "${3:-$RUN_PS1}"; } | LC_ALL=C sort -u | LC_ALL=C awk -v f="${_fafn:-0}" '{ s = substr($0, 2); sub(/[a-z]+$/, "", s) } s + 0 >= f' | { _fam=0; while IFS= read -r _fav; do
-        printf '%s\n' "$_famp" | LC_ALL=C grep -qxF -- "$_fav" || _fam=$((_fam + 1))
-    done; echo "$_fam"; }
+ak_case_unmapped() { # <대응 키> <시작 키> <파트> [규약 파일] [sh 러너] [ps1 러너] → 두 러너의 그 파트 케이스 중 시작 번호 이상인데 대응에 없는 것의 수(서로 다른 케이스로 센다)
+    _akfn=$(ak_from "$2" "$3" "${4:-}")
+    _akmp=$(ak_pairs "$1" "${4:-}" | LC_ALL=C awk '{ print substr($0, index($0, "=") + 1) }')
+    { ak_case_ids "$3" "${5:-$RUN_SH}"; ak_case_ids "$3" "${6:-$RUN_PS1}"; } | LC_ALL=C sort -u | LC_ALL=C awk -v f="${_akfn:-0}" '{ s = substr($0, 2); sub(/[a-z]+$/, "", s) } s + 0 >= f' | { _akm=0; while IFS= read -r _akv; do
+        printf '%s\n' "$_akmp" | LC_ALL=C grep -qxF -- "$_akv" || _akm=$((_akm + 1))
+    done; echo "$_akm"; }
 }
+fa_pairs() { ak_pairs "$FAC_KEY" "${1:-}"; }   # [규약 파일]
+fa_from() { ak_from "$FAF_KEY" N "${1:-}"; }   # [규약 파일]
+case_ids() { ak_case_ids N "$1"; }   # <러너 파일> — Part N
+fa_ask_nocase() { ak_ask_nocase "$FAS_KEY" "$FAC_KEY" "${1:-}"; }   # [규약 파일]
+fa_ask_unknown() { ak_ask_unknown "$FAS_KEY" "$FAC_KEY" "${1:-}"; }   # [규약 파일]
+fa_case_missing() { ak_case_missing "$FAC_KEY" N "${1:-}" "${2:-}" "${3:-}"; }   # [규약 파일] [sh 러너] [ps1 러너]
+fa_case_unmapped() { ak_case_unmapped "$FAC_KEY" "$FAF_KEY" N "${1:-}" "${2:-}" "${3:-}"; }   # [규약 파일] [sh 러너] [ps1 러너]
 fa_runner_fixture() { # → 케이스 줄 판정의 통제용 합성 러너(주석 줄의 케이스 · 들여쓴 케이스 · Part N 밖 케이스 · 접미 ID 케이스를 한 벌씩 든다)
     _farf="$SBX/runner-fa.txt"
     printf '%s\n' '# chk "N30: commented"' '    chk "N99: indented"' 'chk "O1: other part"' '    # Chk "N31: commented"' 'chk "N98b: suffixed"' > "$_farf"
@@ -3061,6 +3099,53 @@ fa_suffix_fixture() { # <sh|ps1> → 접미 ID 케이스 하나만 든 합성 �
     if [ "$1" = ps1 ]; then printf '%s\n' '    Chk "N98b: suffixed"' > "$_fasf"; else printf '%s\n' 'chk "N98b: suffixed"' > "$_fasf"; fi
     printf '%s' "$_fasf"
 }
+# (K7~K25 · M88 `rf-112`) **공통 통제 축의 판정 이름과 케이스 대응** — 규약 "새 하니스가 갖출 공통 통제" 절의 「집행」이 산문 나열이 아니라
+# `hc-asks:` · `hc-ask-cases:` · `hc-ask-from:`이다. 선언 위생(K7~K9 · K11~K15)은 등록표 행이 내고, 대응(K16~K19)은 위 `ak_*` 본체를 Part K로
+# 부른다. 통제(K20~K25)는 규약 사본 · 합성 러너에서 판정 값이 하나씩 움직이는지를 **차이**로 묻는다(`control-reads-delta`). 이 블록은
+# `ak_*` 정의 뒤에 있어야 해서 Part K의 다른 케이스와 떨어져 있다.
+HCA_KEY='hc-asks:'
+HCC_KEY='hc-ask-cases:'
+HCF_KEY='hc-ask-from:'
+hc_fixture() { # <addname|droppair|nocase|unknown> → 규약 사본(addname: 판정 선언에 이름 하나 · droppair: 대응에서 케이스가 한 번만 나오는 첫 쌍을 뺌 · nocase: 없는 케이스를 든 쌍 · unknown: 선언 밖 이름의 쌍)
+    _hcff="$SBX/conv-hc-$1.md"
+    # droppair가 빼는 쌍은 **케이스가 대응에 한 번만 나오는 첫 쌍**이다 — 맨 앞 쌍을 빼면 그 케이스가 다른 쌍에도 있을 때 통제가 움직이지 않는다(M88 되돌림 실측)
+    # 그 케이스는 sh 러너에 실재해야 한다 — 없는 케이스를 든 쌍을 빼면 미대응이 움직이지 않는다
+    _hcids=$(ak_case_ids K "$RUN_SH" | LC_ALL=C tr '\n' ' ')
+    _hcp1=$(ak_pairs "$HCC_KEY" | LC_ALL=C awk -v ids=" $_hcids" '{ j = index($0, "="); k[NR] = substr($0, j + 1); l[NR] = $0; c[k[NR]]++ } END { for (i = 1; i <= NR; i++) if (c[k[i]] == 1 && index(ids, " " k[i] " ") > 0) { print l[i]; exit } }'); _hcn1=$(dn_names "$HCA_KEY" | head -1)
+    LC_ALL=C awk -v m="$1" -v ka="- \`$HCA_KEY\`" -v kc="- \`$HCC_KEY\`" -v p1=" $_hcp1" -v n1="$_hcn1" '{
+        t = $0; sub(/^[ \t]+/, "", t)
+        if (m == "addname" && substr(t, 1, length(ka)) == ka) { sub(/\r$/, ""); $0 = $0 " hc-zz-add" }
+        if (substr(t, 1, length(kc)) == kc) {
+            sub(/\r$/, "")
+            if (m == "droppair") { $0 = $0 " "; i = index($0, p1 " "); if (i > 0) $0 = substr($0, 1, i - 1) substr($0, i + length(p1)); sub(/ $/, "") }
+            if (m == "nocase") $0 = $0 " " n1 "=K999"
+            if (m == "unknown") $0 = $0 " hc-zz-unknown=K1"
+        }
+        print }' "$CONV" > "$_hcff"
+    printf '%s' "$_hcff"
+}
+hc_runner_fixture() { # <ids|suffix-sh|suffix-ps1> → 합성 러너(ids: 주석 줄 · 들여쓴 · 다른 파트 · 접미 ID 케이스와 Part K · 다른 파트 등록표 행을 한 벌씩 · suffix-*: 대응 없는 접미 ID 케이스 하나)
+    _hcrf="$SBX/runner-hc-$1.txt"
+    case $1 in
+        ids) printf '%s\n' '# chk "K30: commented"' '    chk "K99: indented"' 'chk "N1: other part"' '    # Chk "K31: commented"' 'chk "K98b: suffixed"' 'K|K97|count|CONV|zz:|registry row' 'N|N96|count|CONV|zz:|other-part registry row' > "$_hcrf" ;;
+        suffix-sh) printf '%s\n' 'chk "K98b: suffixed"' > "$_hcrf" ;;
+        suffix-ps1) printf '%s\n' '    Chk "K98b: suffixed"' > "$_hcrf" ;;
+    esac
+    printf '%s' "$_hcrf"
+}
+if part_on K; then
+chk "K10: 공통 통제 판정 이름 · 대응 · 시작 케이스 추출 positive-control" "$([ "$(dn_names "$HCA_KEY" | grep -c .)" -ge 1 ] && [ "$(ak_pairs "$HCC_KEY" | grep -c .)" -ge 1 ] && [ -n "$(ak_from "$HCF_KEY" K)" ] && echo ok || echo no)" "ok"
+chk "K16: 본 검사 - 공통 통제 판정 이름마다 대응하는 케이스가 있다" "$(ak_ask_nocase "$HCA_KEY" "$HCC_KEY")" "0"
+chk "K17: 본 검사 - 대응의 이름이 전부 hc-asks에 있다" "$(ak_ask_unknown "$HCA_KEY" "$HCC_KEY")" "0"
+chk "K18: 본 검사 - 대응의 케이스가 두 러너 모두에 케이스 줄로 있다" "$(ak_case_missing "$HCC_KEY" K)" "0"
+chk "K19: 본 검사 - 이 축의 케이스(hc-ask-from 이상)가 전부 대응에 있다" "$(ak_case_unmapped "$HCC_KEY" "$HCF_KEY" K)" "0"
+chk "K20: 통제 - 판정 선언에 이름 하나를 더한 규약 사본에서 대응 없는 이름이 하나 는다" "$(( $(ak_ask_nocase "$HCA_KEY" "$HCC_KEY" "$(hc_fixture addname)") - $(ak_ask_nocase "$HCA_KEY" "$HCC_KEY") ))" "1"
+chk "K21: 통제 - 대응에서 케이스가 한 번만 나오는 첫 쌍을 뺀 규약 사본에서 대응 없는 케이스가 하나 는다" "$(( $(ak_case_unmapped "$HCC_KEY" "$HCF_KEY" K "$(hc_fixture droppair)") - $(ak_case_unmapped "$HCC_KEY" "$HCF_KEY" K) ))" "1"
+chk "K22: 통제 - 없는 케이스를 든 쌍을 더한 규약 사본에서 빠진 케이스가 하나 는다" "$(( $(ak_case_missing "$HCC_KEY" K "$(hc_fixture nocase)") - $(ak_case_missing "$HCC_KEY" K) ))" "1"
+chk "K23: 통제 - 대응 없는 접미 ID 케이스 하나만 든 두 합성 러너에서 미대응이 1이다" "$(ak_case_unmapped "$HCC_KEY" "$HCF_KEY" K "" "$(hc_runner_fixture suffix-sh)" "$(hc_runner_fixture suffix-ps1)")" "1"
+chk "K24: 통제 - 선언 밖 이름의 쌍을 더한 규약 사본에서 모르는 이름이 하나 는다" "$(( $(ak_ask_unknown "$HCA_KEY" "$HCC_KEY" "$(hc_fixture unknown)") - $(ak_ask_unknown "$HCA_KEY" "$HCC_KEY") ))" "1"
+chk "K25: 통제 - 케이스 줄 판정이 주석 줄 · Part K 밖 케이스(등록표 행 포함)를 세지 않고 접미 ID와 Part K 등록표 행은 읽는다" "$(ak_case_ids K "$(hc_runner_fixture ids)" | LC_ALL=C tr '\n' ',')" "K99,K98b,K97,"
+fi
 fl_order_fixture() { # <in|swap> → 이름 선언과 정의 항목 셋만 든 합성 규약(순서 통제). `swap`은 정의 첫 둘의 순서만 바꾼다(`dn_order_fixture`와 같은 까닭으로 실제 규약을 쓰지 않는다).
     _flxf="$SBX/conv-flo-$1.md"
     if [ "$1" = swap ]; then _flx1=zz-fb; _flx2=zz-fa; else _flx1=zz-fa; _flx2=zz-fb; fi
@@ -4159,6 +4244,45 @@ chk "O115: 러너 라벨 positive-control - 두 러너 소스의 케이스 라�
 chk "O116: 본 검사 - 두 러너 소스의 케이스 라벨에 나온 ms- 이름이 전부 선언된 이름이다(러너가 선언 밖 갈래를 구현했다고 주장하지 않는다)" "$(ms_label_bad)" "0|0"
 _msl0=$(ms_label_bad | LC_ALL=C cut -d'|' -f1)
 chk "O117: 변환 통제 - 케이스 라벨에 선언 밖 갈래 이름을 든 합성 러너는 하나 늘고 주석 줄의 토큰 · 낱말 안의 ms- 는 늘지 않는다" "$(( $(ms_label_bad "$(ms_runner_fixture relabel)" | LC_ALL=C cut -d'|' -f1) - _msl0 ))|$(( $(ms_label_bad "$(ms_runner_fixture comment)" | LC_ALL=C cut -d'|' -f1) - _msl0 ))|$(( $(ms_label_bad "$(ms_runner_fixture inword)" | LC_ALL=C cut -d'|' -f1) - _msl0 ))" "1|0|0"
+# (O118~O120 · M88 `rf-113`) **창 안 이름의 차례** — 선언의 이름 순서가 적용 순서이므로, 재서술처 창에서 ms- 이름이 처음 나오는 차례가
+# 선언 순서와 같아야 한다(`pf_order_bad` 꼴 — 양쪽에 다 있는 이름끼리만 견준다. 집합 차이는 `O108`의 몫이라 판정을 떼어 둔다).
+# 규약 **조각** 문서에 심은 토큰도 잔재 판정이 잡는지는 조각 하나를 더한 규약 디렉터리 사본을 글롭 발견(`conv_files`)으로 읽어 잰다.
+ms_order_bad() { # <파일> [규약 파일] → 창의 ms- 이름 첫 등장 차례가 선언 순서와 같으면 0, 다르면 1
+    _msod=$(dn_names "$MSS_KEY" "${2:-}")
+    _msow=$(ms_window "$1" | ms_toks | LC_ALL=C awk '!s[$0]++')
+    _msoa=$(printf '%s\n' "$_msod" | while IFS= read -r _v; do [ -n "$_v" ] && printf '%s\n' "$_msow" | LC_ALL=C grep -qxF -- "$_v" && printf '%s ' "$_v"; done)
+    _msob=$(printf '%s\n' "$_msow" | while IFS= read -r _v; do [ -n "$_v" ] && printf '%s\n' "$_msod" | LC_ALL=C grep -qxF -- "$_v" && printf '%s ' "$_v"; done)
+    [ "$_msoa" = "$_msob" ] && echo 0 || echo 1
+}
+ms_order_fixture() { # <site|decl|syn-in|syn-rev> → site: 첫 자리(release 스킬)에서 첫 두 이름을 맞바꾼 사본의 루트 · decl: 선언 줄에서만 첫 두 이름을 맞바꾼 규약 사본 ·
+    # syn-in / syn-rev: 앵커 둘 사이에 선언 이름을 선언 차례대로 / 거꾸로 든 합성 파일(읽는 대상이 픽스처뿐이라 기준선이 구조로 상수)
+    _mso1=$(dn_names "$MSS_KEY" | sed -n 1p); _mso2=$(dn_names "$MSS_KEY" | sed -n 2p)
+    case $1 in
+        site)
+            _msor="$SBX/msord-site"; mkdir -p "$_msor/skills/release" "$_msor/skills/retro" "$_msor/docs"
+            cp "$ROOT/skills/retro/SKILL.md" "$_msor/skills/retro/"; cp "$ROOT/docs/commands.md" "$_msor/docs/"
+            LC_ALL=C awk -v x="\`$_mso1\`" -v y="\`$_mso2\`" -v z='`ms-zz-swap`' '{ o = $0; gsub(x, z, o); gsub(y, x, o); gsub(z, y, o); print o }' "$ROOT/skills/release/SKILL.md" > "$_msor/skills/release/SKILL.md"
+            printf '%s' "$_msor" ;;
+        decl)
+            LC_ALL=C awk -v k="- \`$MSS_KEY\`" -v x=" $_mso1 " -v y=" $_mso2 " '{ t = $0; sub(/^[ \t]+/, "", t); if (substr(t, 1, length(k)) == k) { sub(/\r$/, ""); $0 = $0 " "; i = index($0, x); j = index($0, y); if (i > 0 && j > 0) { gsub(x, " ms-zz-swap ", $0); gsub(y, x, $0); gsub(/ ms-zz-swap /, y, $0) } sub(/ $/, "") } print }' "$CONV" > "$SBX/conv-msord-decl.md"
+            printf '%s' "$SBX/conv-msord-decl.md" ;;
+        syn-in|syn-rev)
+            _msof="$SBX/msord-$1.md"
+            { printf '%s\n' "x $MSS_A"; if [ "$1" = syn-in ]; then dn_names "$MSS_KEY"; else dn_names "$MSS_KEY" | LC_ALL=C awk '{ a[NR] = $0 } END { for (i = NR; i >= 1; i--) print a[i] }'; fi | LC_ALL=C awk -v q='`' '{ print "- " q $0 q }'; printf '%s\n' "y $MSS_B"; } > "$_msof"
+            printf '%s' "$_msof" ;;
+    esac
+}
+ms_frag_root() { # → 규약 문서 집합 사본에 조각 하나(conventions-zz-frag.md)를 더한 루트 — 조각에만 선언 밖 백틱 ms- 토큰을 심는다
+    _msfr="$SBX/msfrag"; mkdir -p "$_msfr/docs"
+    conv_files | while IFS= read -r _msff; do cp "$_msff" "$_msfr/docs/"; done
+    printf '%s\n' '# fragment' '' '- see `ms-zz-frag`' > "$_msfr/docs/conventions-zz-frag.md"
+    printf '%s' "$_msfr"
+}
+chk "O118: 본 검사 - 재서술처 셋마다 창의 ms- 이름 첫 등장 차례가 선언 순서와 같다" "$(ms_each ms_order_bad)" "0|0|0"
+# 둘째 칸(선언만 맞바꾼 규약 사본)은 실물 자리가 아니라 **차례대로 든 합성 창**에 건다 — 실물 자리를 읽으면 실물의 차례가 어긋난 트리에서
+# 통제가 본 검사와 함께 움직여 `O118`의 단독 행이 사라진다(M88 되돌림 `order-swap-site` 실측).
+chk "O119: 차례 통제 - 첫 자리에서 두 이름을 맞바꾼 사본 · 선언 쪽만 맞바꾼 규약 사본으로 읽은 차례대로 합성 창 · 차례대로 든 합성 창 · 거꾸로 든 합성 창" "$(ms_order_bad "$(ms_order_fixture site)/skills/release/SKILL.md")|$(ms_order_bad "$(ms_order_fixture syn-in)" "$(ms_order_fixture decl)")|$(ms_order_bad "$(ms_order_fixture syn-in)")|$(ms_order_bad "$(ms_order_fixture syn-rev)")" "1|1|0|1"
+chk "O120: 발견 통제 - 조각을 하나 더한 규약 디렉터리를 글롭으로 발견하면 조각에 심은 선언 밖 토큰이 하나 는다" "$(( $(ms_stray "$(conv_files "$(ms_frag_root)")") - $(ms_stray) ))" "1"
 fi
 
 # --- Part P: 완료 기준 대조 (M55) --------------------------------------------
@@ -6377,8 +6501,8 @@ fi
 # `dn_*` — 키 여럿이면 한 선언 목록으로 읽는다) · 그 넷의 `-sum`(키마다 돌린 합 — 문서 커밋 두 선언)이다. ID · 라벨 · 기대값은 손으로
 # 적던 케이스 줄과 같다(M86 impl 보고서 T02 · T03 — 옮기기 전후의 라벨 목록 대조). 케이스는 자기 파트에서만 낸다(`part_on`).
 # `cover` 행은 케이스를 내지 않고 **이 하니스가 아는 선언 키**로만 든다 — 덮음 판정(`F27`)이 규약 문서 집합에서 발견한 선언 키 집합과
-# 이 표의 키 집합을 견준다. (M87) `cover` 행의 마지막 칸은 그 키를 묻는 케이스 ID(공백으로 가른 하나 이상)이고, ID의 실재를 `F30`이 묻는다. **Part N의 선언 케이스는 이 표에 두지 않는다** — `case_ids`가 러너 소스의 케이스 줄을 읽어
-# `floor-ask-cases:` 대응을 묻기 때문이다(그 키들은 `cover` 행이다). 키는 소스의 리터럴이고 선언의 원본은 규약 줄 자체다 — 표가 정하는
+# 이 표의 키 집합을 견준다. (M87) `cover` 행의 마지막 칸은 그 키를 묻는 케이스 ID(공백으로 가른 하나 이상)이고, ID의 실재를 `F30`이 묻는다. **Part N의 선언 케이스는 이 표에 두지 않는다** — M79 때 `case_ids`가 러너 소스의 케이스 줄만 읽어
+# `floor-ask-cases:` 대응을 물었기 때문이다(그 키들은 `cover` 행이다). M88부터 `ak_case_ids`가 이 표의 케이스 행도 읽으므로 Part K(`hc-asks:`)의 선언 위생은 이 표에 둔다. 키는 소스의 리터럴이고 선언의 원본은 규약 줄 자체다 — 표가 정하는
 # 것은 「어느 키를 어느 케이스 ID로 묻는가」뿐이다.
 decl_reg() { # → 등록표 행(한 줄씩)
     cat <<'DECLREG'
@@ -6388,6 +6512,14 @@ I|I10|seps|CONV|state-neg:|state-neg 선언 줄 꼬리에 금지 구분자 0건
 I|I11|seps|CONV|state-past:|state-past 선언 줄 꼬리에 금지 구분자 0건
 I|I18|count|CONV|sep-cps:|sep-cps 선언 줄이 규약에 정확히 1개
 I|I19|count|CONV|sep-ok-cps:|sep-ok-cps 선언 줄이 규약에 정확히 1개
+K|K7|count|CONV|hc-asks:|hc-asks 선언 줄 정확히 1개
+K|K8|count|CONV|hc-ask-cases:|hc-ask-cases 선언 줄 정확히 1개
+K|K9|count|CONV|hc-ask-from:|hc-ask-from 선언 줄 정확히 1개
+K|K11|seps|CONV|hc-asks: hc-ask-cases: hc-ask-from:|공통 통제 판정 선언 세 줄 꼬리에 금지 구분자 0건
+K|K12|dup|CONV|hc-asks:|본 검사 - 공통 통제 판정 이름이 유일하다
+K|K13|def|CONV|hc-asks:|본 검사 - 판정 이름마다 정의 항목이 정확히 하나
+K|K14|orphan|CONV|hc-asks:|본 검사 - 판정 정의 항목마다 선언된 이름이 있다(고아 정의 0)
+K|K15|order|CONV|hc-asks:|본 검사 - 판정 정의 항목의 순서가 선언의 이름 순서와 같다
 L|L1|count|CONV|count-word:|count-word 선언 줄 정확히 1개
 L|L2|count|CONV|count-copula:|count-copula 선언 줄 정확히 1개
 M|M1|count|CONV|epic-status:|epic-status 선언 줄 정확히 1개

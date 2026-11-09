@@ -521,15 +521,71 @@ try {
         return 'yes'
     }
 
+    # (M88) Roster-size EXPECTATIONS are read from the number the conventions sentence carries -- a hand
+    # constant 6 / 11 in the runner makes a normal roster edit fix the conventions AND the runner to go green
+    # (rf-97 class). The number is the first "<prefix><digits><Uni 0xC885>" in the conventions body. Prefixes are
+    # three: writer roster "**phase <Uni 0xAE30,0xB85D> <Uni 0xCEE4,0xB9E8,0xB4DC> " / non-writer "**<Uni 0xB098,0xBA38,0xC9C0> " /
+    # stable "**<Uni 0xCEE4,0xB9E8,0xB4DC> ". Unreadable -> empty, and the positive control below goes red (an empty
+    # expectation equal to an empty measure must not pass -- vacuous-pass).
+    $DN_KIND     = Uni 0xC885
+    $DN_CMD      = Uni 0xCEE4,0xB9E8,0xB4DC
+    $DN_WRITER    = '**phase ' + (Uni 0xAE30,0xB85D) + ' ' + $DN_CMD + ' '
+    $DN_NONWRITER = '**' + (Uni 0xB098,0xBA38,0xC9C0) + ' '
+    $DN_STABLE    = '**' + $DN_CMD + ' '
+    function DeclN($file, $prefix) {
+        $raw = ReadUtf8 $file
+        if ($null -eq $raw) { return '' }
+        # Only the FIRST occurrence of the prefix is read -- no digits there means empty, never a slide to a later restatement.
+        foreach ($ln in ($raw -split "`r?`n")) {
+            $i = $ln.IndexOf($prefix, [System.StringComparison]::Ordinal)
+            if ($i -ge 0) {
+                $r = $ln.Substring($i + $prefix.Length)
+                $m = [regex]::Match($r, '^[0-9]+')
+                if ($m.Success -and $r.Substring($m.Length).StartsWith($DN_KIND, [System.StringComparison]::Ordinal)) { return $m.Value }
+                return ''
+            }
+        }
+        return ''
+    }
+    # grow: writer-count sentence +1 and one more name after `cycle` on that line / drop: the digits removed at
+    # EVERY occurrence of the prefix (the same prefix appears once more in a later section).
+    function DeclNFixture($mode) {
+        $out = Join-Path $sbx "conv-dn-$mode.md"
+        $w = DeclN $CONV $DN_WRITER
+        $p = $DN_WRITER + $w
+        $raw = ReadUtf8 $CONV
+        if ($mode -eq 'grow') {
+            $i = $raw.IndexOf($p, [System.StringComparison]::Ordinal)
+            if ($i -ge 0) {
+                $raw = $raw.Substring(0, $i) + $DN_WRITER + ([int]$w + 1) + $raw.Substring($i + $p.Length)
+                $j = $raw.IndexOf('`cycle`', $i, [System.StringComparison]::Ordinal)
+                if ($j -ge 0) { $raw = $raw.Substring(0, $j + 7) + (Uni 0x00B7) + '`zz-grow`' + $raw.Substring($j + 7) }
+            }
+        } else {
+            $raw = $raw.Replace($p, $DN_WRITER)
+        }
+        [System.IO.File]::WriteAllText($out, $raw, (New-Object System.Text.UTF8Encoding($false)))
+        return $out
+    }
+    $NWRITER    = DeclN $CONV $DN_WRITER
+    $NNONWRITER = DeclN $CONV $DN_NONWRITER
+    $NSTABLE    = DeclN $CONV $DN_STABLE
+
     if (PartOn 'C') {
-    Chk "C3: conventions roster holds 6 names"    (RosterCount $CONV)     6
-    Chk "C3: published page roster holds 6 names" (RosterCount $CONCEPTS) 6
+    Chk "C3: roster-size declaration extraction positive control (writer / non-writer / stable numbers read from the conventions sentences)" `
+        $(if ($NWRITER -ne '' -and $NNONWRITER -ne '' -and $NSTABLE -ne '') { 'ok' } else { 'no' }) 'ok'
+    $dnGrow = DeclNFixture 'grow'
+    $dnDrop = DeclNFixture 'drop'
+    Chk "C3: control -- a copy with one more writer name and the number +1 counts equal to the declared number; a copy with the number removed extracts nothing" `
+        ($(if ([string](RosterCount $dnGrow) -eq [string](DeclN $dnGrow $DN_WRITER)) { 'same' } else { 'diff' }) + '|' + (DeclN $dnDrop $DN_WRITER)) 'same|'
+    Chk "C3: conventions roster holds 6 names"    (RosterCount $CONV)     $NWRITER
+    Chk "C3: published page roster holds 6 names" (RosterCount $CONCEPTS) $NWRITER
     Chk "C3: the two rosters are identical" (SetsEqual (RosterSet $CONV) (RosterSet $CONCEPTS)) 'yes'
     Chk "C3: only conventions + published page enumerate" (RosterFiles) 'docs/conventions.md site/docs/concepts.md'
 
     # The non-writer half is bitten at the same width -- the conventions declaration binds both lists.
-    Chk "C3: conventions non-writer roster holds 6 names"    (NonWriterCount $CONV)     6
-    Chk "C3: published page non-writer roster holds 6 names" (NonWriterCount $CONCEPTS) 6
+    Chk "C3: conventions non-writer roster holds 6 names"    (NonWriterCount $CONV)     $NNONWRITER
+    Chk "C3: published page non-writer roster holds 6 names" (NonWriterCount $CONCEPTS) $NNONWRITER
     Chk "C3: the two non-writer rosters are identical" (SetsEqual (NonWriterSet $CONV) (NonWriterSet $CONCEPTS)) 'yes'
     Chk "C3: only conventions + published page enumerate non-writers" (NonWriterFiles) 'docs/conventions.md site/docs/concepts.md'
     Chk "C3: conventions writer/non-writer rosters are disjoint"    (RostersDisjoint $CONV)     'yes'
@@ -555,9 +611,10 @@ try {
     #   boundary and run.sh uses the same value).
     #   Needles include the CLOSING backtick so that `/tide:fleet` cannot match inside
     #   `/tide:fleet-cycle` (same reason B3 demands boundaries).
-    #   /tide:debug is NOT in the frozen set -- if it drifts into the window the count becomes 12 and
-    #   this fails. Promotion is a major-version decision, and paying for it in conventions + README +
-    #   this runner at the same time is the intended cost.
+    #   /tide:debug is NOT in the frozen set -- if it drifts into the window the count goes one above the
+    #   declared number and this fails. Promotion is a major-version decision, and paying for it in the
+    #   conventions (roster and number) + README at the same time is the intended cost (from M88 the
+    #   expectation is read from the conventions sentence, so this runner does not change).
     $STABLE_NEEDLES = @('`/tide:kickoff`','`/tide:milestone`','`/tide:impl`','`/tide:review`',
                         '`/tide:cycle`','`/tide:release`','`/tide:retro`','`/tide:status`',
                         '`/tide:fleet`','`/tide:fleet-cycle`','`/tide:fleet-verify`')
@@ -604,8 +661,8 @@ try {
     }
 
     if (PartOn 'C') {
-    Chk "C4: conventions stable roster holds 11 names" (StableCount $CONV)   11
-    Chk "C4: README stable roster holds 11 names"      (StableCount $README) 11
+    Chk "C4: conventions stable roster holds 11 names" (StableCount $CONV)   $NSTABLE
+    Chk "C4: README stable roster holds 11 names"      (StableCount $README) $NSTABLE
     Chk "C4: the two stable rosters are identical" (SetsEqual (StableSet $CONV) (StableSet $README)) 'yes'
     Chk "C4: only conventions + README enumerate the stable roster" (StableFiles) 'README.md docs/conventions.md'
     Chk "C4: stable control -- conventions has no 'phantom-stable'" (StableHas $CONV 'phantom-stable')   'no'
@@ -3358,15 +3415,18 @@ try {
     # "this judgment has this case", not how wide the case bites.
     $RUN_SH = Join-Path $ROOT 'tests/discover/run.sh'
     $RUN_PS1 = Join-Path $ROOT 'tests/discover/run.ps1'
-    function FaPairs([string]$flConv = '') {
-        return @(@(DnNames $FAC_KEY $flConv) | Where-Object { $j = $_.IndexOf('=', [System.StringComparison]::Ordinal); $j -gt 0 -and $j -lt ($_.Length - 1) })
+    # (M88) The verdicts below are NOT tied to one axis -- the Ak* bodies take the ask / case / from keys and the part letter as
+    # arguments; Fa* are thin wrappers fixing the safety-floor axis (floor-asks: / Part N). The common-control axis (hc-asks: / Part K)
+    # uses the same bodies. That Part N gives identical output before and after is recorded in the impl report ("same window").
+    function AkPairs([string]$key, [string]$akConv = '') {
+        return @(@(DnNames $key $akConv) | Where-Object { $j = $_.IndexOf('=', [System.StringComparison]::Ordinal); $j -gt 0 -and $j -lt ($_.Length - 1) })
     }
-    function FaFrom([string]$flConv = '') {
-        $t = @(DnNames $FAF_KEY $flConv) | Select-Object -First 1
-        if ($null -ne $t -and [regex]::IsMatch($t, '^N[0-9]+$')) { return [string][int]$t.Substring(1) }
+    function AkFrom([string]$key, [string]$part, [string]$akConv = '') {
+        $t = @(DnNames $key $akConv) | Select-Object -First 1
+        if ($null -ne $t -and $t.Length -gt 1 -and $t.StartsWith($part, [System.StringComparison]::Ordinal) -and [regex]::IsMatch($t.Substring(1), '^[0-9]+$')) { return [string][int]$t.Substring(1) }
         return ''
     }
-    function CaseIds([string]$path) {
+    function AkCaseIds([string]$part, [string]$path) {
         $q = [string][char]0x22
         $ws = [char[]]@([char]0x20, [char]0x09)
         $out = New-Object System.Collections.Generic.List[string]
@@ -3374,35 +3434,46 @@ try {
             $t = $ln.TrimStart($ws)
             if ($t.StartsWith('chk ' + $q, [System.StringComparison]::Ordinal) -or $t.StartsWith('Chk ' + $q, [System.StringComparison]::Ordinal)) {
                 $r = $t.Substring(5); $j = $r.IndexOf(':', [System.StringComparison]::Ordinal)
-                # An ID is N + digits with an optional lowercase suffix (this harness uses F1b / G8a forms -- M79 review blocker 1).
-                if ($j -gt 0) { $id = $r.Substring(0, $j); if ([regex]::IsMatch($id, '^N[0-9]+[a-z]*$')) { $out.Add($id) } }
+                # An ID is <part> + digits with an optional lowercase suffix (this harness uses F1b / G8a forms -- M79 review blocker 1).
+                if ($j -gt 0) { $id = $r.Substring(0, $j); if ($id.Length -gt 1 -and $id.StartsWith($part, [System.StringComparison]::Ordinal) -and [regex]::IsMatch($id.Substring(1), '^[0-9]+[a-z]*$')) { $out.Add($id) } }
+                continue
             }
+            # (M88) A declaration-registry case row (<part>|<ID>|<check>|...) is a case too -- same shape as SrcCaseIds (F29). The common-control
+            # axis gets its declaration hygiene from registry rows. Part N has no registry case rows, so the safety-floor axis is unchanged.
+            if ($t.StartsWith($part + '|', [System.StringComparison]::Ordinal) -and [regex]::IsMatch($t, '^[A-Z]\|[A-Z][0-9]+[a-z]*\|[a-z-]+\|')) { $id = ($t -split '\|')[1]; if ($id.StartsWith($part, [System.StringComparison]::Ordinal)) { $out.Add($id) } }
         }
         return $out
     }
-    function FaAskNoCase([string]$flConv = '') {
-        $mapped = OrdSet @(@(FaPairs $flConv) | ForEach-Object { FlPairName $_ })
-        return [string]@(@(DnNames $FAS_KEY $flConv) | Where-Object { -not $mapped.Contains($_) }).Count
+    function AkAskNoCase([string]$asks, [string]$cases, [string]$akConv = '') {
+        $mapped = OrdSet @(@(AkPairs $cases $akConv) | ForEach-Object { FlPairName $_ })
+        return [string]@(@(DnNames $asks $akConv) | Where-Object { -not $mapped.Contains($_) }).Count
     }
-    function FaAskUnknown([string]$flConv = '') {
-        $names = OrdSet @(DnNames $FAS_KEY $flConv)
-        return [string]@((OrdSet @(@(FaPairs $flConv) | ForEach-Object { FlPairName $_ })) | Where-Object { -not $names.Contains($_) }).Count
+    function AkAskUnknown([string]$asks, [string]$cases, [string]$akConv = '') {
+        $names = OrdSet @(DnNames $asks $akConv)
+        return [string]@((OrdSet @(@(AkPairs $cases $akConv) | ForEach-Object { FlPairName $_ })) | Where-Object { -not $names.Contains($_) }).Count
     }
-    function FaCaseMissing([string]$flConv = '', [string]$shRun = '', [string]$psRun = '') {
+    function AkCaseMissing([string]$cases, [string]$part, [string]$akConv = '', [string]$shRun = '', [string]$psRun = '') {
         if ($shRun -eq '') { $shRun = $RUN_SH }
         if ($psRun -eq '') { $psRun = $RUN_PS1 }
-        $s = OrdSet @(CaseIds $shRun); $p = OrdSet @(CaseIds $psRun)
-        return [string]@((OrdSet @(@(FaPairs $flConv) | ForEach-Object { FlPairMark $_ })) | Where-Object { -not ($s.Contains($_) -and $p.Contains($_)) }).Count
+        $s = OrdSet @(AkCaseIds $part $shRun); $p = OrdSet @(AkCaseIds $part $psRun)
+        return [string]@((OrdSet @(@(AkPairs $cases $akConv) | ForEach-Object { FlPairMark $_ })) | Where-Object { -not ($s.Contains($_) -and $p.Contains($_)) }).Count
     }
-    function FaCaseUnmapped([string]$flConv = '', [string]$shRun = '', [string]$psRun = '') {
+    function AkCaseUnmapped([string]$cases, [string]$from, [string]$part, [string]$akConv = '', [string]$shRun = '', [string]$psRun = '') {
         if ($shRun -eq '') { $shRun = $RUN_SH }
         if ($psRun -eq '') { $psRun = $RUN_PS1 }
-        $f = FaFrom $flConv
+        $f = AkFrom $from $part $akConv
         if ($f -eq '') { $f = '0' }
-        $mapped = OrdSet @(@(FaPairs $flConv) | ForEach-Object { FlPairMark $_ })
-        $all = OrdSet (@(CaseIds $shRun) + @(CaseIds $psRun))
-        return [string]@($all | Where-Object { [int]([regex]::Match($_, '^N([0-9]+)').Groups[1].Value) -ge [int]$f -and -not $mapped.Contains($_) }).Count
+        $mapped = OrdSet @(@(AkPairs $cases $akConv) | ForEach-Object { FlPairMark $_ })
+        $all = OrdSet (@(AkCaseIds $part $shRun) + @(AkCaseIds $part $psRun))
+        return [string]@($all | Where-Object { [int]([regex]::Match($_.Substring(1), '^([0-9]+)').Groups[1].Value) -ge [int]$f -and -not $mapped.Contains($_) }).Count
     }
+    function FaPairs([string]$flConv = '') { return @(AkPairs $FAC_KEY $flConv) }
+    function FaFrom([string]$flConv = '') { return (AkFrom $FAF_KEY 'N' $flConv) }
+    function CaseIds([string]$path) { return (AkCaseIds 'N' $path) }
+    function FaAskNoCase([string]$flConv = '') { return (AkAskNoCase $FAS_KEY $FAC_KEY $flConv) }
+    function FaAskUnknown([string]$flConv = '') { return (AkAskUnknown $FAS_KEY $FAC_KEY $flConv) }
+    function FaCaseMissing([string]$flConv = '', [string]$shRun = '', [string]$psRun = '') { return (AkCaseMissing $FAC_KEY 'N' $flConv $shRun $psRun) }
+    function FaCaseUnmapped([string]$flConv = '', [string]$shRun = '', [string]$psRun = '') { return (AkCaseUnmapped $FAC_KEY $FAF_KEY 'N' $flConv $shRun $psRun) }
     # Case-line control -- a synthetic runner with one commented case, one indented case, one case outside Part N and one suffixed ID.
     function FaRunnerFixture {
         $f = Join-Path $sbx 'runner-fa.txt'
@@ -3418,6 +3489,64 @@ try {
         if ($mode -eq 'ps1') { $ln = '    Chk ' + $q + 'N98b: suffixed' + $q } else { $ln = 'chk ' + $q + 'N98b: suffixed' + $q }
         [System.IO.File]::WriteAllLines($f, [string[]]@($ln), (New-Object System.Text.UTF8Encoding($false)))
         return $f
+    }
+    # (K7-K25, M88 rf-112) COMMON-CONTROL JUDGMENT NAMES AND THEIR CASES -- the "enforcement" item of the conventions section on the
+    # common controls a new harness must carry is no longer a prose list but hc-asks: / hc-ask-cases: / hc-ask-from:. Declaration hygiene
+    # (K7-K9, K11-K15) comes from registry rows, the mapping (K16-K19) calls the Ak* bodies above with Part K, and the controls
+    # (K20-K25) ask, as a DELTA, whether a verdict moves by one on a conventions copy / synthetic runner (control-reads-delta). The block
+    # has to sit after the Ak* definitions, so it is apart from the other Part K cases.
+    $HCA_KEY = 'hc-asks:'
+    $HCC_KEY = 'hc-ask-cases:'
+    $HCF_KEY = 'hc-ask-from:'
+    # addname: one more judgment name / droppair: the first pair removed from the mapping / nocase: a pair naming a missing case /
+    # unknown: a pair naming an undeclared judgment. (droppair: see the selection note below.)
+    function HcFixture([string]$mode) {
+        $f = Join-Path $sbx ('conv-hc-' + $mode + '.md')
+        $bt = [string][char]0x60
+        $ka = '- ' + $bt + $HCA_KEY + $bt; $kc = '- ' + $bt + $HCC_KEY + $bt
+        # droppair removes the FIRST PAIR WHOSE CASE APPEARS ONCE in the mapping -- removing the front pair does not move the control when
+        # that case is also on another pair (M88 reversal measurement).
+        $ps = @(AkPairs $HCC_KEY); $cnt = @{}
+        foreach ($x in $ps) { $k = FlPairMark $x; if ($cnt.ContainsKey($k)) { $cnt[$k]++ } else { $cnt[$k] = 1 } }
+        # ...and that case must exist in the sh runner -- dropping a pair naming a missing case does not move the unmapped count.
+        $ids = OrdSet @(AkCaseIds 'K' $RUN_SH)
+        $p1 = ' ' + (@($ps | Where-Object { $cnt[(FlPairMark $_)] -eq 1 -and $ids.Contains((FlPairMark $_)) }) | Select-Object -First 1); $n1 = @(DnNames $HCA_KEY) | Select-Object -First 1
+        $ws = [char[]]@([char]0x20, [char]0x09)
+        $out = foreach ($l in [System.IO.File]::ReadAllLines($CONV)) {
+            $t = $l.TrimStart($ws)
+            if ($mode -eq 'addname' -and $t.StartsWith($ka, [System.StringComparison]::Ordinal)) { $l = $l + ' hc-zz-add' }
+            if ($t.StartsWith($kc, [System.StringComparison]::Ordinal)) {
+                if ($mode -eq 'droppair') { $s = $l + ' '; $i = $s.IndexOf($p1 + ' ', [System.StringComparison]::Ordinal); if ($i -ge 0) { $s = $s.Substring(0, $i) + $s.Substring($i + $p1.Length) }; $l = $s.Substring(0, $s.Length - 1) }
+                if ($mode -eq 'nocase') { $l = $l + ' ' + $n1 + '=K999' }
+                if ($mode -eq 'unknown') { $l = $l + ' hc-zz-unknown=K1' }
+            }
+            $l
+        }
+        [System.IO.File]::WriteAllLines($f, [string[]]@($out), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    # ids: one commented, one indented, one other-part and one suffixed case / suffix-sh, suffix-ps1: one unmapped suffixed case only.
+    function HcRunnerFixture([string]$mode) {
+        $f = Join-Path $sbx ('runner-hc-' + $mode + '.txt')
+        $q = [string][char]0x22
+        if ($mode -eq 'ids') { $lines = @(('# chk ' + $q + 'K30: commented' + $q), ('    chk ' + $q + 'K99: indented' + $q), ('chk ' + $q + 'N1: other part' + $q), ('    # Chk ' + $q + 'K31: commented' + $q), ('chk ' + $q + 'K98b: suffixed' + $q), 'K|K97|count|CONV|zz:|registry row', 'N|N96|count|CONV|zz:|other-part registry row') }
+        elseif ($mode -eq 'suffix-ps1') { $lines = @('    Chk ' + $q + 'K98b: suffixed' + $q) }
+        else { $lines = @('chk ' + $q + 'K98b: suffixed' + $q) }
+        [System.IO.File]::WriteAllLines($f, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    if (PartOn 'K') {
+    Chk "K10: common-control judgment name / mapping / start-case extraction positive control" $(if (@(DnNames $HCA_KEY).Count -ge 1 -and @(AkPairs $HCC_KEY).Count -ge 1 -and (AkFrom $HCF_KEY 'K') -ne '') { 'ok' } else { 'no' }) 'ok'
+    Chk "K16: main check - every common-control judgment name has a mapped case" (AkAskNoCase $HCA_KEY $HCC_KEY) '0'
+    Chk "K17: main check - every name in the mapping is in hc-asks" (AkAskUnknown $HCA_KEY $HCC_KEY) '0'
+    Chk "K18: main check - every mapped case exists as a case line in both runners" (AkCaseMissing $HCC_KEY 'K') '0'
+    Chk "K19: main check - every case of this axis (hc-ask-from and above) is in the mapping" (AkCaseUnmapped $HCC_KEY $HCF_KEY 'K') '0'
+    Chk "K20: control - a conventions copy with one more judgment name adds one name without a case" ([string]([int](AkAskNoCase $HCA_KEY $HCC_KEY (HcFixture 'addname')) - [int](AkAskNoCase $HCA_KEY $HCC_KEY))) '1'
+    Chk "K21: control - a conventions copy with the first pair whose case appears once dropped adds one unmapped case" ([string]([int](AkCaseUnmapped $HCC_KEY $HCF_KEY 'K' (HcFixture 'droppair')) - [int](AkCaseUnmapped $HCC_KEY $HCF_KEY 'K'))) '1'
+    Chk "K22: control - a conventions copy with a pair naming a missing case adds one missing case" ([string]([int](AkCaseMissing $HCC_KEY 'K' (HcFixture 'nocase')) - [int](AkCaseMissing $HCC_KEY 'K'))) '1'
+    Chk "K23: control - two synthetic runners holding one unmapped suffixed case give one unmapped" (AkCaseUnmapped $HCC_KEY $HCF_KEY 'K' '' (HcRunnerFixture 'suffix-sh') (HcRunnerFixture 'suffix-ps1')) '1'
+    Chk "K24: control - a conventions copy with a pair naming an undeclared judgment adds one unknown name" ([string]([int](AkAskUnknown $HCA_KEY $HCC_KEY (HcFixture 'unknown')) - [int](AkAskUnknown $HCA_KEY $HCC_KEY))) '1'
+    Chk "K25: control - the case-line verdict skips comment lines and cases outside Part K (registry rows included) and reads suffixed IDs and Part K registry rows" ((@(AkCaseIds 'K' (HcRunnerFixture 'ids')) | ForEach-Object { $_ + ',' }) -join '') 'K99,K98b,K97,'
     }
     # Order control fixture -- SYNTHETIC (same reason as DnOrderFixture); 'swap' reverses only the first two definitions.
     function FlOrderFixture([string]$mode) {
@@ -4719,11 +4848,13 @@ try {
     function MsCoverEach([string]$msRoot = '', [string]$msConv = '') { return ((@(MsSites $msRoot) | ForEach-Object { MsCoverBad $_ $msConv }) -join '|') }
     function MsAnchorEach([string]$msRoot = '') { return ((@(MsSites $msRoot) | ForEach-Object { MsAnchor $_ }) -join '|') }
     # Backticked ms- tokens in the given conventions file (the whole conventions set when none) and the three sites that are not declared names.
-    function MsStray([string]$convFile = '', [string]$msRoot = '', [string]$msConv = '') {
+    # (M88) $convRoot: the root whose docs/conventions*.md set is globbed when no single file is given (the fragment discovery control O120).
+    function MsStray([string]$convFile = '', [string]$msRoot = '', [string]$msConv = '', [string]$convRoot = '') {
         $decl = OrdSet @(DnNames $MSS_KEY $msConv)
+        if ($convRoot -eq '') { $convRoot = $ROOT }
         $files = New-Object System.Collections.Generic.List[string]
         if ($convFile -ne '') { [void]$files.Add($convFile) } else {
-            $cf = @(Get-ChildItem (Join-Path $ROOT 'docs') -File -Force -ErrorAction SilentlyContinue |
+            $cf = @(Get-ChildItem (Join-Path $convRoot 'docs') -File -Force -ErrorAction SilentlyContinue |
                 Where-Object { $_.Name.StartsWith('conventions', $MS_O) -and $_.Name.EndsWith('.md', $MS_O) } | ForEach-Object { $_.FullName })
             foreach ($c in $cf) { [void]$files.Add($c) }
         }
@@ -4836,6 +4967,67 @@ try {
     Chk "O116: main check -- every ms- name in the case labels of both runner sources is declared (no runner claims an undeclared step)" (MsLabelBad) '0|0'
     $msl0 = [int](((MsLabelBad) -split '\|')[0])
     Chk "O117: transform control -- a synthetic runner with a case label naming an undeclared step adds one; a comment-line token and ms- inside a word add none" (([string]([int]((MsLabelBad (MsRunnerFixture 'relabel')) -split '\|')[0] - $msl0)) + '|' + ([string]([int]((MsLabelBad (MsRunnerFixture 'comment')) -split '\|')[0] - $msl0)) + '|' + ([string]([int]((MsLabelBad (MsRunnerFixture 'inword')) -split '\|')[0] - $msl0))) '1|0|0'
+    # (O118-O120, M88 rf-113) ORDER inside the window -- the declared order is the application order, so the order in which ms- names
+    # FIRST appear in each site window must equal the declared order (pf_order_bad shape -- only names on both sides are compared; set
+    # difference is O108's job, the verdicts stay apart). Whether a token planted in a conventions FRAGMENT is caught is measured by
+    # globbing a conventions-directory copy with one fragment added.
+    function MsOrderBad([string]$f, [string]$msConv = '') {
+        $decl = @(DnNames $MSS_KEY $msConv)
+        $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        $win = New-Object System.Collections.Generic.List[string]
+        foreach ($w in @(MsToksOfLines @((MsWindow $f) -split "`n"))) { if ($seen.Add($w)) { $win.Add($w) } }
+        $ds = OrdSet $decl
+        $a = @($decl | Where-Object { $_ -ne '' -and $seen.Contains($_) }) -join ' '
+        $b = @($win | Where-Object { $ds.Contains($_) }) -join ' '
+        if ([string]::Equals($a, $b, $MS_O)) { return '0' } else { return '1' }
+    }
+    function MsOrderEach([string]$msRoot = '', [string]$msConv = '') { return ((@(MsSites $msRoot) | ForEach-Object { MsOrderBad $_ $msConv }) -join '|') }
+    # site: a root whose first site (release skill) has the first two names swapped / decl: a conventions copy with only the declaration
+    # line's first two names swapped / syn-in, syn-rev: synthetic files holding the two anchors and the declared names in / against order.
+    function MsOrderFixture([string]$mode) {
+        $nm = @(DnNames $MSS_KEY); $x = '`' + $nm[0] + '`'; $y = '`' + $nm[1] + '`'
+        $enc = New-Object System.Text.UTF8Encoding($false)
+        if ($mode -eq 'site') {
+            $r = Join-Path $sbx 'msord-site'
+            foreach ($d in @('skills/release', 'skills/retro', 'docs')) { [void](New-Item -ItemType Directory -Force -Path (Join-Path $r $d)) }
+            Copy-Item -LiteralPath (Join-Path $ROOT 'skills/retro/SKILL.md') -Destination (Join-Path $r 'skills/retro/SKILL.md') -Force
+            Copy-Item -LiteralPath (Join-Path $ROOT 'docs/commands.md') -Destination (Join-Path $r 'docs/commands.md') -Force
+            $out = foreach ($l in [System.IO.File]::ReadAllLines((Join-Path $ROOT 'skills/release/SKILL.md'))) { $l.Replace($x, '`ms-zz-swap`').Replace($y, $x).Replace('`ms-zz-swap`', $y) }
+            [System.IO.File]::WriteAllLines((Join-Path $r 'skills/release/SKILL.md'), [string[]]@($out), $enc)
+            return $r
+        }
+        if ($mode -eq 'decl') {
+            $f = Join-Path $sbx 'conv-msord-decl.md'; $k = '- `' + $MSS_KEY + '`'
+            $out = foreach ($l in [System.IO.File]::ReadAllLines($CONV)) {
+                if ($l.TrimStart([char[]]@([char]0x20, [char]0x09)).StartsWith($k, $MS_O)) {
+                    $s = $l + ' '; $s = $s.Replace(' ' + $nm[0] + ' ', ' ms-zz-swap ').Replace(' ' + $nm[1] + ' ', ' ' + $nm[0] + ' ').Replace(' ms-zz-swap ', ' ' + $nm[1] + ' ')
+                    $s.Substring(0, $s.Length - 1)
+                } else { $l }
+            }
+            [System.IO.File]::WriteAllLines($f, [string[]]@($out), $enc)
+            return $f
+        }
+        $f = Join-Path $sbx ('msord-' + $mode + '.md')
+        $names = if ($mode -eq 'syn-in') { $nm } else { $r2 = @($nm); [array]::Reverse($r2); $r2 }
+        $lines = @('x ' + $MSS_A) + @($names | ForEach-Object { '- `' + $_ + '`' }) + @('y ' + $MSS_B)
+        [System.IO.File]::WriteAllLines($f, [string[]]$lines, $enc)
+        return $f
+    }
+    function MsFragRoot {
+        $r = Join-Path $sbx 'msfrag'; $d = Join-Path $r 'docs'
+        [void](New-Item -ItemType Directory -Force -Path $d)
+        Get-ChildItem (Join-Path $ROOT 'docs') -File -Force -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name.StartsWith('conventions', $MS_O) -and $_.Name.EndsWith('.md', $MS_O) } |
+            ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $d $_.Name) -Force }
+        [System.IO.File]::WriteAllLines((Join-Path $d 'conventions-zz-frag.md'), [string[]]@('# fragment', '', '- see `ms-zz-frag`'), (New-Object System.Text.UTF8Encoding($false)))
+        return $r
+    }
+    Chk "O118: main check -- per site the order in which ms- names first appear in the window equals the declared order" (MsOrderEach) '0|0|0'
+    # The second cell (conventions copy with only the declaration swapped) is applied to the IN-ORDER SYNTHETIC WINDOW, not the real sites -- read
+    # on the real sites the control moves with the main check on a tree whose real order is off, and O118 loses its solo row (M88 reversal
+    # row order-swap-site).
+    Chk "O119: order control -- first site with two names swapped / in-order synthetic window read with a declaration-swapped conventions copy / synthetic window in order / synthetic window reversed" ((MsOrderBad (Join-Path (MsOrderFixture 'site') 'skills/release/SKILL.md')) + '|' + (MsOrderBad (MsOrderFixture 'syn-in') (MsOrderFixture 'decl')) + '|' + (MsOrderBad (MsOrderFixture 'syn-in')) + '|' + (MsOrderBad (MsOrderFixture 'syn-rev'))) '1|1|0|1'
+    Chk "O120: discovery control -- globbing a conventions directory with one more fragment adds the undeclared token planted only in that fragment" ([string]([int](MsStray '' '' '' (MsFragRoot)) - [int](MsStray))) '1'
     }
 
     # --- Part P: completion-criteria cross-check (M55) ----------------------
@@ -7658,8 +7850,9 @@ try {
     # per key -- the two docs-commit declarations). IDs, labels and expected values equal the hand-written case lines they replace
     # (M86 impl report T02/T03 -- label lists compared before and after). Rows run only in their own part (PartOn). `cover` rows emit
     # no case; they only list a declaration key this harness knows -- the coverage check (F27) compares the key set discovered in the
-    # conventions document set with this table's key set. Part N's declaration cases are NOT in this table: CaseIds reads the runner
-    # source case lines to check the `floor-ask-cases:` mapping (those keys are `cover` rows). The keys are literals in source and the
+    # conventions document set with this table's key set. Part N's declaration cases are NOT in this table: at M79 CaseIds read only the runner
+    # source case lines to check the `floor-ask-cases:` mapping (those keys are `cover` rows). From M88 AkCaseIds also reads this table's case rows,
+    # so the Part K (`hc-asks:`) declaration hygiene lives here. The keys are literals in source and the
     # declaration's original is the conventions line itself -- the table only decides WHICH case ID asks WHICH key.
     $DECL_REG = @'
 I|I7|count|CONV|state-neg:|exactly one state-neg declaration line in the convention
@@ -7668,6 +7861,14 @@ I|I10|seps|CONV|state-neg:|no forbidden separator in the state-neg declaration t
 I|I11|seps|CONV|state-past:|no forbidden separator in the state-past declaration tail
 I|I18|count|CONV|sep-cps:|exactly one sep-cps declaration line in the convention
 I|I19|count|CONV|sep-ok-cps:|exactly one sep-ok-cps declaration line in the convention
+K|K7|count|CONV|hc-asks:|exactly one hc-asks declaration line
+K|K8|count|CONV|hc-ask-cases:|exactly one hc-ask-cases declaration line
+K|K9|count|CONV|hc-ask-from:|exactly one hc-ask-from declaration line
+K|K11|seps|CONV|hc-asks: hc-ask-cases: hc-ask-from:|no forbidden separator in the three common-control judgment declaration tails
+K|K12|dup|CONV|hc-asks:|main check - common-control judgment names are unique
+K|K13|def|CONV|hc-asks:|main check - every judgment name has exactly one definition item
+K|K14|orphan|CONV|hc-asks:|main check - every judgment definition item has a declared name (orphan definitions 0)
+K|K15|order|CONV|hc-asks:|main check - judgment definition items follow the declared name order
 L|L1|count|CONV|count-word:|exactly one count-word declaration line
 L|L2|count|CONV|count-copula:|exactly one count-copula declaration line
 M|M1|count|CONV|epic-status:|epic-status declaration line is exactly 1
