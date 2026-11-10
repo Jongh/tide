@@ -3599,6 +3599,126 @@ try {
         [System.IO.File]::WriteAllLines($f, [string[]]@($ln), (New-Object System.Text.UTF8Encoding($false)))
         return $f
     }
+    # (M90) NAME DECLARATION + SITE PAIRS: CO-PRESENCE AND STRAY CHECKS -- `retro-flow:` / `retro-flow-sites:` (Part O, O90 / O92) and
+    # `epic-flow:` / `epic-flow-sites:` (Part M, M24 / M26) share one body. It takes the keys and the token prefix as arguments; Part O's
+    # RtSiteBad / RtStray are thin wrappers pinning their keys. Part O output of both runners was byte-identical before and after the move
+    # (M90 impl report). The site names `retro` / `milestone` and their two files (SKILL.md / template.md) are the same map for both
+    # declarations (conventions section on consuming retro follow-ups).
+    function FlowSiteBad([string]$nameKey, [string]$siteKey, [string]$f = '', [string]$skRoot = '') {
+        # -> names without exactly one site pair + pair names not declared + unknown sites + site files (of the two) not carrying the backticked name.
+        if ($f -eq '') { $f = $CONV }
+        if ($skRoot -eq '') { $skRoot = $ROOT }
+        $names = @(DnNames $nameKey $f)
+        $pairs = @(DnPairs $siteKey $f)
+        $bad = 0
+        $bt = [string][char]0x60
+        foreach ($n in $names) {
+            $hit = @($pairs | Where-Object { (FlPairName $_) -ceq $n })
+            if ($hit.Count -ne 1) { $bad++; continue }
+            $site = FlPairMark $hit[0]
+            if (-not ($site -ceq 'retro' -or $site -ceq 'milestone')) { $bad++; continue }
+            foreach ($x in @('SKILL.md', 'template.md')) {
+                $p = Join-Path $skRoot ('skills/' + $site + '/' + $x)
+                if (-not (Test-Path -LiteralPath $p) -or -not ([System.IO.File]::ReadAllText($p).Contains($bt + $n + $bt))) { $bad++ }
+            }
+        }
+        $nset = OrdSet $names
+        foreach ($p in $pairs) { if (-not $nset.Contains((FlPairName $p))) { $bad++ } }
+        return [string]$bad
+    }
+    function FlowStray([string]$nameKey, [string]$prefix, [string]$f = '', [string]$skRoot = '') {
+        # -> backtick tokens starting with the prefix (the part before `=` for site pairs) in the conventions (the whole conventions set
+        #    when no file argument) and the retro / milestone skills and templates that are not declared names (distinct tokens).
+        $conv = if ($f -eq '') { $CONV } else { $f }
+        if ($skRoot -eq '') { $skRoot = $ROOT }
+        $names = OrdSet @(DnNames $nameKey $conv)
+        $files = New-Object System.Collections.Generic.List[string]
+        if ($f -ne '') { [void]$files.Add($f) } else {
+            $cf = @(Get-ChildItem (Join-Path $ROOT 'docs') -File -Force -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name.StartsWith('conventions', [System.StringComparison]::Ordinal) -and $_.Name.EndsWith('.md', [System.StringComparison]::Ordinal) } |
+                ForEach-Object { $_.FullName })
+            foreach ($c in $cf) { [void]$files.Add($c) }
+        }
+        foreach ($s in @('retro', 'milestone')) { foreach ($x in @('SKILL.md', 'template.md')) { [void]$files.Add((Join-Path $skRoot ('skills/' + $s + '/' + $x))) } }
+        $bt = [string][char]0x60
+        $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($p in $files) {
+            if (-not (Test-Path -LiteralPath $p)) { continue }
+            foreach ($ln in [System.IO.File]::ReadAllLines($p)) {
+                $s = $ln
+                while (($i = $s.IndexOf($bt + $prefix, [System.StringComparison]::Ordinal)) -ge 0) {
+                    $s = $s.Substring($i + 1)
+                    $j = $s.IndexOf($bt, [System.StringComparison]::Ordinal)
+                    if ($j -lt 0) { break }
+                    $t = $s.Substring(0, $j)
+                    $e = $t.IndexOf('=', [System.StringComparison]::Ordinal)
+                    if ($e -ge 0) { $t = $t.Substring(0, $e) }
+                    [void]$seen.Add($t)
+                    $s = $s.Substring($j + 1)
+                }
+            }
+        }
+        return [string]@($seen | Where-Object { $_ -ne '' -and -not $names.Contains($_) }).Count
+    }
+    # === Part M (M90) -- trunk emergence: test / novelty check / no fit / epic promotion =================
+    # The conventions sub-section on trunk emergence (inside the epic layer section) declares `epic-flow:` (names) and `epic-flow-sites:`
+    # (one restatement site per name). Declaration hygiene (M16-M22) comes from registry rows; here: extraction, site co-presence, stray
+    # names and their controls (M23-M28). Whether a trunk answer is right, whether the check was really done, whether a promotion is sound,
+    # whether the user really approved -- not asked (the same sub-section's "not asked" item). This block must follow the Dn* definitions,
+    # so it sits apart from the other Part M cases.
+    $EFL_KEY = 'epic-flow:'
+    $EFS_KEY = 'epic-flow-sites:'
+    function EfFixture([string]$mode) {
+        $fx = Join-Path $sbx ('conv-ef-' + $mode + '.md')
+        $bt = [string][char]0x60
+        $names = @(DnNames $EFL_KEY)
+        $nl = $names -join ' '
+        $pl = @(DnPairs $EFS_KEY | ForEach-Object { $bt + $_ + $bt })
+        $ex = ''
+        switch ($mode) {
+            'dup' { $nl = $nl + ' ' + $names[0] }
+            'nosite' { $pl = @($pl | Select-Object -Skip 1) }
+            'stray' { $ex = '  - see ' + $bt + 'ef-gone' + $bt }
+        }
+        $defs = @($names)
+        if ($mode -eq 'nodef') { $defs = @($names | Select-Object -Skip 1) }
+        if ($mode -eq 'swap' -and $names.Count -ge 2) { $defs = @($names[1], $names[0]) + @($names | Select-Object -Skip 2) }
+        $lines = @('## fixture', '', ('  - ' + $bt + $EFL_KEY + $bt + ' ' + $nl), ('  - ' + $bt + $EFS_KEY + $bt + ' ' + ($pl -join ' ')), '')
+        foreach ($d in $defs) { $lines += ('  - **' + $bt + $d + $bt + '** - x') }
+        if ($ex -ne '') { $lines += $ex }
+        [System.IO.File]::WriteAllLines($fx, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
+        return $fx
+    }
+    function EfSkillsFixture([string]$mode) {
+        # -> the root of a copy of the retro / milestone skills and templates (drop: the first declared name's backtick token is removed from its site's template).
+        $r = Join-Path $sbx ('efsk-' + $mode)
+        foreach ($s in @('retro', 'milestone')) {
+            $d = Join-Path $r ('skills/' + $s)
+            [void](New-Item -ItemType Directory -Force -Path $d)
+            foreach ($x in @('SKILL.md', 'template.md')) { Copy-Item -LiteralPath (Join-Path $ROOT ('skills/' + $s + '/' + $x)) -Destination (Join-Path $d $x) -Force }
+        }
+        if ($mode -eq 'drop') {
+            $bt = [string][char]0x60
+            $n = @(DnNames $EFL_KEY)[0]
+            $site = ''
+            foreach ($pp in @(DnPairs $EFS_KEY)) { if ((FlPairName $pp) -ceq $n) { $site = FlPairMark $pp; break } }
+            # no declaration (no name / no site) -> nothing to drop; the copy equals clean and the second slot of M25 turns red with 0 (same value in both runners)
+            if (-not ($site -ceq 'retro' -or $site -ceq 'milestone')) { return $r }
+            $p = Join-Path $r ('skills/' + $site + '/template.md')
+            $txt = [System.IO.File]::ReadAllText((Join-Path $ROOT ('skills/' + $site + '/template.md')))
+            [System.IO.File]::WriteAllText($p, $txt.Replace($bt + $n + $bt, 'zz-gone'), (New-Object System.Text.UTF8Encoding($false)))
+        }
+        return $r
+    }
+    if (PartOn 'M') {
+    Chk "M23: extraction positive-control - at least one epic-flow name and at least one epic-flow-sites pair are read" `
+        ((@($(if (@(DnNames $EFL_KEY).Count -gt 0) { 'ok' } else { 'no' }), $(if (@(DnPairs $EFS_KEY).Count -gt 0) { 'ok' } else { 'no' }))) -join '|') 'ok|ok'
+    Chk "M24: main check - every declared name has exactly one site pair and that site's skill and template carry the backticked name" (FlowSiteBad $EFL_KEY $EFS_KEY) '0'
+    Chk "M25: transform control - a synthetic conventions file without one site pair and a copy whose site template lost the name each add one" (([string]([int](FlowSiteBad $EFL_KEY $EFS_KEY (EfFixture 'nosite')) - [int](FlowSiteBad $EFL_KEY $EFS_KEY (EfFixture 'base')))) + '|' + ([string]([int](FlowSiteBad $EFL_KEY $EFS_KEY '' (EfSkillsFixture 'drop')) - [int](FlowSiteBad $EFL_KEY $EFS_KEY '' (EfSkillsFixture 'clean'))))) '1|1'
+    Chk "M26: main check - every backtick ef- token in the conventions set and the retro / milestone skills and templates is a declared name" (FlowStray $EFL_KEY 'ef-') '0'
+    Chk "M27: transform control - one undeclared ef- token is counted" ([string]([int](FlowStray $EFL_KEY 'ef-' (EfFixture 'stray')) - [int](FlowStray $EFL_KEY 'ef-' (EfFixture 'base')))) '1'
+    Chk "M28: transform control - in a synthetic conventions file a duplicated name, a removed definition and the first two definitions swapped each add one" (([string]([int](DnDup $EFL_KEY (EfFixture 'dup')) - [int](DnDup $EFL_KEY (EfFixture 'base')))) + '|' + ([string]([int](DnDefBad $EFL_KEY (EfFixture 'nodef')) - [int](DnDefBad $EFL_KEY (EfFixture 'base')))) + '|' + ([string]([int](DnDefOrder $EFL_KEY (EfFixture 'swap')) - [int](DnDefOrder $EFL_KEY (EfFixture 'base'))))) '1|1|1'
+    }
     # (K7-K25, M88 rf-112) COMMON-CONTROL JUDGMENT NAMES AND THEIR CASES -- the "enforcement" item of the conventions section on the
     # common controls a new harness must carry is no longer a prose list but hc-asks: / hc-ask-cases: / hc-ask-from:. Declaration hygiene
     # (K7-K9, K11-K15) comes from registry rows, the mapping (K16-K19) calls the Ak* bodies above with Part K, and the controls
@@ -4674,59 +4794,12 @@ try {
     }
     function RtSiteBad([string]$f = '', [string]$skRoot = '') {
         # -> names without exactly one site pair + pair names not declared + unknown sites + site files (of the two) not carrying the backticked name.
-        if ($f -eq '') { $f = $CONV }
-        if ($skRoot -eq '') { $skRoot = $ROOT }
-        $names = @(DnNames $RFL_KEY $f)
-        $pairs = @(DnPairs $RFS_KEY $f)
-        $bad = 0
-        $bt = [string][char]0x60
-        foreach ($n in $names) {
-            $hit = @($pairs | Where-Object { (FlPairName $_) -ceq $n })
-            if ($hit.Count -ne 1) { $bad++; continue }
-            $site = FlPairMark $hit[0]
-            if (-not ($site -ceq 'retro' -or $site -ceq 'milestone')) { $bad++; continue }
-            foreach ($x in @('SKILL.md', 'template.md')) {
-                $p = Join-Path $skRoot ('skills/' + $site + '/' + $x)
-                if (-not (Test-Path -LiteralPath $p) -or -not ([System.IO.File]::ReadAllText($p).Contains($bt + $n + $bt))) { $bad++ }
-            }
-        }
-        $nset = OrdSet $names
-        foreach ($p in $pairs) { if (-not $nset.Contains((FlPairName $p))) { $bad++ } }
-        return [string]$bad
+        return (FlowSiteBad $RFL_KEY $RFS_KEY $f $skRoot)   # (M90) the body is shared with Part M
     }
     function RtStray([string]$f = '', [string]$skRoot = '') {
         # -> backtick `rt-...` tokens (the part before `=` for site pairs) in the conventions (the whole conventions set when no argument)
         #    and the retro / milestone skills and templates that are not declared names (distinct tokens).
-        $conv = if ($f -eq '') { $CONV } else { $f }
-        if ($skRoot -eq '') { $skRoot = $ROOT }
-        $names = OrdSet @(DnNames $RFL_KEY $conv)
-        $files = New-Object System.Collections.Generic.List[string]
-        if ($f -ne '') { [void]$files.Add($f) } else {
-            $cf = @(Get-ChildItem (Join-Path $ROOT 'docs') -File -Force -ErrorAction SilentlyContinue |
-                Where-Object { $_.Name.StartsWith('conventions', [System.StringComparison]::Ordinal) -and $_.Name.EndsWith('.md', [System.StringComparison]::Ordinal) } |
-                ForEach-Object { $_.FullName })
-            foreach ($c in $cf) { [void]$files.Add($c) }
-        }
-        foreach ($s in @('retro', 'milestone')) { foreach ($x in @('SKILL.md', 'template.md')) { [void]$files.Add((Join-Path $skRoot ('skills/' + $s + '/' + $x))) } }
-        $bt = [string][char]0x60
-        $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
-        foreach ($p in $files) {
-            if (-not (Test-Path -LiteralPath $p)) { continue }
-            foreach ($ln in [System.IO.File]::ReadAllLines($p)) {
-                $s = $ln
-                while (($i = $s.IndexOf($bt + 'rt-', [System.StringComparison]::Ordinal)) -ge 0) {
-                    $s = $s.Substring($i + 1)
-                    $j = $s.IndexOf($bt, [System.StringComparison]::Ordinal)
-                    if ($j -lt 0) { break }
-                    $t = $s.Substring(0, $j)
-                    $e = $t.IndexOf('=', [System.StringComparison]::Ordinal)
-                    if ($e -ge 0) { $t = $t.Substring(0, $e) }
-                    [void]$seen.Add($t)
-                    $s = $s.Substring($j + 1)
-                }
-            }
-        }
-        return [string]@($seen | Where-Object { $_ -ne '' -and -not $names.Contains($_) }).Count
+        return (FlowStray $RFL_KEY 'rt-' $f $skRoot)   # (M90) the body is shared with Part M
     }
     function RtSinceNum([string]$f = '') {
         # -> the number when `retro-gate-since:` is ONE token of `rf-` + digits ('' otherwise).
@@ -8115,6 +8188,13 @@ L|L2|count|CONV|count-copula:|exactly one count-copula declaration line
 M|M1|count|CONV|epic-status:|epic-status declaration line is exactly 1
 M|M2|count|CONV|epic-since:|epic-since declaration line is exactly 1
 M|M11|count|CONV|epic-members:|epic-members declaration line is exactly 1
+M|M16|count|CONV|epic-flow:|exactly one epic-flow declaration line
+M|M17|count|CONV|epic-flow-sites:|exactly one epic-flow-sites declaration line
+M|M18|seps|CONV|epic-flow: epic-flow-sites:|no forbidden separators at the tail of the two trunk-emergence declaration lines
+M|M19|dup|CONV|epic-flow:|main check - trunk-emergence names are unique
+M|M20|def|CONV|epic-flow:|main check - exactly one definition item per name
+M|M21|orphan|CONV|epic-flow:|main check - every definition item has a declared name (0 orphans)
+M|M22|order|CONV|epic-flow:|main check - definition items follow the declared name order
 O|O1|count|CONV|retro-status:|retro-status declaration line is exactly 1
 O|O2|count|CONV|retro-block:|retro-block declaration line is exactly 1
 O|O15|count|CONV|retro-cadence:|retro-cadence declaration line is exactly 1
