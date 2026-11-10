@@ -324,7 +324,8 @@ tide는 porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴�
   기록하고 최종 보고 직전 `idle`로 되돌린다. **기록 시점은 각 커맨드의 절차가 정한다** — 전제조건을
   먼저 검사하는 커맨드는 그 검사를 통과한 뒤에 기록하므로, 검사에서 중단되면 phase가 기록되지 않는다.
   어느 커맨드가 어느 시점에 쓰는지는 **해당 SKILL이 단일 원본**이고, 규약은 그 시점 목록을 복제하지
-  않는다. **나머지 6종은 이 레포의 phase를 쓰지 않는다** —
+  않는다.
+  **나머지 6종은 이 레포의 phase를 쓰지 않는다** —
   `status`·`fleet`은 읽기 전용, `retro`는 회고 문서와(처분이 생겼을 때) 이월 원장의 처분 행만 쓰고, `fleet-verify`는 verification-only이며,
   `kickoff`는 `.gitignore` 항목만 손대고, `fleet-cycle`은 **자식 레포의** phase만 쓴다(부모·세션 레포는
   건드리지 않는다). 6종도 **대상 레포**의 phase를 쓴다 — 상위 폴더 세션이 자식 레포를 대상으로 잡으면
@@ -1346,12 +1347,13 @@ release의 시작 전 검사는 이름 선언이 든다(M84). 선언의 이름 �
   정의 순서가 선언 순서와 같다 · `retro-flow-sites:`가 선언된 이름마다 정확히 한 번 자리를 들고 그 자리의 두 파일에 그 이름이
   백틱으로 있다 · 위 네 파일과 규약 문서 집합에서 백틱으로 감싼 rt- 토큰(자리 쌍은 `=` 앞)이 전부 선언된 이름이다 · `retro-gate-since:`가 `rf-{NN}` 꼴 하나이고
   `retro-review-after:`가 양의 정수 하나다 · 최상단 회고 표에서 키 번호가 `retro-gate-since:` 이상인 `미반영` 행마다 반영 위치 셀에
-  `next:`와 `kin:`이 있다(키 번호는 숫자로 견준다) · 반영 위치 셀에 `review-due`가 있는 행의 상태가 `미반영` 또는 `미결`이다.
+  `next:`와 `kin:`이 있다(키 번호는 숫자로 견준다) · 반영 위치 셀에 `review-due`가 있는 행의 상태가 `미반영` 또는 `미결`이다 ·
+  최상단 바로 아래 회고 섹션의 후속 표에서 `미반영` · `미결`이던 행 키가 최상단 표에 모두 있다(M89 · `rf-105` — 열린 행은 지우지 않고 `처분`으로 옮겨 닫는다. 옮기는 것은 사라짐이
+  아니다). M85 리뷰가 비어 있다고 적은 통제 셋(관문의 `미반영` 필터 · 재심 표지 판정의 `미결` 수용과 `처분` 거부 · 시작 키 선언 줄)은 M89가 세웠다.
   **묻지 않는 것** — 다음 행동이 옳은가 · `kin:`이 가리킨 확인이 맞는가 · 재심 표지를 제때 달았는가 · 관측이 실제로 표 밖으로
   옮겨졌는가 · 청소 슬롯을 실제로 보였는가(프롬프트 절차) · 원장 그룹 줄이 키마다 사유를 담는가 · 위 네 파일 밖(커맨드 카탈로그 ·
-  하니스 README)의 rt- 토큰 · 대상 레포가 시작 키를 물려받지 않았는가(하니스는 이 저장소에서만 돈다). 통제가 비는 방향도 있다 —
-  관문의 `미반영` 필터를 지우는 편집 · 재심 표지 판정의 `미결` 수용과 `처분` 거부(M85 리뷰 · 하니스 README Part O). 집행은 `tests/discover` Part O다
-  (케이스 목록의 단일 선언처는 `tests/discover/README.md`).
+  하니스 README)의 rt- 토큰 · 대상 레포가 시작 키를 물려받지 않았는가(하니스는 이 저장소에서만 돈다) · 직전 섹션보다 더 아래 섹션의 열린 행
+  (회고마다 한 칸씩만 견준다). 집행은 `tests/discover` Part O다(케이스 목록의 단일 선언처는 `tests/discover/README.md`).
 
 - **마일스톤은 집은 행을 문서에 선언한다**(`retro-row-claimed`) — 위 소비자는 집은 행을 **생성 보고에
   한 줄** 적을 뿐이라 **기계가 되짚을 수 없다.** 마일스톤 문서 메타데이터에 위 행 키로 선언하고,
@@ -1360,7 +1362,8 @@ release의 시작 전 검사는 이름 선언이 든다(M84). 선언의 이름 �
   - **회고는 선언된 키의 행을 지우지 않고, 집었으나 닫지 못한 행을 `미결`로 옮긴다** — 마일스톤 문서는
     릴리즈 뒤 고치지 않으므로, 선언된 키의 행이 표에서 사라지면 위 「실재」 판정이 **영구히** 붉다. 집었다고
     선언했는데 그 사이클이 닫지 못한 행을 `미반영`으로 두면 다음 마일스톤 문서가 생길 때 stale 판정이 붉다 —
-    그 행은 시도했으나 결론이 나지 않은 것이므로 `미결`이 사실이다. 재서술처는 `skills/retro/SKILL.md`와
+    그 행은 시도했으나 결론이 나지 않은 것이므로 `미결`이 사실이다. **직전 섹션에서 `미반영` · `미결`이던 행도
+    지우지 않는다** — 닫을 때는 `처분`으로 옮기고 사유를 적는다(병합도 같다 · M89 리뷰 권장 5). 재서술처는 `skills/retro/SKILL.md`와
     `skills/retro/template.md`다(M69 리뷰 라운드 2 권장 4).
 
 - **기계가 무는 것과 사람의 영역** — 무는 것은 **두 병기어의 선언 유일성 · 위 재서술처에서의 공존 ·
@@ -1605,10 +1608,40 @@ release의 시작 전 검사는 이름 선언이 든다(M84). 선언의 이름 �
       적용 범위는 **재서술처 셋**(impl 스킬 · impl 템플릿 · release 스킬)에서만 같은 파트가 문다 —
       나머지 스킬에 축 이름이 적히는 것은 리뷰의 자리다. 케이스 내역은
       `tests/discover/README.md`의 Part W 절이 단일 선언처다.
-- **기계가 무는 것과 사람의 영역** — 무는 것은 **선언의 유일성 · 번호 집합의 일치(빠짐 0 · 유령 0) ·
-  판정 값의 집합 소속**까지다. **묻지 않는 것 셋**: ⑴ **`충족`이 사실인가** ⑵ **근거에 알맹이가
-  있는가** ⑶ **기준 자체가 방전 가능한 형태인가**(그것은 위 "마일스톤 문서" 절의 완료 기준 작성
-  규율이 따로 적는다). 셋 다 **리뷰와 사람의 자리**이며 그 이상을 주장하지 않는다.
+- **기계가 무는 것과 사람의 영역** — 무는 판정은 아래 `cc-asks:`가 이름으로 들고, 이름마다 정의 항목이 하나다(M89). 판정마다 그것을 무는
+  `tests/discover` Part P 케이스는 `cc-ask-cases:`가 `이름=케이스` 토큰으로 든다(한 이름이 여러 케이스를, 한 케이스가 여러 이름을 가질 수 있다).
+  `cc-ask-from:`은 이 축이 시작하는 케이스이고, `cc-ask-skip:`은 같은 파트에 있지만 **다른 절의 판정**인 케이스다(아래 "판정 계측" 절의 계측 줄
+  판정). 두 러너의 Part P 케이스 중 시작 번호 이상이고 제외 목록에 없는 것은 전부 어느 판정에든 대응해야 한다. 판정 선언도 다른 이름 선언과 같은
+  위생 판정을 받고, 대응 판정의 본체는 안전 바닥 절 · 공통 통제 절의 고지 대응과 같은 함수다(축의 키와 파트 표지만 인자로 다르다).
+  **묻지 않는 것 셋**: ⑴ **`충족`이 사실인가** ⑵ **근거에 알맹이가 있는가** ⑶ **기준 자체가 방전 가능한 형태인가**(그것은 위 "마일스톤 문서"
+  절의 완료 기준 작성 규율이 따로 적는다). 셋 다 **리뷰와 사람의 자리**이며 그 이상을 주장하지 않는다.
+
+    - `cc-asks:` cc-decl-unique cc-extract cc-nums-match cc-since-boundary cc-verdict-member cc-wiring cc-no-reenum cc-no-seps cc-name-unique cc-def-each cc-def-orphan cc-def-order cc-ask-has-case cc-ask-known cc-case-exists cc-case-mapped cc-skip-exists
+    - `cc-ask-cases:` cc-decl-unique=P1 cc-decl-unique=P2 cc-extract=P3 cc-nums-match=P4 cc-verdict-member=P5 cc-nums-match=P6 cc-nums-match=P7 cc-verdict-member=P8 cc-verdict-member=P9 cc-nums-match=P10 cc-since-boundary=P11 cc-verdict-member=P12 cc-wiring=P13 cc-wiring=P14 cc-no-reenum=P15 cc-nums-match=P16 cc-no-reenum=P17 cc-no-reenum=P18 cc-no-reenum=P19 cc-decl-unique=P24 cc-decl-unique=P25 cc-decl-unique=P26 cc-decl-unique=P27 cc-no-seps=P28 cc-name-unique=P29 cc-def-each=P30 cc-def-orphan=P31 cc-def-order=P32 cc-extract=P33 cc-ask-has-case=P34 cc-ask-known=P35 cc-case-exists=P36 cc-case-mapped=P37 cc-skip-exists=P38 cc-ask-has-case=P39 cc-case-mapped=P40 cc-case-exists=P41 cc-ask-known=P42 cc-case-mapped=P43 cc-case-mapped=P44 cc-case-mapped=P45 cc-skip-exists=P46
+    - `cc-ask-from:` P1
+    - `cc-ask-skip:` P20 P21 P22 P23
+
+    - **`cc-decl-unique`** — 판정 값 · 시작 번호 선언과 이 축의 판정 선언 줄이 키마다 정확히 하나다.
+    - **`cc-extract`** — 마일스톤 완료 기준 번호의 추출이 비지 않는다(추출 0건이면 FAIL — 집합 일치가 「0 == 0」으로 공허 통과하지 않게). 판정
+      선언의 이름 · 대응 · 제외 추출도 비지 않고, `cc-ask-from:`이 `P`+숫자 꼴로 읽힌다.
+    - **`cc-nums-match`** — `criteria-since:` 이상이고 impl 보고서가 있는 마일스톤마다, 마일스톤 `## 완료 기준`의 최상위 번호 집합과 impl 보고서
+      「완료 기준 대조」 표의 번호 집합이 같다(빠짐 0 · 유령 0). 창은 두 제목의 줄 전체 일치로 열리고, CRLF 사본에서도 같은 번호를 낸다.
+    - **`cc-since-boundary`** — 시작 번호가 장식이 아니다. 1로 낮추면 그 절이 없던 시절의 보고서가 대상에 들어와 어긋난다.
+    - **`cc-verdict-member`** — 표의 판정 값이 `criteria-verdict:` 집합 안에 있다. 빈 값은 집합 밖이고, 집합 안 다른 값으로 바꾸는 것은 통과한다.
+    - **`cc-wiring`** — impl 스킬이 이 절을 가리키고, impl 템플릿이 「완료 기준 대조」 제목 줄을 정확히 하나 갖는다(줄 전체 일치).
+    - **`cc-no-reenum`** — impl 스킬이 판정 값 집합을 다시 열거하지 않는다. 포함 관계에 있는 값 쌍이 파일 안에 함께 나오면 열거로 보고,
+      값 하나만 쓰는 것은 통과한다.
+    - **`cc-no-seps`** — 이 축의 판정 선언 줄 꼬리에 금지 구분자가 없다.
+    - **`cc-name-unique`** — `cc-asks:`의 이름이 유일하다.
+    - **`cc-def-each`** — 선언된 판정 이름마다 정의 항목이 정확히 하나다.
+    - **`cc-def-orphan`** — 정의 항목마다 선언된 이름이 있다.
+    - **`cc-def-order`** — 정의 항목의 순서가 선언의 이름 순서와 같다.
+    - **`cc-ask-has-case`** — 판정 이름마다 대응하는 케이스가 하나 이상이다.
+    - **`cc-ask-known`** — 대응의 이름이 전부 `cc-asks:`에 있다.
+    - **`cc-case-exists`** — 대응의 케이스가 두 러너 모두에 케이스로 있다. 케이스의 꼴은 공통 통제 절의 고지 대응과 같다.
+    - **`cc-case-mapped`** — 두 러너의 Part P 케이스 중 `cc-ask-from:` 이상이고 `cc-ask-skip:`에 없는 것(접미 ID는 숫자 부분으로 견준다)이
+      전부 대응에 있다.
+    - **`cc-skip-exists`** — 제외 목록의 케이스가 두 러너 모두에 케이스로 있다(낡은 제외가 남지 않는다).
 
 ### 검사 범위 선언
 

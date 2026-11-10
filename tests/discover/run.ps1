@@ -535,17 +535,100 @@ try {
     function DeclN($file, $prefix) {
         $raw = ReadUtf8 $file
         if ($null -eq $raw) { return '' }
-        # Only the FIRST occurrence of the prefix is read -- no digits there means empty, never a slide to a later restatement.
+        # Only the FIRST LINE whose HEAD (leading blanks and a "- " list mark stripped) starts with the prefix is read -- no digits
+        # there means empty, never a slide to a later restatement. (M89 rf-115) The same prefix in mid-line is not a source: the
+        # prefixes are plain words, so a first-occurrence read took an unrelated "<prefix><digits><kind>" in an earlier section.
+        # Restatements of the same number are asked by DeclNRepeatBad.
+        $ws = [char[]]@([char]0x20, [char]0x09)
         foreach ($ln in ($raw -split "`r?`n")) {
-            $i = $ln.IndexOf($prefix, [System.StringComparison]::Ordinal)
-            if ($i -ge 0) {
-                $r = $ln.Substring($i + $prefix.Length)
+            $t = $ln.TrimStart($ws)
+            if ($t.StartsWith('- ', [System.StringComparison]::Ordinal)) { $t = $t.Substring(2) }
+            if ($t.StartsWith($prefix, [System.StringComparison]::Ordinal)) {
+                $r = $t.Substring($prefix.Length)
                 $m = [regex]::Match($r, '^[0-9]+')
                 if ($m.Success -and $r.Substring($m.Length).StartsWith($DN_KIND, [System.StringComparison]::Ordinal)) { return $m.Value }
                 return ''
             }
         }
         return ''
+    }
+    # -> in the conventions set under <root> (default the repo), the number of "<prefix><digits><kind>" occurrences (line head
+    # or not) whose digits differ from <value>.
+    function DeclNRepeatBad($prefix, $value, $dnRoot = '') {
+        if ($dnRoot -eq '') { $dnRoot = $ROOT }
+        $c = 0
+        foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $dnRoot 'docs') -Filter 'conventions*.md' -File)) {
+            $raw = ReadUtf8 $f.FullName
+            if ($null -eq $raw) { continue }
+            $from = 0
+            while (($i = $raw.IndexOf($prefix, $from, [System.StringComparison]::Ordinal)) -ge 0) {
+                $r = $raw.Substring($i + $prefix.Length)
+                $m = [regex]::Match($r, '^[0-9]+')
+                if ($m.Success -and $r.Substring($m.Length).StartsWith($DN_KIND, [System.StringComparison]::Ordinal) -and $m.Value -cne [string]$value) { $c++ }
+                $from = $i + $prefix.Length
+            }
+        }
+        return [string]$c
+    }
+    # base: a copy of the conventions set / bump: the SECOND occurrence of the writer-count sentence gets +1 (the first line-head one stays).
+    function DeclNRepeatRoot($mode) {
+        $r = Join-Path $sbx ('dnrep-' + $mode)
+        $d = Join-Path $r 'docs'
+        [void](New-Item -ItemType Directory -Force -Path $d)
+        foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $ROOT 'docs') -Filter 'conventions*.md' -File)) { Copy-Item -LiteralPath $f.FullName -Destination (Join-Path $d $f.Name) -Force }
+        if ($mode -eq 'bump') {
+            $w = DeclN $CONV $DN_WRITER
+            $p = $DN_WRITER + $w
+            $raw = ReadUtf8 $CONV
+            $i = $raw.IndexOf($p, [System.StringComparison]::Ordinal)
+            if ($i -ge 0) { $i = $raw.IndexOf($p, $i + $p.Length, [System.StringComparison]::Ordinal) }
+            if ($i -ge 0) { $raw = $raw.Substring(0, $i) + $DN_WRITER + ([int]$w + 1) + $raw.Substring($i + $p.Length) }
+            [System.IO.File]::WriteAllText((Join-Path $d 'conventions.md'), $raw, (New-Object System.Text.UTF8Encoding($false)))
+        }
+        return $r
+    }
+    # (M89 rf-115) -> "found|bad": C3 / C4 case lines (sh and ps1 shape) whose actual-value slot is ONE roster-count helper call, and
+    # of those the lines whose expected slot is NOT the helper's own derived variable. It looks at the place that USES the derived
+    # value -- a control that only re-derives the value stayed green when a case line went back to a hand number (M88 review
+    # recommendation 2). (M89 review rec 1) "bad" is "not that variable", not "a number literal": listing literal shapes missed the
+    # quote forms outside the house style (a double-quoted "6" in ps1, a bare 6 in sh), and accepting any variable let another
+    # derived variable with the same value today pass (writer and non-writer are both 6). The variable is pinned per helper:
+    # roster -> NWRITER / non-writer -> NNONWRITER / stable -> NSTABLE.
+    function CntCaseScan([string]$path) {
+        $q = [string][char]0x22; $sq = [string][char]0x27
+        $ws = [char[]]@([char]0x20, [char]0x09)
+        $n = 0; $b = 0
+        foreach ($ln in [System.IO.File]::ReadAllLines($path)) {
+            $t = $ln.TrimStart($ws)
+            $ok = $false
+            foreach ($h in @(('chk ' + $q + 'C3:'), ('chk ' + $q + 'C4:'), ('Chk ' + $q + 'C3:'), ('Chk ' + $q + 'C4:'))) { if ($t.StartsWith($h, [System.StringComparison]::Ordinal)) { $ok = $true } }
+            if (-not $ok) { continue }
+            $r = $t.Substring(5); $j = $r.IndexOf($q, [System.StringComparison]::Ordinal); if ($j -lt 0) { continue }; $r = $r.Substring($j + 1)
+            if ($t.StartsWith('c', [System.StringComparison]::Ordinal)) {
+                $m = [regex]::Match($r, '^ +"\$\((roster|nonwriter|stable)_count "[^"]*"\)" +'); if (-not $m.Success) { continue }
+                $v = @{ 'roster' = 'NWRITER'; 'nonwriter' = 'NNONWRITER'; 'stable' = 'NSTABLE' }[$m.Groups[1].Value]
+                $bad = ($r.Substring($m.Length).TrimEnd($ws) -cne ($q + '$' + $v + $q))
+            } else {
+                $m = [regex]::Match($r, '^ +\((RosterCount|NonWriterCount|StableCount) \$[A-Za-z]+\) +'); if (-not $m.Success) { continue }
+                $v = @{ 'RosterCount' = 'NWRITER'; 'NonWriterCount' = 'NNONWRITER'; 'StableCount' = 'NSTABLE' }[$m.Groups[1].Value]
+                $bad = ($r.Substring($m.Length).TrimEnd($ws) -cne ('$' + $v))
+            }
+            $n++; if ($bad) { $b++ }
+        }
+        return ([string]$n + '|' + [string]$b)
+    }
+    # sh-lit / sh-var / ps1-lit / ps1-var -> a synthetic runner holding one count case line (lit: a number literal / var: the derived variable).
+    function CntCaseFixture([string]$mode) {
+        $f = Join-Path $sbx ('runner-cnt-' + $mode + '.txt')
+        $q = [string][char]0x22; $sq = [string][char]0x27; $d = [string][char]0x24
+        $ln = switch ($mode) {
+            'sh-lit' { 'chk ' + $q + 'C3: zz' + $q + ' ' + $q + $d + '(roster_count ' + $q + $d + 'CONV' + $q + ')' + $q + ' ' + $q + '6' + $q }
+            'sh-var' { 'chk ' + $q + 'C3: zz' + $q + ' ' + $q + $d + '(roster_count ' + $q + $d + 'CONV' + $q + ')' + $q + ' ' + $q + $d + 'NWRITER' + $q }
+            'ps1-lit' { 'Chk ' + $q + 'C3: zz' + $q + ' (RosterCount ' + $d + 'CONV) ' + $sq + '6' + $sq }
+            'ps1-var' { 'Chk ' + $q + 'C3: zz' + $q + ' (RosterCount ' + $d + 'CONV) ' + $d + 'NWRITER' }
+        }
+        [System.IO.File]::WriteAllLines($f, [string[]]@($ln), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
     }
     # grow: writer-count sentence +1 and one more name after `cycle` on that line / drop: the digits removed at
     # EVERY occurrence of the prefix (the same prefix appears once more in a later section).
@@ -561,6 +644,9 @@ try {
                 $j = $raw.IndexOf('`cycle`', $i, [System.StringComparison]::Ordinal)
                 if ($j -ge 0) { $raw = $raw.Substring(0, $j + 7) + (Uni 0x00B7) + '`zz-grow`' + $raw.Substring($j + 7) }
             }
+        } elseif ($mode -eq 'stray') {
+            # (M89) a non-writer prefix with another number in the middle of a new first line
+            $raw = 'zz ' + $DN_NONWRITER + '3' + $DN_KIND + ' zz' + "`n" + $raw
         } else {
             $raw = $raw.Replace($p, $DN_WRITER)
         }
@@ -578,6 +664,15 @@ try {
     $dnDrop = DeclNFixture 'drop'
     Chk "C3: control -- a copy with one more writer name and the number +1 counts equal to the declared number; a copy with the number removed extracts nothing" `
         ($(if ([string](RosterCount $dnGrow) -eq [string](DeclN $dnGrow $DN_WRITER)) { 'same' } else { 'diff' }) + '|' + (DeclN $dnDrop $DN_WRITER)) 'same|'
+    # (C5 / C6, M89 rf-115) ask the place that USES the derived value and the source boundary directly -- the control above only
+    # checked that the derivation is right.
+    $ccs = CntCaseScan (Join-Path $ROOT 'tests/discover/run.sh'); $ccp = CntCaseScan (Join-Path $ROOT 'tests/discover/run.ps1')
+    Chk "C5: count-case line extraction positive control -- both runners find the same non-zero number" $(if ([int]($ccs.Split('|')[0]) -gt 0 -and $ccs.Split('|')[0] -ceq $ccp.Split('|')[0]) { 'ok' } else { 'no' }) 'ok'
+    Chk "C5: main check -- every count case in both runners expects its own helper's derived variable" ([string]([int]($ccs.Split('|')[1]) + [int]($ccp.Split('|')[1]))) '0'
+    Chk "C5: control -- literal counts of synthetic runners (sh-shape literal / sh-shape variable / ps1-shape literal / ps1-shape variable)" ((@('sh-lit', 'sh-var', 'ps1-lit', 'ps1-var') | ForEach-Object { (CntCaseScan (CntCaseFixture $_)).Split('|')[1] }) -join '|') '1|0|1|0'
+    Chk "C6: main check -- every restatement of the writer / non-writer / stable numbers under the same bold prefix equals the first line-head occurrence" ([string]([int](DeclNRepeatBad $DN_WRITER $NWRITER) + [int](DeclNRepeatBad $DN_NONWRITER $NNONWRITER) + [int](DeclNRepeatBad $DN_STABLE $NSTABLE))) '0'
+    Chk "C6: control -- a copy with another number planted mid-line keeps the derived value; a copy bumping only the second writer-count occurrence adds one" `
+        ($(if ([string](DeclN (DeclNFixture 'stray') $DN_NONWRITER) -ceq [string]$NNONWRITER) { 'same' } else { 'diff' }) + '|' + [string]([int](DeclNRepeatBad $DN_WRITER $NWRITER (DeclNRepeatRoot 'bump')) - [int](DeclNRepeatBad $DN_WRITER $NWRITER (DeclNRepeatRoot 'base')))) 'same|1'
     Chk "C3: conventions roster holds 6 names"    (RosterCount $CONV)     $NWRITER
     Chk "C3: published page roster holds 6 names" (RosterCount $CONCEPTS) $NWRITER
     Chk "C3: the two rosters are identical" (SetsEqual (RosterSet $CONV) (RosterSet $CONCEPTS)) 'yes'
@@ -3458,14 +3553,28 @@ try {
         $s = OrdSet @(AkCaseIds $part $shRun); $p = OrdSet @(AkCaseIds $part $psRun)
         return [string]@((OrdSet @(@(AkPairs $cases $akConv) | ForEach-Object { FlPairMark $_ })) | Where-Object { -not ($s.Contains($_) -and $p.Contains($_)) }).Count
     }
-    function AkCaseUnmapped([string]$cases, [string]$from, [string]$part, [string]$akConv = '', [string]$shRun = '', [string]$psRun = '') {
+    # (M89 rf-114) <skip> names a declaration of cases that sit in the same part but belong to ANOTHER section's verdict
+    # (cc-ask-skip: on the completion-criteria axis). An empty skip key means no skip -- AkCaseUnmapped is that shape, and Part N / K
+    # give the same values as before the widening (the impl report's "same window" comparison).
+    function AkCaseUnmappedX([string]$cases, [string]$from, [string]$skip, [string]$part, [string]$akConv = '', [string]$shRun = '', [string]$psRun = '') {
         if ($shRun -eq '') { $shRun = $RUN_SH }
         if ($psRun -eq '') { $psRun = $RUN_PS1 }
         $f = AkFrom $from $part $akConv
         if ($f -eq '') { $f = '0' }
         $mapped = OrdSet @(@(AkPairs $cases $akConv) | ForEach-Object { FlPairMark $_ })
+        $skipped = OrdSet @(if ($skip -ne '') { DnNames $skip $akConv })
         $all = OrdSet (@(AkCaseIds $part $shRun) + @(AkCaseIds $part $psRun))
-        return [string]@($all | Where-Object { [int]([regex]::Match($_.Substring(1), '^([0-9]+)').Groups[1].Value) -ge [int]$f -and -not $mapped.Contains($_) }).Count
+        return [string]@($all | Where-Object { [int]([regex]::Match($_.Substring(1), '^([0-9]+)').Groups[1].Value) -ge [int]$f -and -not $mapped.Contains($_) -and -not $skipped.Contains($_) }).Count
+    }
+    function AkCaseUnmapped([string]$cases, [string]$from, [string]$part, [string]$akConv = '', [string]$shRun = '', [string]$psRun = '') {
+        return (AkCaseUnmappedX $cases $from '' $part $akConv $shRun $psRun)
+    }
+    # -> the number of cases in the skip declaration missing as a case from either runner (counted as distinct cases).
+    function AkSkipMissing([string]$skip, [string]$part, [string]$akConv = '', [string]$shRun = '', [string]$psRun = '') {
+        if ($shRun -eq '') { $shRun = $RUN_SH }
+        if ($psRun -eq '') { $psRun = $RUN_PS1 }
+        $s = OrdSet @(AkCaseIds $part $shRun); $p = OrdSet @(AkCaseIds $part $psRun)
+        return [string]@((OrdSet @(DnNames $skip $akConv)) | Where-Object { -not ($s.Contains($_) -and $p.Contains($_)) }).Count
     }
     function FaPairs([string]$flConv = '') { return @(AkPairs $FAC_KEY $flConv) }
     function FaFrom([string]$flConv = '') { return (AkFrom $FAF_KEY 'N' $flConv) }
@@ -4557,6 +4666,7 @@ try {
     $RGS_KEY = 'retro-gate-since:'
     $RRA_KEY = 'retro-review-after:'
     $rPend = if ($rStatSet.Count -gt 2) { $rStatSet[2] } else { '' }
+    $rDisp = if ($rStatSet.Count -gt 3) { $rStatSet[3] } else { '' }   # (M89) the fourth status value -- used by the review-mark control (O122)
     function RtDecl([string]$f = '') {
         if ($f -eq '') { $f = $CONV }
         return ((DeclCount $f $RFL_KEY) + (DeclCount $f $RFS_KEY) + (DeclCount $f $RGS_KEY) + (DeclCount $f $RRA_KEY) + '|' +
@@ -4709,8 +4819,10 @@ try {
         if ($mode -eq 'nodef') { $defs = @($names | Select-Object -Skip 1) }
         if ($mode -eq 'swap' -and $names.Count -ge 2) { $defs = @($names[1], $names[0]) + @($names | Select-Object -Skip 2) }
         $raLine = if ($mode -eq 'noafter') { '  - zz' } else { '  - ' + $bt + $RRA_KEY + $bt + ' ' + $after }
+        # (M89) nosince: the start-key declaration line removed
+        $gsLine = if ($mode -eq 'nosince') { '  - zz' } else { '  - ' + $bt + $RGS_KEY + $bt + ' ' + $since }
         $lines = @('## fixture', '', ('  - ' + $bt + $RFL_KEY + $bt + ' ' + $nl), ('  - ' + $bt + $RFS_KEY + $bt + ' ' + ($pl -join ' ')),
-            ('  - ' + $bt + $RGS_KEY + $bt + ' ' + $since), $raLine, '')
+            $gsLine, $raLine, '')
         foreach ($d in $defs) { $lines += ('  - **' + $bt + $d + $bt + '** - x') }
         if ($ex -ne '') { $lines += $ex }
         [System.IO.File]::WriteAllLines($fx, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
@@ -4749,6 +4861,11 @@ try {
             'revopen' { '| ' + $bt + 'rf-0' + $bt + ' **zz** | zz | **' + $rUndone + '** | zz review-due |' }
             'revquoted' { '| ' + $bt + 'rf-0' + $bt + ' **zz** | zz | **' + $rFirst + '** | zz ' + $bt + 'review-due' + $bt + ' zz |' }
             'revitem' { '| ' + $bt + 'rf-0' + $bt + ' **zz review-due** | zz | **' + $rFirst + '** | zz |' }
+            # (M89) the gate applies to open rows only; the review mark accepts pending rows and refuses disposed rows
+            'donegate' { '| ' + $bt + 'rf-' + $s + $bt + ' **zz** | zz | **' + $rFirst + '** | zz |' }
+            'pendgate' { '| ' + $bt + 'rf-' + $s + $bt + ' **zz** | zz | **' + $rPend + '** | zz |' }
+            'revpend' { '| ' + $bt + 'rf-0' + $bt + ' **zz** | zz | **' + $rPend + '** | zz review-due |' }
+            'revdisp' { '| ' + $bt + 'rf-0' + $bt + ' **zz** | zz | **' + $rDisp + '** | zz review-due |' }
         }
         $src = [System.IO.File]::ReadAllLines($RETRO)
         $out = New-Object System.Collections.Generic.List[string]
@@ -5028,6 +5145,69 @@ try {
     # row order-swap-site).
     Chk "O119: order control -- first site with two names swapped / in-order synthetic window read with a declaration-swapped conventions copy / synthetic window in order / synthetic window reversed" ((MsOrderBad (Join-Path (MsOrderFixture 'site') 'skills/release/SKILL.md')) + '|' + (MsOrderBad (MsOrderFixture 'syn-in') (MsOrderFixture 'decl')) + '|' + (MsOrderBad (MsOrderFixture 'syn-in')) + '|' + (MsOrderBad (MsOrderFixture 'syn-rev'))) '1|1|0|1'
     Chk "O120: discovery control -- globbing a conventions directory with one more fragment adds the undeclared token planted only in that fragment" ([string]([int](MsStray '' '' '' (MsFragRoot)) - [int](MsStray))) '1'
+    # (O121-O123, M89 rf-105) THE MISSING CONTROLS OF THE M85 RETRO VERDICTS -- the gate applies to open rows only (a done or pending
+    # row without marks adds nothing), the review mark accepts pending rows and refuses disposed rows, and the value verdict goes red
+    # without the start-key declaration line. A copy with that line doubled is caught by the registry's declaration-count row.
+    Chk "O121: gate control -- a done row and a pending row without marks add nothing to the gate verdict" (([string]([int](RtGateBad (RtRetroFixture 'donegate')) - $rtg0)) + '|' + ([string]([int](RtGateBad (RtRetroFixture 'pendgate')) - $rtg0))) '0|0'
+    Chk "O122: review control -- a bare review-due on a pending row adds none; on a disposed row adds one" (([string]([int](RtReviewBad (RtRetroFixture 'revpend')) - $rtv0)) + '|' + ([string]([int](RtReviewBad (RtRetroFixture 'revdisp')) - $rtv0))) '0|1'
+    Chk "O123: start-key control -- a synthetic conventions file without the start-key declaration line adds one to the value verdict" ([string]([int](RtValuesBad (RtFixture 'nosince')) - [int](RtValuesBad (RtFixture 'base')))) '1'
+    # (O124-O126, M89 rf-105) AN OPEN ROW OF THE PREVIOUS SECTION DOES NOT VANISH FROM THE TOP TABLE -- collect the row keys whose
+    # status is open or pending in the follow-up table of the section right below the top one ("## " heading two up to three), and ask
+    # that the top table (marker window) has them all. Moving a row to disposed is not vanishing (the row stays). The previous table is
+    # outside the markers, so a row is told by its key shape (the first backtick span at the head of the item cell is rf- + digits).
+    function RtPrevRows([string]$path = '') {
+        if ($path -eq '') { $path = $RETRO }
+        $out = New-Object System.Collections.Generic.List[string]
+        $s = 0
+        foreach ($l in [System.IO.File]::ReadAllLines($path)) {
+            if ($l.StartsWith('## ', [System.StringComparison]::Ordinal)) { $s++; continue }
+            if ($s -ne 2 -or -not $l.StartsWith('|', [System.StringComparison]::Ordinal)) { continue }
+            $fl = $l -split '\|'
+            if ($fl.Count -lt 5) { continue }
+            $a = $fl[1].Split([char]96)
+            if ($a.Count -lt 3 -or -not ($a[1] -cmatch '^rf-[0-9]+$')) { continue }
+            $v = $fl[3].Replace([string][char]13, '').Replace('*', '').Replace(' ', '')
+            $pp = $v.IndexOf('(', [System.StringComparison]::Ordinal)
+            if ($pp -ge 0) { $v = $v.Substring(0, $pp) }
+            $out.Add($a[1] + ' ' + $v)
+        }
+        return $out
+    }
+    function RtPrevOpen([string]$path = '') {
+        return @(@(RtPrevRows $path) | Where-Object { $v = $_.Split(' ')[1]; $v -ceq $rUndone -or $v -ceq $rPend } | ForEach-Object { $_.Split(' ')[0] })
+    }
+    function RtOpenLost([string]$path = '') {
+        if ($path -eq '') { $path = $RETRO }
+        $top = OrdSet @(RetroKeys $path)
+        return [string]@((OrdSet @(RtPrevOpen $path)) | Where-Object { -not $top.Contains($_) }).Count
+    }
+    # drop: the top row of the first open key of the previous section removed / dispose: that row moved to disposed /
+    # dropdone: the top row of the first key that was done in the previous section removed.
+    function RtLostFixture([string]$mode) {
+        $fx = Join-Path $sbx ('retro-lost-' + $mode + '.md')
+        $k = if ($mode -eq 'dropdone') { @(@(RtPrevRows) | Where-Object { $_.Split(' ')[1] -ceq $rFirst } | ForEach-Object { $_.Split(' ')[0] }) | Select-Object -First 1 } else { @(RtPrevOpen) | Select-Object -First 1 }
+        $inb = $false
+        $out = foreach ($l in [System.IO.File]::ReadAllLines($RETRO)) {
+            if ($l.Contains('<!-- ' + $rBlk + ':start -->')) { $inb = $true; $l; continue }
+            if ($l.Contains('<!-- ' + $rBlk + ':end -->')) { $inb = $false; $l; continue }
+            if ($inb -and $null -ne $k -and $l.StartsWith('|', [System.StringComparison]::Ordinal)) {
+                $fl = $l -split '\|'
+                $a = $fl[1].Split([char]96)
+                if ($a.Count -ge 3 -and $a[1] -ceq $k) {
+                    if ($mode -ne 'dispose') { continue }
+                    $fl[3] = ' **' + $rDisp + '** '
+                    $fl -join '|'
+                    continue
+                }
+            }
+            $l
+        }
+        [System.IO.File]::WriteAllLines($fx, [string[]]@($out), (New-Object System.Text.UTF8Encoding($false)))
+        return $fx
+    }
+    Chk "O124: previous-section open-row extraction positive-control (>0)" $(if (@(RtPrevOpen).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "O125: main check -- no open row of the previous section vanished from the top table" (RtOpenLost) '0'
+    Chk "O126: vanish control -- an open row removed 1 / that row moved to disposed 0 / a row that was done before removed 0" (([string]([int](RtOpenLost (RtLostFixture 'drop')) - [int](RtOpenLost))) + '|' + ([string]([int](RtOpenLost (RtLostFixture 'dispose')) - [int](RtOpenLost))) + '|' + ([string]([int](RtOpenLost (RtLostFixture 'dropdone')) - [int](RtOpenLost)))) '1|0|0'
     }
 
     # --- Part P: completion-criteria cross-check (M55) ----------------------
@@ -5415,6 +5595,67 @@ try {
     Chk "P21: metrics slots and target reports extract (positive-control)" $(if ([int](MeasSlots) -ge 1 -and @(MeasReports).Count -ge 1) { 'ok' } else { 'no' }) 'ok'
     Chk "P22: main check -- the metrics line values of review reports at or above the declared number are not empty" (MeasBadTotal) '0'
     Chk "P23: fixture control -- blanking one metrics value in a copy moves the check by one" ([string]([int](MeasLineBad (MeasFixture 'blank')) - [int](MeasLineBad (MeasFixture 'intact')))) '1'
+    # (P24-P46, M89 rf-114) COMPLETION-CRITERIA JUDGMENT NAMES AND THEIR CASES -- the "what the machine checks" item of the conventions
+    # section on completion-criteria matching is no longer prose but cc-asks: / cc-ask-cases: / cc-ask-from: / cc-ask-skip:. Declaration
+    # hygiene (P24-P32) comes from registry rows, the mapping (P34-P38) calls the Ak* bodies with Part P. The skip declaration holds the
+    # cases of the same part that belong to the metrics section (P20-P23). The controls (P39-P46) ask, as a DELTA, whether a verdict moves
+    # by one on a conventions copy / synthetic runner (control-reads-delta).
+    $CCA_KEY = 'cc-asks:'
+    $CCC_KEY = 'cc-ask-cases:'
+    $CCF_KEY = 'cc-ask-from:'
+    $CCS_KEY = 'cc-ask-skip:'
+    # addname / droppair / nocase / unknown as in HcFixture; noskip: the skip declaration line removed; ghostskip: one case not in either runner added to the skip.
+    function CcFixture([string]$mode) {
+        $f = Join-Path $sbx ('conv-cc-' + $mode + '.md')
+        $bt = [string][char]0x60
+        $ka = '- ' + $bt + $CCA_KEY + $bt; $kc = '- ' + $bt + $CCC_KEY + $bt; $ks = '- ' + $bt + $CCS_KEY + $bt
+        $ps = @(AkPairs $CCC_KEY); $cnt = @{}
+        foreach ($x in $ps) { $k = FlPairMark $x; if ($cnt.ContainsKey($k)) { $cnt[$k]++ } else { $cnt[$k] = 1 } }
+        $ids = OrdSet @(AkCaseIds 'P' $RUN_SH)
+        $p1 = ' ' + (@($ps | Where-Object { $cnt[(FlPairMark $_)] -eq 1 -and $ids.Contains((FlPairMark $_)) }) | Select-Object -First 1); $n1 = @(DnNames $CCA_KEY) | Select-Object -First 1
+        $ws = [char[]]@([char]0x20, [char]0x09)
+        $out = foreach ($l in [System.IO.File]::ReadAllLines($CONV)) {
+            $t = $l.TrimStart($ws)
+            if ($mode -eq 'addname' -and $t.StartsWith($ka, [System.StringComparison]::Ordinal)) { $l = $l + ' cc-zz-add' }
+            if ($t.StartsWith($ks, [System.StringComparison]::Ordinal)) { if ($mode -eq 'noskip') { continue }; if ($mode -eq 'ghostskip') { $l = $l + ' P999' } }
+            if ($t.StartsWith($kc, [System.StringComparison]::Ordinal)) {
+                if ($mode -eq 'droppair') { $s = $l + ' '; $i = $s.IndexOf($p1 + ' ', [System.StringComparison]::Ordinal); if ($i -ge 0) { $s = $s.Substring(0, $i) + $s.Substring($i + $p1.Length) }; $l = $s.Substring(0, $s.Length - 1) }
+                if ($mode -eq 'nocase') { $l = $l + ' ' + $n1 + '=P999' }
+                if ($mode -eq 'unknown') { $l = $l + ' cc-zz-unknown=P3' }
+            }
+            $l
+        }
+        [System.IO.File]::WriteAllLines($f, [string[]]@($out), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    # in-sh / in-ps1: one in-range unmapped suffixed case / skip-sh / skip-ps1: the first case of the skip declaration.
+    function CcRunnerFixture([string]$mode) {
+        $f = Join-Path $sbx ('runner-cc-' + $mode + '.txt')
+        $q = [string][char]0x22
+        $sk = @(DnNames $CCS_KEY) | Select-Object -First 1
+        $ln = switch ($mode) {
+            'in-sh' { 'chk ' + $q + 'P7b: suffixed' + $q }
+            'in-ps1' { '    Chk ' + $q + 'P7b: suffixed' + $q }
+            'skip-sh' { 'chk ' + $q + $sk + ': skipped' + $q }
+            'skip-ps1' { '    Chk ' + $q + $sk + ': skipped' + $q }
+        }
+        [System.IO.File]::WriteAllLines($f, [string[]]@($ln), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    Chk "P33: completion-criteria judgment name / mapping / start-case / skip extraction positive control" $(if (@(DnNames $CCA_KEY).Count -ge 1 -and @(AkPairs $CCC_KEY).Count -ge 1 -and (AkFrom $CCF_KEY 'P') -ne '' -and @(DnNames $CCS_KEY).Count -ge 1) { 'ok' } else { 'no' }) 'ok'
+    Chk "P34: main check - every completion-criteria judgment name has a mapped case" (AkAskNoCase $CCA_KEY $CCC_KEY) '0'
+    Chk "P35: main check - every name in the mapping is in cc-asks" (AkAskUnknown $CCA_KEY $CCC_KEY) '0'
+    Chk "P36: main check - every mapped case exists as a case in both runners" (AkCaseMissing $CCC_KEY 'P') '0'
+    Chk "P37: main check - every case of this axis (cc-ask-from and above, outside cc-ask-skip) is in the mapping" (AkCaseUnmappedX $CCC_KEY $CCF_KEY $CCS_KEY 'P') '0'
+    Chk "P38: main check - every case in the skip declaration exists as a case in both runners" (AkSkipMissing $CCS_KEY 'P') '0'
+    Chk "P39: control - a conventions copy with one more judgment name adds one name without a case" ([string]([int](AkAskNoCase $CCA_KEY $CCC_KEY (CcFixture 'addname')) - [int](AkAskNoCase $CCA_KEY $CCC_KEY))) '1'
+    Chk "P40: control - a conventions copy with the first pair whose case appears once dropped adds one unmapped case" ([string]([int](AkCaseUnmappedX $CCC_KEY $CCF_KEY $CCS_KEY 'P' (CcFixture 'droppair')) - [int](AkCaseUnmappedX $CCC_KEY $CCF_KEY $CCS_KEY 'P'))) '1'
+    Chk "P41: control - a conventions copy with a pair naming a missing case adds one missing case" ([string]([int](AkCaseMissing $CCC_KEY 'P' (CcFixture 'nocase')) - [int](AkCaseMissing $CCC_KEY 'P'))) '1'
+    Chk "P42: control - a conventions copy with a pair naming an undeclared judgment adds one unknown name" ([string]([int](AkAskUnknown $CCA_KEY $CCC_KEY (CcFixture 'unknown')) - [int](AkAskUnknown $CCA_KEY $CCC_KEY))) '1'
+    Chk "P43: control - two synthetic runners holding one in-range unmapped suffixed case give one unmapped" (AkCaseUnmappedX $CCC_KEY $CCF_KEY $CCS_KEY 'P' '' (CcRunnerFixture 'in-sh') (CcRunnerFixture 'in-ps1')) '1'
+    Chk "P44: control - two synthetic runners holding one skipped case give zero unmapped" (AkCaseUnmappedX $CCC_KEY $CCF_KEY $CCS_KEY 'P' '' (CcRunnerFixture 'skip-sh') (CcRunnerFixture 'skip-ps1')) '0'
+    Chk "P45: control - a conventions copy without the skip declaration line adds unmapped cases (>0)" $(if (([int](AkCaseUnmappedX $CCC_KEY $CCF_KEY $CCS_KEY 'P' (CcFixture 'noskip')) - [int](AkCaseUnmappedX $CCC_KEY $CCF_KEY $CCS_KEY 'P')) -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "P46: control - a conventions copy adding a case to the skip that no runner has adds one missing skip" ([string]([int](AkSkipMissing $CCS_KEY 'P' (CcFixture 'ghostskip')) - [int](AkSkipMissing $CCS_KEY 'P'))) '1'
     }
 
     # --- Part Q: the verdict comparison is pinned to Ordinal (M57) ------------
@@ -7900,6 +8141,15 @@ O|O105|order|CONV|mark-since-steps:|main check -- step definition order equals d
 P|P1|count|CONV|criteria-verdict:|criteria-verdict declaration line is exactly 1
 P|P2|count|CONV|criteria-since:|criteria-since declaration line is exactly 1
 P|P20|count|CONV|metrics-filled-since:|exactly one metrics-filled-since declaration line
+P|P24|count|CONV|cc-asks:|exactly one cc-asks declaration line
+P|P25|count|CONV|cc-ask-cases:|exactly one cc-ask-cases declaration line
+P|P26|count|CONV|cc-ask-from:|exactly one cc-ask-from declaration line
+P|P27|count|CONV|cc-ask-skip:|exactly one cc-ask-skip declaration line
+P|P28|seps|CONV|cc-asks: cc-ask-cases: cc-ask-from: cc-ask-skip:|no forbidden separators at the tail of the four completion-criteria judgment declaration lines
+P|P29|dup|CONV|cc-asks:|main check - completion-criteria judgment names are unique
+P|P30|def|CONV|cc-asks:|main check - exactly one definition item per judgment name
+P|P31|orphan|CONV|cc-asks:|main check - every judgment definition item has a declared name (0 orphans)
+P|P32|order|CONV|cc-asks:|main check - judgment definition items follow the declared name order
 R|R1|count|CONV|coverage-bookkeeping:|coverage-bookkeeping declaration line is exactly 1
 S|S1|count|CONV_REL|push-availability:|push-availability declaration line is exactly 1
 S|S2|count|CONV_REL|terminal-state:|terminal-state declaration line is exactly 1
