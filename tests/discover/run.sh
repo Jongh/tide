@@ -3098,11 +3098,11 @@ ak_from() { # <시작 키> <파트> [규약 파일] → 시작 선언의 첫 토
     dn_names "$1" "${3:-}" | head -1 | LC_ALL=C awk -v p="$2" '{ if (substr($0, 1, 1) == p && substr($0, 2) ~ /^[0-9]+$/) print substr($0, 2) + 0 }'
 }
 ak_case_ids() { # <파트> <러너 파일> → 그 파트 케이스 줄의 ID 한 줄씩(공백을 벗긴 문면이 `chk "<파트>…:` 또는 `Chk "<파트>…:`로 시작 · 주석 줄 제외 ·
-    # ID는 <파트>+숫자에 소문자 접미가 붙을 수 있다 — 이 하니스는 `F1b` · `G8a` 꼴을 쓴다. M79 리뷰 차단 1)
+    # ID는 <파트>+숫자에 소문자 접미가 붙을 수 있다 — 이 하니스는 `F1b` · `G8a` 꼴을 쓴다. M79 리뷰 차단 1. (M91) 접미 뒤 숫자 꼬리도 받는다 — `G8b0`)
     # (M88) 선언 판정 등록표의 케이스 행(`<파트>|<ID>|<판정>|…`)도 케이스로 센다 — `src_case_ids`(F29)와 같은 꼴이다. 공통 통제 축의 선언 위생은
     # 등록표 행이 내기 때문이다. Part N에는 등록표 케이스 행이 없어 안전 바닥 축의 값은 그대로다(impl 보고서의 「같은 창」 대조).
     LC_ALL=C awk -v q='"' -v p="$1" '{ sub(/\r$/, ""); t = $0; sub(/^[ \t]+/, "", t)
-        if (substr(t, 1, 5) == "chk " q || substr(t, 1, 5) == "Chk " q) { r = substr(t, 6); j = index(r, ":"); if (j > 1) { id = substr(r, 1, j - 1); if (substr(id, 1, 1) == p && substr(id, 2) ~ /^[0-9]+[a-z]*$/) print id }; next }
+        if (substr(t, 1, 5) == "chk " q || substr(t, 1, 5) == "Chk " q) { r = substr(t, 6); j = index(r, ":"); if (j > 1) { id = substr(r, 1, j - 1); if (substr(id, 1, 1) == p && substr(id, 2) ~ /^[0-9]+[a-z]*[0-9]*$/) print id }; next }
         if (substr(t, 1, 2) == p "|" && t ~ /^[A-Z][|][A-Z][0-9]+[a-z]*[|][a-z-]+[|]/) { split(t, f, "|"); if (substr(f[2], 1, 1) == p) print f[2] } }' "$2"
 }
 ak_ask_nocase() { # <고지 키> <대응 키> [규약 파일] → 대응하는 케이스가 하나도 없는 고지 이름의 수
@@ -4434,20 +4434,46 @@ rt_open_lost() { # [retro 경로] → 직전 섹션의 열린 행 키 중 최상
         printf '%s\n' "$_rtok" | LC_ALL=C grep -qxF -- "$_rtk" || _rtol=$((_rtol + 1))
     done; echo "$_rtol"; }
 }
-rt_lost_fixture() { # <drop|dispose|dropdone> → 회고 사본(drop: 직전 섹션 첫 열린 키의 최상단 행을 지움 · dispose: 그 행의 상태를 처분으로 · dropdone: 직전 섹션에서 반영이던 첫 키의 최상단 행을 지움)
-    _rtlf="$SBX/retro-lost-$1.md"
-    if [ "$1" = dropdone ]; then _rtlk=$(rt_prev_rows | LC_ALL=C awk -v d="$RFIRST" '$2 == d { print $1; exit }'); else _rtlk=$(rt_prev_open | head -1); fi
+rt_lost_fixture() { # <drop|dispose|dropdone> [원본 회고] → 회고 사본(drop: 직전 섹션 첫 열린 키의 최상단 행을 지움 · dispose: 그 행의 상태를 처분으로 · dropdone: 직전 섹션에서 반영이던 첫 키의 최상단 행을 지움)
+    _rtlf="$SBX/retro-lost-$1.md"; _rtls="${2:-$RETRO}"
+    if [ "$1" = dropdone ]; then _rtlk=$(rt_prev_rows "$_rtls" | LC_ALL=C awk -v d="$RFIRST" '$2 == d { print $1; exit }'); else _rtlk=$(rt_prev_open "$_rtls" | head -1); fi
     LC_ALL=C awk -v mk="$RBLK" -v q='`' -v k="$_rtlk" -v m="$1" -v dp="$RDISP" '
         index($0, "<!-- " mk ":start -->") > 0 { inb = 1; print; next }
         index($0, "<!-- " mk ":end -->") > 0 { inb = 0; print; next }
         inb && substr($0, 1, 1) == "|" && k != "" { n = split($0, f, "|"); split(f[2], a, q)
             if (a[2] == k) { if (m != "dispose") next; f[4] = " **" dp "** "; o = f[1]; for (i = 2; i <= n; i++) o = o "|" f[i]; print o; next } }
-        { print }' "$RETRO" > "$_rtlf"
+        { print }' "$_rtls" > "$_rtlf"
     printf '%s' "$_rtlf"
 }
-chk "O124: 직전 섹션 열린 행 추출 positive-control(>0)" "$([ "$(rt_prev_open | grep -c .)" -gt 0 ] && echo ok || echo no)" "ok"
+# (M91 · `rf-117`) 소실 통제의 기준 — 섹션이 둘 이상이면 원본 그대로, 하나뿐이면 최상단 표의 행을 그대로 옮긴 직전 섹션을 붙인 사본(rt_sec_fixture prev)이다.
+# 과거 섹션을 나눈 문서에서도 통제가 지울 열린 행 · 반영 행을 갖게 해 허용된 편집을 막지 않는다. 섹션이 둘 이상이면 출력은 이 갈래 전과 같다.
+rt_lost_base() { if [ "$(rt_sec_count "${1:-$RETRO}")" -lt 2 ]; then rt_sec_fixture prev "${1:-$RETRO}"; else printf '%s' "${1:-$RETRO}"; fi; }   # [회고 경로] → 소실 통제의 기준 경로
+rt_lost_ctl() { # [회고 경로] → 기준 대비 「열린 행을 지운 사본 | 처분으로 옮긴 사본 | 반영이던 행을 지운 사본」의 소실 증가
+    _rtcb=$(rt_lost_base "${1:-}"); _rtc0=$(rt_open_lost "$_rtcb")
+    printf '%s|%s|%s' "$(( $(rt_open_lost "$(rt_lost_fixture drop "$_rtcb")") - _rtc0 ))" "$(( $(rt_open_lost "$(rt_lost_fixture dispose "$_rtcb")") - _rtc0 ))" "$(( $(rt_open_lost "$(rt_lost_fixture dropdone "$_rtcb")") - _rtc0 ))"
+}
+# (M91 · `rf-117`) **직전 섹션이 없으면 대상 없음** — 과거 섹션을 `retro-archive.md`로 나누면(retro 스킬이 허용) 회고 문서에 섹션이 하나만 남는다.
+# 그때 추출 positive-control이 붉으면 허용된 편집을 막는다. 「대상 없음」은 **섹션 수로만** 정한다 — 섹션이 둘 이상인데 추출이 0이면 여전히 붉다
+# (추출 결과로 정하면 추출이 깨졌을 때 조용히 통과한다).
+rt_sec_count() { LC_ALL=C awk 'substr($0, 1, 3) == "## " { n++ } END { print n + 0 }' "${1:-$RETRO}"; }   # [retro 경로] → `## ` 회고 섹션 수
+rt_prev_verdict() { # [retro 경로] → 섹션이 둘 미만이면 ok(대상 없음) · 둘 이상이면 직전 섹션 열린 키 추출이 비지 않을 때만 ok
+    if [ "$(rt_sec_count "${1:-}")" -lt 2 ]; then echo ok; elif [ "$(rt_prev_open "${1:-}" | grep -c .)" -gt 0 ]; then echo ok; else echo no; fi
+}
+rt_sec_fixture() { # <one|noopen|prev> [원본 회고] → 회고 사본(one: 최상단 섹션만 남김 · noopen: 최상단 섹션 뒤에 최상단 표의 행을 모두 반영으로 바꾼 직전 섹션 하나 · prev: 그 행을 상태 그대로 옮긴 직전 섹션 하나)
+    _rtsf="$SBX/retro-sec-$1.md"
+    LC_ALL=C awk -v m="$1" -v mk="$RBLK" -v q='`' -v dn="$RFIRST" '
+        substr($0, 1, 3) == "## " { s++; if (s >= 2) exit }
+        { print }
+        index($0, "<!-- " mk ":start -->") > 0 { inb = 1; next }
+        index($0, "<!-- " mk ":end -->") > 0 { inb = 0; next }
+        inb && substr($0, 1, 1) == "|" { n = split($0, f, "|"); split(f[2], a, q); if (n >= 5 && a[2] ~ /^rf-[0-9]+$/) { if (m == "prev") { r[++nr] = $0; next } f[4] = " **" dn "** "; o = f[1]; for (i = 2; i <= n; i++) o = o "|" f[i]; r[++nr] = o } }
+        END { if (m == "noopen" || m == "prev") { print "## zz-prev"; print ""; for (i = 1; i <= nr; i++) print r[i] } }' "${2:-$RETRO}" > "$_rtsf"
+    printf '%s' "$_rtsf"
+}
+chk "O124: 직전 섹션 열린 행 추출 positive-control(>0 · 섹션이 하나뿐이면 대상 없음)" "$(rt_prev_verdict)" "ok"
 chk "O125: 본 검사 - 직전 섹션의 열린 행이 최상단 표에서 사라지지 않았다" "$(rt_open_lost)" "0"
-chk "O126: 소실 통제 - 열린 행을 지운 사본 1 · 그 행을 처분으로 옮긴 사본 0 · 직전에 반영이던 행을 지운 사본 0" "$(( $(rt_open_lost "$(rt_lost_fixture drop)") - $(rt_open_lost) ))|$(( $(rt_open_lost "$(rt_lost_fixture dispose)") - $(rt_open_lost) ))|$(( $(rt_open_lost "$(rt_lost_fixture dropdone)") - $(rt_open_lost) ))" "1|0|0"
+chk "O126: 소실 통제 - 열린 행을 지운 사본 1 · 그 행을 처분으로 옮긴 사본 0 · 직전에 반영이던 행을 지운 사본 0" "$(rt_lost_ctl)" "1|0|0"
+chk "O127: 섹션 수 통제 - 섹션 하나뿐인 사본은 O124 대상 없음 · O125 소실 0 · O126 통제 성립 · 직전 표의 열린 키가 0인 두 섹션 사본은 O124가 붉다" "$(rt_prev_verdict "$(rt_sec_fixture one)")|$(rt_open_lost "$(rt_sec_fixture one)")|$(rt_lost_ctl "$(rt_sec_fixture one)")|$(rt_prev_verdict "$(rt_sec_fixture noopen)")|$(rt_sec_count "$(rt_sec_fixture noopen)")" "ok|0|1|0|0|no|2"
 fi
 
 # --- Part P: 완료 기준 대조 (M55) --------------------------------------------
@@ -4768,15 +4794,15 @@ CCA_KEY='cc-asks:'
 CCC_KEY='cc-ask-cases:'
 CCF_KEY='cc-ask-from:'
 CCS_KEY='cc-ask-skip:'
-cc_fixture() { # <addname|droppair|nocase|unknown|noskip|ghostskip> → 규약 사본(addname: 판정 선언에 이름 하나 · droppair: 대응에서 케이스가 한 번만 나오는 첫 쌍을 뺌 ·
-    # nocase: 없는 케이스를 든 쌍 · unknown: 선언 밖 이름의 쌍 · noskip: 제외 선언 줄을 지움 · ghostskip: 제외에 없는 케이스 하나를 더함)
+cc_fixture() { # <addname|droppair|nocase|unknown|noskip|ghostskip|dropskip> → 규약 사본(addname: 판정 선언에 이름 하나 · droppair: 대응에서 케이스가 한 번만 나오는 첫 쌍을 뺌 ·
+    # nocase: 없는 케이스를 든 쌍 · unknown: 선언 밖 이름의 쌍 · noskip: 제외 선언 줄을 지움 · ghostskip: 제외에 없는 케이스 하나를 더함 · dropskip: 제외의 첫 케이스 하나만 뺌 — M91 `rf-117`)
     _ccff="$SBX/conv-cc-$1.md"
     _ccids=$(ak_case_ids P "$RUN_SH" | LC_ALL=C tr '\n' ' ')
     _ccp1=$(ak_pairs "$CCC_KEY" | LC_ALL=C awk -v ids=" $_ccids" '{ j = index($0, "="); k[NR] = substr($0, j + 1); l[NR] = $0; c[k[NR]]++ } END { for (i = 1; i <= NR; i++) if (c[k[i]] == 1 && index(ids, " " k[i] " ") > 0) { print l[i]; exit } }'); _ccn1=$(dn_names "$CCA_KEY" | head -1)
     LC_ALL=C awk -v m="$1" -v ka="- \`$CCA_KEY\`" -v kc="- \`$CCC_KEY\`" -v ks="- \`$CCS_KEY\`" -v p1=" $_ccp1" -v n1="$_ccn1" '{
         t = $0; sub(/^[ \t]+/, "", t)
         if (m == "addname" && substr(t, 1, length(ka)) == ka) { sub(/\r$/, ""); $0 = $0 " cc-zz-add" }
-        if (substr(t, 1, length(ks)) == ks) { if (m == "noskip") next; if (m == "ghostskip") { sub(/\r$/, ""); $0 = $0 " P999" } }
+        if (substr(t, 1, length(ks)) == ks) { if (m == "noskip") next; if (m == "ghostskip") { sub(/\r$/, ""); $0 = $0 " P999" }; if (m == "dropskip") sub(/` [A-Z][0-9]+[a-z0-9]*/, "`") }
         if (substr(t, 1, length(kc)) == kc) {
             sub(/\r$/, "")
             if (m == "droppair") { $0 = $0 " "; i = index($0, p1 " "); if (i > 0) $0 = substr($0, 1, i - 1) substr($0, i + length(p1)); sub(/ $/, "") }
@@ -4810,7 +4836,56 @@ chk "P43: 통제 - 범위 안 대응 없는 접미 ID 케이스 하나만 든 �
 chk "P44: 통제 - 제외 선언의 케이스 하나만 든 두 합성 러너에서 미대응이 0이다" "$(ak_case_unmapped_x "$CCC_KEY" "$CCF_KEY" "$CCS_KEY" P "" "$(cc_runner_fixture skip-sh)" "$(cc_runner_fixture skip-ps1)")" "0"
 chk "P45: 통제 - 제외 선언 줄을 지운 규약 사본에서 미대응이 는다(>0)" "$([ "$(( $(ak_case_unmapped_x "$CCC_KEY" "$CCF_KEY" "$CCS_KEY" P "$(cc_fixture noskip)") - $(ak_case_unmapped_x "$CCC_KEY" "$CCF_KEY" "$CCS_KEY" P) ))" -gt 0 ] && echo ok || echo no)" "ok"
 chk "P46: 통제 - 제외에 없는 케이스를 더한 규약 사본에서 빠진 제외가 하나 는다" "$(( $(ak_skip_missing "$CCS_KEY" P "$(cc_fixture ghostskip)") - $(ak_skip_missing "$CCS_KEY" P) ))" "1"
+chk "P47: 통제 - 제외 선언에서 케이스 하나만 뺀 규약 사본에서 미대응이 정확히 하나 는다" "$(( $(ak_case_unmapped_x "$CCC_KEY" "$CCF_KEY" "$CCS_KEY" P "$(cc_fixture dropskip)") - $(ak_case_unmapped_x "$CCC_KEY" "$CCF_KEY" "$CCS_KEY" P) ))" "1"
 fi
+
+# (G9~G27 · M91 `rf-116`) **상호참조 무결성 축의 판정 이름과 케이스 대응** — 규약 "상호참조 무결성" 절의 「집행」이 산문이 아니라
+# `xr-asks:` · `xr-ask-cases:` · `xr-ask-from:`이다. 선언 위생(G9~G16)은 등록표 행이 내고, 대응(G18~G21)은 `ak_*` 본체를 Part G로 부른다.
+# Part G는 이 절 하나의 축이라 제외 선언이 없다. 이 블록은 `ak_*` 정의 뒤라야 해서 Part G의 다른 케이스(G1~G8c)와 떨어져 여기 있다.
+# 통제(G22~G27)는 규약 사본 · 합성 러너에서 판정 값이 하나씩 움직이는지를 **차이**로 묻는다(`control-reads-delta`).
+XRA_KEY='xr-asks:'
+XRC_KEY='xr-ask-cases:'
+XRF_KEY='xr-ask-from:'
+xr_fixture() { # <addname|droppair|nocase|unknown> → 규약 사본(addname: 판정 선언에 이름 하나 · droppair: 대응에서 케이스가 한 번만 나오는 첫 쌍을 뺌 ·
+    # nocase: 없는 케이스를 든 쌍 · unknown: 선언 밖 이름의 쌍)
+    _xrff="$SBX/conv-xr-$1.md"
+    _xrids=$(ak_case_ids G "$RUN_SH" | LC_ALL=C tr '\n' ' ')
+    _xrp1=$(ak_pairs "$XRC_KEY" | LC_ALL=C awk -v ids=" $_xrids" '{ j = index($0, "="); k[NR] = substr($0, j + 1); l[NR] = $0; c[k[NR]]++ } END { for (i = 1; i <= NR; i++) if (c[k[i]] == 1 && index(ids, " " k[i] " ") > 0) { print l[i]; exit } }'); _xrn1=$(dn_names "$XRA_KEY" | head -1)
+    LC_ALL=C awk -v m="$1" -v ka="- \`$XRA_KEY\`" -v kc="- \`$XRC_KEY\`" -v p1=" $_xrp1" -v n1="$_xrn1" '{
+        t = $0; sub(/^[ \t]+/, "", t)
+        if (m == "addname" && substr(t, 1, length(ka)) == ka) { sub(/\r$/, ""); $0 = $0 " xr-zz-add" }
+        if (substr(t, 1, length(kc)) == kc) {
+            sub(/\r$/, "")
+            if (m == "droppair") { $0 = $0 " "; i = index($0, p1 " "); if (i > 0) $0 = substr($0, 1, i - 1) substr($0, i + length(p1)); sub(/ $/, "") }
+            if (m == "nocase") $0 = $0 " " n1 "=G999"
+            if (m == "unknown") $0 = $0 " xr-zz-unknown=G3"
+        }
+        print }' "$CONV" > "$_xrff"
+    printf '%s' "$_xrff"
+}
+xr_runner_fixture() { # <in-sh|in-ps1|tail> → 합성 러너(in-*: 범위 안 · 대응 없는 접미 ID 케이스 하나 · tail: 숫자 꼬리 ID · 주석 줄 · 다른 파트 케이스)
+    _xrrf="$SBX/runner-xr-$1.txt"; _xrq='"'
+    case $1 in
+        in-sh) printf '%s\n' "chk ${_xrq}G7b: suffixed${_xrq}" > "$_xrrf" ;;
+        in-ps1) printf '%s\n' "    Chk ${_xrq}G7b: suffixed${_xrq}" > "$_xrrf" ;;
+        tail) printf '%s\n' "chk ${_xrq}G8b0: tail${_xrq}" "# chk ${_xrq}G97b1: comment${_xrq}" "chk ${_xrq}P8b0: other${_xrq}" "    Chk ${_xrq}G96: plain${_xrq}" > "$_xrrf" ;;
+    esac
+    printf '%s' "$_xrrf"
+}
+if part_on G; then
+chk "G17: 상호참조 무결성 판정 이름 · 대응 · 시작 케이스 추출 positive-control" "$([ "$(dn_names "$XRA_KEY" | grep -c .)" -ge 1 ] && [ "$(ak_pairs "$XRC_KEY" | grep -c .)" -ge 1 ] && [ -n "$(ak_from "$XRF_KEY" G)" ] && echo ok || echo no)" "ok"
+chk "G18: 본 검사 - 상호참조 무결성 판정 이름마다 대응하는 케이스가 있다" "$(ak_ask_nocase "$XRA_KEY" "$XRC_KEY")" "0"
+chk "G19: 본 검사 - 대응의 이름이 전부 xr-asks에 있다" "$(ak_ask_unknown "$XRA_KEY" "$XRC_KEY")" "0"
+chk "G20: 본 검사 - 대응의 케이스가 두 러너 모두에 케이스로 있다" "$(ak_case_missing "$XRC_KEY" G)" "0"
+chk "G21: 본 검사 - 이 축의 케이스(xr-ask-from 이상)가 전부 대응에 있다" "$(ak_case_unmapped "$XRC_KEY" "$XRF_KEY" G)" "0"
+chk "G22: 통제 - 판정 선언에 이름 하나를 더한 규약 사본에서 대응 없는 이름이 하나 는다" "$(( $(ak_ask_nocase "$XRA_KEY" "$XRC_KEY" "$(xr_fixture addname)") - $(ak_ask_nocase "$XRA_KEY" "$XRC_KEY") ))" "1"
+chk "G23: 통제 - 대응에서 케이스가 한 번만 나오는 첫 쌍을 뺀 규약 사본에서 대응 없는 케이스가 하나 는다" "$(( $(ak_case_unmapped "$XRC_KEY" "$XRF_KEY" G "$(xr_fixture droppair)") - $(ak_case_unmapped "$XRC_KEY" "$XRF_KEY" G) ))" "1"
+chk "G24: 통제 - 없는 케이스를 든 쌍을 더한 규약 사본에서 빠진 케이스가 하나 는다" "$(( $(ak_case_missing "$XRC_KEY" G "$(xr_fixture nocase)") - $(ak_case_missing "$XRC_KEY" G) ))" "1"
+chk "G25: 통제 - 선언 밖 이름의 쌍을 더한 규약 사본에서 모르는 이름이 하나 는다" "$(( $(ak_ask_unknown "$XRA_KEY" "$XRC_KEY" "$(xr_fixture unknown)") - $(ak_ask_unknown "$XRA_KEY" "$XRC_KEY") ))" "1"
+chk "G26: 통제 - 범위 안 대응 없는 접미 ID 케이스 하나만 든 두 합성 러너에서 미대응이 1이다" "$(ak_case_unmapped "$XRC_KEY" "$XRF_KEY" G "" "$(xr_runner_fixture in-sh)" "$(xr_runner_fixture in-ps1)")" "1"
+chk "G27: 통제 - 케이스 줄 판정이 숫자 꼬리 ID(G8b0 꼴)를 읽고 주석 줄 · 다른 파트 케이스는 세지 않는다" "$(ak_case_ids G "$(xr_runner_fixture tail)" | LC_ALL=C tr '\n' ',')" "G8b0,G96,"
+fi
+
 
 # --- Part Q: 판정 비교의 Ordinal 고정 (M57) -----------------------------------
 # M42-T03이 *"이 파일의 모든 단언이 여기를 지난다"* 며 판정 비교를 Ordinal로 못박았다. 그 처방이
@@ -6782,6 +6857,14 @@ P|P29|dup|CONV|cc-asks:|본 검사 - 완료 기준 대조 판정 이름이 유�
 P|P30|def|CONV|cc-asks:|본 검사 - 판정 이름마다 정의 항목이 정확히 하나
 P|P31|orphan|CONV|cc-asks:|본 검사 - 판정 정의 항목마다 선언된 이름이 있다(고아 정의 0)
 P|P32|order|CONV|cc-asks:|본 검사 - 판정 정의 항목의 순서가 선언의 이름 순서와 같다
+G|G9|count|CONV|xr-asks:|xr-asks 선언 줄 정확히 1개
+G|G10|count|CONV|xr-ask-cases:|xr-ask-cases 선언 줄 정확히 1개
+G|G11|count|CONV|xr-ask-from:|xr-ask-from 선언 줄 정확히 1개
+G|G12|seps|CONV|xr-asks: xr-ask-cases: xr-ask-from:|상호참조 무결성 판정 선언 세 줄 꼬리에 금지 구분자 0건
+G|G13|dup|CONV|xr-asks:|본 검사 - 상호참조 무결성 판정 이름이 유일하다
+G|G14|def|CONV|xr-asks:|본 검사 - 판정 이름마다 정의 항목이 정확히 하나
+G|G15|orphan|CONV|xr-asks:|본 검사 - 판정 정의 항목마다 선언된 이름이 있다(고아 정의 0)
+G|G16|order|CONV|xr-asks:|본 검사 - 판정 정의 항목의 순서가 선언의 이름 순서와 같다
 R|R1|count|CONV|coverage-bookkeeping:|coverage-bookkeeping 선언 줄 정확히 1개
 S|S1|count|CONV_REL|push-availability:|push-availability 선언 줄 정확히 1개
 S|S2|count|CONV_REL|terminal-state:|terminal-state 선언 줄 정확히 1개
