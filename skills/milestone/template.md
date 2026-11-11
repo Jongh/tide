@@ -53,7 +53,7 @@
 ## 메타데이터
 
 - 마일스톤: M{N}
-- epic: {E{N} — 속한 줄기. 열린 에픽이 없으면 이 줄을 지운다}
+- epic: {E{N} — 속한 줄기. 열린 에픽이 없으면 이 줄을 지운다. 어느 열린 에픽에도 맞지 않으면 가장 가까운 에픽을 적고 생성 보고의 `ef-no-fit` 줄이 그 참조가 잠정임을 밝힌다 — 대조(`ef-novelty-check`)와 판별 기준(`ef-trunk-test`)의 단일 원본은 `docs/conventions.md`의 "줄기의 발생 (판별 · 유도)" 소절}
 - 생성일: {YYYY-MM-DD}
 - 기반 버전: {vX.Y.Z}
 - 목표 버전: {vX.Y.Z (major/minor/patch — 사유)}

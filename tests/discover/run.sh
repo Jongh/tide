@@ -3157,6 +3157,87 @@ fa_suffix_fixture() { # <sh|ps1> → 접미 ID 케이스 하나만 든 합성 �
     if [ "$1" = ps1 ]; then printf '%s\n' '    Chk "N98b: suffixed"' > "$_fasf"; else printf '%s\n' 'chk "N98b: suffixed"' > "$_fasf"; fi
     printf '%s' "$_fasf"
 }
+# (M90) **이름 선언 + 자리 쌍의 공존 · 잔재 판정** — `retro-flow:` · `retro-flow-sites:`(Part O `O90` · `O92`)와 `epic-flow:` ·
+# `epic-flow-sites:`(Part M `M24` · `M26`)가 같은 본체를 쓴다. 키와 토큰 접두를 인자로 받고, Part O의 `rt_site_bad` · `rt_stray`는
+# 그 키를 고정한 얇은 포장이다. 옮기기 전후로 두 러너의 Part O 출력이 바이트 단위로 같았다(M90 impl 보고서). 자리 이름 `retro` ·
+# `milestone`과 그 두 파일(SKILL.md · template.md)은 두 선언이 같은 대응을 쓴다(규약 "회고 후속 항목의 소비" 절).
+flow_site_bad() { # <이름 키> <자리 키> [규약 파일] [스킬 루트] → 자리 쌍이 정확히 하나가 아닌 이름 + 선언에 없는 쌍 이름 + 모르는 자리 + 자리의 두 파일 중 이름을 백틱으로 들지 않은 파일의 수
+    _fwsf=${3:-$CONV}; _fwsr=${4:-$ROOT}
+    _fwsn=$(dn_names "$1" "$_fwsf")
+    _fwsp=$(dn_pairs "$2" "$_fwsf")
+    _fwsb=0
+    for _fwsv in $_fwsn; do
+        _fwsc=$(printf '%s\n' "$_fwsp" | LC_ALL=C awk -v n="$_fwsv" 'substr($0, 1, index($0, "=") - 1) == n' | grep -c .)
+        [ "$_fwsc" = 1 ] || { _fwsb=$((_fwsb + 1)); continue; }
+        _fwss=$(printf '%s\n' "$_fwsp" | LC_ALL=C awk -v n="$_fwsv" 'substr($0, 1, index($0, "=") - 1) == n { print substr($0, index($0, "=") + 1) }')
+        case "$_fwss" in retro|milestone) ;; *) _fwsb=$((_fwsb + 1)); continue ;; esac
+        for _fwsx in SKILL.md template.md; do
+            LC_ALL=C grep -qF -- "\`$_fwsv\`" "$_fwsr/skills/$_fwss/$_fwsx" 2>/dev/null || _fwsb=$((_fwsb + 1))
+        done
+    done
+    printf '%s\n' "$_fwsp" | while IFS= read -r _fwsq; do [ -n "$_fwsq" ] || continue
+        printf '%s\n' "$_fwsn" | LC_ALL=C grep -qxF -- "${_fwsq%%=*}" || echo x; done | { _fwso=$(grep -c .); echo $((_fwsb + _fwso)); }
+}
+flow_stray() { # <이름 키> <토큰 접두> [규약 파일] [스킬 루트] → 규약(인자 없으면 규약 문서 집합) · retro · milestone 스킬과 템플릿 안 백틱 `{접두}…` 토큰(자리 쌍은 `=` 앞) 중 선언에 없는 것의 수(서로 다른 토큰)
+    _fwxf=${3:-$CONV}; _fwxr=${4:-$ROOT}
+    _fwxn=$(dn_names "$1" "$_fwxf")
+    if [ -n "${3:-}" ]; then _fwxl=$3; else _fwxl=$(conv_files); fi
+    { printf '%s\n' "$_fwxl"; for _fwxs in retro milestone; do printf '%s\n' "$_fwxr/skills/$_fwxs/SKILL.md" "$_fwxr/skills/$_fwxs/template.md"; done; } |
+        while IFS= read -r _fwxp; do [ -f "$_fwxp" ] && cat "$_fwxp"; done |
+        LC_ALL=C awk -v q="\`" -v pf="$2" '{ s = $0; while ((i = index(s, q pf)) > 0) { s = substr(s, i + 1); j = index(s, q); if (j == 0) break; t = substr(s, 1, j - 1); e = index(t, "="); if (e > 0) t = substr(t, 1, e - 1); print t; s = substr(s, j + 1) } }' |
+        LC_ALL=C sort -u | { _fwx=0; while IFS= read -r _fwxv; do [ -n "$_fwxv" ] || continue
+            printf '%s\n' "$_fwxn" | LC_ALL=C grep -qxF -- "$_fwxv" || _fwx=$((_fwx + 1)); done; echo "$_fwx"; }
+}
+# === Part M (M90) — 줄기의 발생: 판별 · 대조 · 맞는 줄기 없음 · 에픽 승격 ==================
+# 규약 "에픽 (방향) 층" 절의 "줄기의 발생 (판별 · 유도)" 소절이 `epic-flow:`(이름) · `epic-flow-sites:`(이름마다 재서술처 자리)를
+# 선언한다. 선언 위생(M16~M22)은 등록표 행이 내고, 여기서는 추출 · 자리 공존 · 이름 잔재와 그 통제를 묻는다(M23~M28). 판별 답이 옳은가 ·
+# 대조를 실제로 했는가 · 승격이 정당한가 · 사용자 승인이 있었는가는 묻지 않는다(규약 같은 소절의 「기계가 묻지 않는 것」). 이 블록은
+# `dn_*` 정의 뒤에 있어야 해서 Part M의 다른 케이스와 떨어져 있다.
+EFL_KEY='epic-flow:'
+EFS_KEY='epic-flow-sites:'
+ef_fixture() { # <base|dup|nodef|swap|nosite|stray> → 실제 선언의 이름 · 자리로 만든 합성 규약(실제 규약을 건드리지 않는다)
+    _eff="$SBX/conv-ef-$1.md"
+    _efn=$(dn_names "$EFL_KEY" | LC_ALL=C tr '\n' ' ' | LC_ALL=C sed 's/ *$//')
+    _efp=$(dn_pairs "$EFS_KEY" | LC_ALL=C awk -v q="\`" '{ printf "%s%s%s%s", (NR > 1 ? " " : ""), q, $0, q }')
+    _ef1=${_efn%% *}; _efx=''
+    case "$1" in
+        dup) _efn="$_efn $_ef1" ;;
+        nosite) _efp=${_efp#* } ;;
+        stray) _efx="  - see \`ef-gone\`" ;;
+    esac
+    printf '%s\n' "## fixture" "" "  - \`$EFL_KEY\` $_efn" "  - \`$EFS_KEY\` $_efp" "" > "$_eff"
+    _efd=$(dn_names "$EFL_KEY")
+    case "$1" in
+        nodef) _efd=$(printf '%s\n' "$_efd" | LC_ALL=C sed 1d) ;;
+        swap) _efd=$(printf '%s\n' "$_efd" | LC_ALL=C awk 'NR == 1 { a = $0; next } NR == 2 { print; print a; next } { print } END { if (NR == 1) print a }') ;;   # 이름이 하나면 그대로(ps1 사본과 같다 · M90 리뷰 사소 4)
+    esac
+    printf '%s\n' "$_efd" | while IFS= read -r _efv; do printf '  - **`%s`** - x\n' "$_efv"; done >> "$_eff"
+    [ -z "$_efx" ] || printf '%s\n' "$_efx" >> "$_eff"
+    printf '%s' "$_eff"
+}
+ef_skills_fixture() { # <clean|drop> → retro · milestone 스킬과 템플릿 사본의 루트(drop: 첫 선언 이름의 자리 템플릿에서 그 백틱 토큰을 지운다)
+    _efkr="$SBX/efsk-$1"
+    mkdir -p "$_efkr/skills/retro" "$_efkr/skills/milestone"
+    for _efks in retro milestone; do cp "$ROOT/skills/$_efks/SKILL.md" "$ROOT/skills/$_efks/template.md" "$_efkr/skills/$_efks/"; done
+    if [ "$1" = drop ]; then
+        _efkn=$(dn_names "$EFL_KEY" | head -1)
+        _efks=$(dn_pairs "$EFS_KEY" | LC_ALL=C awk -v n="$_efkn" 'substr($0, 1, index($0, "=") - 1) == n { print substr($0, index($0, "=") + 1); exit }')
+        # 선언이 없으면(이름 · 자리 없음) 지울 것이 없다 — 사본은 clean과 같고 M25 뒷자리가 0으로 붉는다(두 러너 같은 값)
+        case "$_efks" in retro|milestone) ;; *) printf '%s' "$_efkr"; return ;; esac
+        LC_ALL=C awk -v t="\`$_efkn\`" '{ while ((i = index($0, t)) > 0) $0 = substr($0, 1, i - 1) "zz-gone" substr($0, i + length(t)); print }' \
+            "$ROOT/skills/$_efks/template.md" > "$_efkr/skills/$_efks/template.md"
+    fi
+    printf '%s' "$_efkr"
+}
+if part_on M; then
+chk "M23: 추출 positive-control - epic-flow 이름과 epic-flow-sites 자리 쌍을 하나 이상 읽는다" \
+    "$([ "$(dn_names "$EFL_KEY" | grep -c .)" -gt 0 ] && echo ok || echo no)|$([ "$(dn_pairs "$EFS_KEY" | grep -c .)" -gt 0 ] && echo ok || echo no)" "ok|ok"
+chk "M24: 본 검사 - 선언된 이름마다 자리 쌍이 하나이고 그 자리의 스킬 · 템플릿이 이름을 백틱으로 든다" "$(flow_site_bad "$EFL_KEY" "$EFS_KEY")" "0"
+chk "M25: 변환 통제 - 자리 쌍 하나를 지운 합성 규약 · 자리 템플릿에서 이름을 지운 사본이 각자 하나씩 는다" "$(( $(flow_site_bad "$EFL_KEY" "$EFS_KEY" "$(ef_fixture nosite)") - $(flow_site_bad "$EFL_KEY" "$EFS_KEY" "$(ef_fixture base)") ))|$(( $(flow_site_bad "$EFL_KEY" "$EFS_KEY" "" "$(ef_skills_fixture drop)") - $(flow_site_bad "$EFL_KEY" "$EFS_KEY" "" "$(ef_skills_fixture clean)") ))" "1|1"
+chk "M26: 본 검사 - 규약 문서 집합 · retro · milestone 스킬과 템플릿 안 백틱 ef- 토큰이 전부 선언된 이름이다" "$(flow_stray "$EFL_KEY" ef-)" "0"
+chk "M27: 변환 통제 - 선언에 없는 ef- 토큰 하나를 센다" "$(( $(flow_stray "$EFL_KEY" ef- "$(ef_fixture stray)") - $(flow_stray "$EFL_KEY" ef- "$(ef_fixture base)") ))" "1"
+chk "M28: 변환 통제 - 합성 규약에서 이름 복제 · 정의 하나 지움 · 정의 첫 둘 맞바꿈이 각자 하나씩 는다" "$(( $(dn_dup "$EFL_KEY" "$(ef_fixture dup)") - $(dn_dup "$EFL_KEY" "$(ef_fixture base)") ))|$(( $(dn_def_bad "$EFL_KEY" "$(ef_fixture nodef)") - $(dn_def_bad "$EFL_KEY" "$(ef_fixture base)") ))|$(( $(dn_def_order "$EFL_KEY" "$(ef_fixture swap)") - $(dn_def_order "$EFL_KEY" "$(ef_fixture base)") ))" "1|1|1"
+fi
 # (K7~K25 · M88 `rf-112`) **공통 통제 축의 판정 이름과 케이스 대응** — 규약 "새 하니스가 갖출 공통 통제" 절의 「집행」이 산문 나열이 아니라
 # `hc-asks:` · `hc-ask-cases:` · `hc-ask-from:`이다. 선언 위생(K7~K9 · K11~K15)은 등록표 행이 내고, 대응(K16~K19)은 위 `ak_*` 본체를 Part K로
 # 부른다. 통제(K20~K25)는 규약 사본 · 합성 러너에서 판정 값이 하나씩 움직이는지를 **차이**로 묻는다(`control-reads-delta`). 이 블록은
@@ -4034,31 +4115,10 @@ rt_decl() { # [규약 파일] → 「선언 줄 수 넷 | 이름 중복 | 정의
         "$(dn_def_bad "$RFL_KEY" "$_rtdf")" "$(dn_def_orphan "$RFL_KEY" "$_rtdf")" "$(dn_def_order "$RFL_KEY" "$_rtdf")"
 }
 rt_site_bad() { # [규약 파일] [스킬 루트] → 자리 쌍이 정확히 하나가 아닌 이름 + 선언에 없는 쌍 이름 + 모르는 자리 + 자리의 두 파일 중 이름을 백틱으로 들지 않은 파일의 수
-    _rtsf=${1:-$CONV}; _rtsr=${2:-$ROOT}
-    _rtsn=$(dn_names "$RFL_KEY" "$_rtsf")
-    _rtsp=$(dn_pairs "$RFS_KEY" "$_rtsf")
-    _rtsb=0
-    for _rtsv in $_rtsn; do
-        _rtsc=$(printf '%s\n' "$_rtsp" | LC_ALL=C awk -v n="$_rtsv" 'substr($0, 1, index($0, "=") - 1) == n' | grep -c .)
-        [ "$_rtsc" = 1 ] || { _rtsb=$((_rtsb + 1)); continue; }
-        _rtss=$(printf '%s\n' "$_rtsp" | LC_ALL=C awk -v n="$_rtsv" 'substr($0, 1, index($0, "=") - 1) == n { print substr($0, index($0, "=") + 1) }')
-        case "$_rtss" in retro|milestone) ;; *) _rtsb=$((_rtsb + 1)); continue ;; esac
-        for _rtsx in SKILL.md template.md; do
-            LC_ALL=C grep -qF -- "\`$_rtsv\`" "$_rtsr/skills/$_rtss/$_rtsx" 2>/dev/null || _rtsb=$((_rtsb + 1))
-        done
-    done
-    printf '%s\n' "$_rtsp" | while IFS= read -r _rtsq; do [ -n "$_rtsq" ] || continue
-        printf '%s\n' "$_rtsn" | LC_ALL=C grep -qxF -- "${_rtsq%%=*}" || echo x; done | { _rtso=$(grep -c .); echo $((_rtsb + _rtso)); }
+    flow_site_bad "$RFL_KEY" "$RFS_KEY" "${1:-}" "${2:-}"   # (M90) 본체는 Part M과 같다
 }
 rt_stray() { # [규약 파일] [스킬 루트] → 규약(인자 없으면 규약 문서 집합) · retro · milestone 스킬과 템플릿 안 백틱 `rt-…` 토큰(자리 쌍은 `=` 앞) 중 선언에 없는 것의 수(서로 다른 토큰)
-    _rtxf=${1:-$CONV}; _rtxr=${2:-$ROOT}
-    _rtxn=$(dn_names "$RFL_KEY" "$_rtxf")
-    if [ -n "${1:-}" ]; then _rtxl=$1; else _rtxl=$(conv_files); fi
-    { printf '%s\n' "$_rtxl"; for _rtxs in retro milestone; do printf '%s\n' "$_rtxr/skills/$_rtxs/SKILL.md" "$_rtxr/skills/$_rtxs/template.md"; done; } |
-        while IFS= read -r _rtxp; do [ -f "$_rtxp" ] && cat "$_rtxp"; done |
-        LC_ALL=C awk -v q="\`" '{ s = $0; while ((i = index(s, q "rt-")) > 0) { s = substr(s, i + 1); j = index(s, q); if (j == 0) break; t = substr(s, 1, j - 1); e = index(t, "="); if (e > 0) t = substr(t, 1, e - 1); print t; s = substr(s, j + 1) } }' |
-        LC_ALL=C sort -u | { _rtx=0; while IFS= read -r _rtxv; do [ -n "$_rtxv" ] || continue
-            printf '%s\n' "$_rtxn" | LC_ALL=C grep -qxF -- "$_rtxv" || _rtx=$((_rtx + 1)); done; echo "$_rtx"; }
+    flow_stray "$RFL_KEY" rt- "${1:-}" "${2:-}"   # (M90) 본체는 Part M과 같다
 }
 rt_since_num() { # [규약 파일] → `retro-gate-since:` 값이 `rf-` + 숫자 한 토큰이면 그 숫자(아니면 빈 출력)
     decl_tail "${1:-$CONV}" "$RGS_KEY" | LC_ALL=C awk '{ if (NF == 1 && $1 ~ /^rf-[0-9]+$/) print substr($1, 4) }'
@@ -6680,6 +6740,13 @@ L|L2|count|CONV|count-copula:|count-copula 선언 줄 정확히 1개
 M|M1|count|CONV|epic-status:|epic-status 선언 줄 정확히 1개
 M|M2|count|CONV|epic-since:|epic-since 선언 줄 정확히 1개
 M|M11|count|CONV|epic-members:|epic-members 선언 줄 정확히 1개
+M|M16|count|CONV|epic-flow:|epic-flow 선언 줄 정확히 1개
+M|M17|count|CONV|epic-flow-sites:|epic-flow-sites 선언 줄 정확히 1개
+M|M18|seps|CONV|epic-flow: epic-flow-sites:|줄기의 발생 선언 두 줄 꼬리에 금지 구분자 0건
+M|M19|dup|CONV|epic-flow:|본 검사 - 줄기의 발생 이름이 유일하다
+M|M20|def|CONV|epic-flow:|본 검사 - 이름마다 정의 항목이 정확히 하나
+M|M21|orphan|CONV|epic-flow:|본 검사 - 정의 항목마다 선언된 이름이 있다(고아 정의 0)
+M|M22|order|CONV|epic-flow:|본 검사 - 정의 항목의 순서가 선언의 이름 순서와 같다
 O|O1|count|CONV|retro-status:|retro-status 선언 줄 정확히 1개
 O|O2|count|CONV|retro-block:|retro-block 선언 줄 정확히 1개
 O|O15|count|CONV|retro-cadence:|retro-cadence 선언 줄 정확히 1개
