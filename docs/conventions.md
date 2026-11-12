@@ -281,7 +281,7 @@ tide는 porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴�
     - **`ask-has-case`** — 고지 이름마다 대응하는 케이스가 하나 이상이다.
     - **`ask-known`** — 대응의 이름이 전부 `floor-asks:`에 있다.
     - **`case-exists`** — 대응의 케이스가 두 러너 모두에 케이스 줄로 있다. 케이스 줄은 공백을 벗긴 문면이 케이스 호출과 `"{케이스}:`로 시작하는 줄이고,
-      주석 줄은 세지 않는다(합성 러너로 통제한다). 케이스 ID는 `N`+숫자에 소문자 접미가 붙을 수 있다(`F1b` · `G8a` 꼴). 작은따옴표나 공백 둘로 쓴 호출,
+      주석 줄은 세지 않는다(합성 러너로 통제한다). 케이스 ID는 `N`+숫자에 소문자 접미가 붙을 수 있고, 접미 뒤에 숫자 꼬리가 더 붙을 수 있다(`F1b` · `G8a` · `G8b0` 꼴 — 숫자 꼬리는 M91이 고지 대응 축들이 함께 쓰는 함수에서 넓혔다. 등록표 행의 ID는 숫자 꼬리를 받지 않는다). 작은따옴표나 공백 둘로 쓴 호출,
       대문자 · 기호 접미(`N63B` · `N63-a` 꼴)는 케이스 줄이 아니다(열린 경계 — 두 러너의 케이스 호출은 전부 큰따옴표 · 공백 한 칸 꼴이고 접미는 소문자뿐이다).
       M88부터 선언 판정 등록표의 케이스 행(`{파트}|{케이스}|{판정}|…`)도 케이스로 센다 — 공통 통제 축과 같은 함수를 쓰기 때문이며, 지금 Part N에는 그 행이 없다.
     - **`case-mapped`** — 두 러너의 Part N 케이스 중 `floor-ask-from:` 이상인 것(접미 ID는 숫자 부분으로 견준다)이 전부 대응에 있다.
@@ -1399,7 +1399,7 @@ release의 시작 전 검사는 이름 선언이 든다(M84). 선언의 이름 �
   `retro-review-after:`가 양의 정수 하나다 · 최상단 회고 표에서 키 번호가 `retro-gate-since:` 이상인 `미반영` 행마다 반영 위치 셀에
   `next:`와 `kin:`이 있다(키 번호는 숫자로 견준다) · 반영 위치 셀에 `review-due`가 있는 행의 상태가 `미반영` 또는 `미결`이다 ·
   최상단 바로 아래 회고 섹션의 후속 표에서 `미반영` · `미결`이던 행 키가 최상단 표에 모두 있다(M89 · `rf-105` — 열린 행은 지우지 않고 `처분`으로 옮겨 닫는다. 옮기는 것은 사라짐이
-  아니다). M85 리뷰가 비어 있다고 적은 통제 셋(관문의 `미반영` 필터 · 재심 표지 판정의 `미결` 수용과 `처분` 거부 · 시작 키 선언 줄)은 M89가 세웠다.
+  아니다). 회고 섹션이 하나뿐이면(과거 섹션을 `retro-archive.md`로 나눈 문서) 직전 섹션이 없어 견줄 대상이 없다 — 이 「대상 없음」은 섹션 수로만 정하고, 섹션이 둘 이상인데 직전 열린 키 추출이 0이면 여전히 붉다(M91 · `rf-117`). 그런 문서에서도 소실 통제는 최상단 표의 행을 그대로 옮긴 합성 직전 섹션을 기준으로 성립한다 — 나눈 문서를 붉히지 않는다. 그 기준은 최상단 표의 행에 기댄다 — 열린 행이 없으면 섹션 수 통제가 붉고, `반영` 행이 없으면 소실 통제의 셋째 칸이 공허하게 통과한다(하니스 README Part O의 경계 기록). M85 리뷰가 비어 있다고 적은 통제 셋(관문의 `미반영` 필터 · 재심 표지 판정의 `미결` 수용과 `처분` 거부 · 시작 키 선언 줄)은 M89가 세웠다.
   **묻지 않는 것** — 다음 행동이 옳은가 · `kin:`이 가리킨 확인이 맞는가 · 재심 표지를 제때 달았는가 · 관측이 실제로 표 밖으로
   옮겨졌는가 · 청소 슬롯을 실제로 보였는가(프롬프트 절차) · 원장 그룹 줄이 키마다 사유를 담는가 · 위 네 파일 밖(커맨드 카탈로그 ·
   하니스 README)의 rt- 토큰 · 대상 레포가 시작 키를 물려받지 않았는가(하니스는 이 저장소에서만 돈다) · 직전 섹션보다 더 아래 섹션의 열린 행
@@ -1667,7 +1667,7 @@ release의 시작 전 검사는 이름 선언이 든다(M84). 선언의 이름 �
   절의 완료 기준 작성 규율이 따로 적는다). 셋 다 **리뷰와 사람의 자리**이며 그 이상을 주장하지 않는다.
 
     - `cc-asks:` cc-decl-unique cc-extract cc-nums-match cc-since-boundary cc-verdict-member cc-wiring cc-no-reenum cc-no-seps cc-name-unique cc-def-each cc-def-orphan cc-def-order cc-ask-has-case cc-ask-known cc-case-exists cc-case-mapped cc-skip-exists
-    - `cc-ask-cases:` cc-decl-unique=P1 cc-decl-unique=P2 cc-extract=P3 cc-nums-match=P4 cc-verdict-member=P5 cc-nums-match=P6 cc-nums-match=P7 cc-verdict-member=P8 cc-verdict-member=P9 cc-nums-match=P10 cc-since-boundary=P11 cc-verdict-member=P12 cc-wiring=P13 cc-wiring=P14 cc-no-reenum=P15 cc-nums-match=P16 cc-no-reenum=P17 cc-no-reenum=P18 cc-no-reenum=P19 cc-decl-unique=P24 cc-decl-unique=P25 cc-decl-unique=P26 cc-decl-unique=P27 cc-no-seps=P28 cc-name-unique=P29 cc-def-each=P30 cc-def-orphan=P31 cc-def-order=P32 cc-extract=P33 cc-ask-has-case=P34 cc-ask-known=P35 cc-case-exists=P36 cc-case-mapped=P37 cc-skip-exists=P38 cc-ask-has-case=P39 cc-case-mapped=P40 cc-case-exists=P41 cc-ask-known=P42 cc-case-mapped=P43 cc-case-mapped=P44 cc-case-mapped=P45 cc-skip-exists=P46
+    - `cc-ask-cases:` cc-decl-unique=P1 cc-decl-unique=P2 cc-extract=P3 cc-nums-match=P4 cc-verdict-member=P5 cc-nums-match=P6 cc-nums-match=P7 cc-verdict-member=P8 cc-verdict-member=P9 cc-nums-match=P10 cc-since-boundary=P11 cc-verdict-member=P12 cc-wiring=P13 cc-wiring=P14 cc-no-reenum=P15 cc-nums-match=P16 cc-no-reenum=P17 cc-no-reenum=P18 cc-no-reenum=P19 cc-decl-unique=P24 cc-decl-unique=P25 cc-decl-unique=P26 cc-decl-unique=P27 cc-no-seps=P28 cc-name-unique=P29 cc-def-each=P30 cc-def-orphan=P31 cc-def-order=P32 cc-extract=P33 cc-ask-has-case=P34 cc-ask-known=P35 cc-case-exists=P36 cc-case-mapped=P37 cc-skip-exists=P38 cc-ask-has-case=P39 cc-case-mapped=P40 cc-case-exists=P41 cc-ask-known=P42 cc-case-mapped=P43 cc-case-mapped=P44 cc-case-mapped=P45 cc-skip-exists=P46 cc-case-mapped=P47
     - `cc-ask-from:` P1
     - `cc-ask-skip:` P20 P21 P22 P23
 
@@ -1690,7 +1690,8 @@ release의 시작 전 검사는 이름 선언이 든다(M84). 선언의 이름 �
     - **`cc-ask-known`** — 대응의 이름이 전부 `cc-asks:`에 있다.
     - **`cc-case-exists`** — 대응의 케이스가 두 러너 모두에 케이스로 있다. 케이스의 꼴은 공통 통제 절의 고지 대응과 같다.
     - **`cc-case-mapped`** — 두 러너의 Part P 케이스 중 `cc-ask-from:` 이상이고 `cc-ask-skip:`에 없는 것(접미 ID는 숫자 부분으로 견준다)이
-      전부 대응에 있다.
+      전부 대응에 있다. 제외는 칸마다 무게를 가진다 — 제외 줄을 통째로 지운 사본에서 미대응이 늘고, 제외 하나만 뺀 사본에서는 정확히 하나
+      는다(M91 · `rf-117`). 제외가 실제로 다른 절의 판정인지는 묻지 않는다.
     - **`cc-skip-exists`** — 제외 목록의 케이스가 두 러너 모두에 케이스로 있다(낡은 제외가 남지 않는다).
 
 ### 검사 범위 선언
@@ -2828,7 +2829,7 @@ release 프리플라이트에서 사이트를 빌드한 **산출물 기준**으�
     - **`hc-ask-has-case`** — 판정 이름마다 대응하는 케이스가 하나 이상이다.
     - **`hc-ask-known`** — 대응의 이름이 전부 `hc-asks:`에 있다.
     - **`hc-case-exists`** — 대응의 케이스가 두 러너 모두에 케이스로 있다. 케이스의 꼴은 안전 바닥 절의 고지 대응과 같다(공백을 벗긴 문면이
-      케이스 호출과 `"{케이스}:`로 시작하는 줄 · 주석 줄 제외 · 소문자 접미 허용 · 선언 판정 등록표의 케이스 행). 이 축의 선언 위생은 등록표 행이
+      케이스 호출과 `"{케이스}:`로 시작하는 줄 · 주석 줄 제외 · 소문자 접미와 그 뒤 숫자 꼬리 허용 · 선언 판정 등록표의 케이스 행). 이 축의 선언 위생은 등록표 행이
       내므로 등록표 행을 세지 않으면 대응이 거짓으로 붉다.
     - **`hc-case-mapped`** — 두 러너의 Part K 케이스 중 `hc-ask-from:` 이상인 것(접미 ID는 숫자 부분으로 견준다)이 전부 대응에 있다.
 
@@ -3465,7 +3466,7 @@ C-3·C-4가, 인용은 Part G가 물지만 **두 문단이 반대되는 사실�
   (원장의 인용이 *"묻지 않는 것 ⑷"* 를 가리켰는데 그 `⑷`는 M40이 닫아 없앤 번호였고, 인용을 옮긴
   편집이 하류를 함께 고치지 않아 생겼다). 대신 **항목의 이름**을 적는다(예: *"「debug 세션」 절 릴리즈
   경로 항목"*) — 이름은 항목이 사라지면 **사람이 읽을 때 즉시 어긋난다.**
-  - **집행**: `tests/discover` **G8**이 살아 있는 문서의 **인용 줄**에서 `절` 표지 **뒤에** 오는
+  - **집행**(판정 이름 `xr-no-ordinal` — 아래 ⑴의 추출 0건은 `xr-extract`): `tests/discover` **G8**이 살아 있는 문서의 **인용 줄**에서 `절` 표지 **뒤에** 오는
     열거 번호를 **0건**으로 고정한다(FAIL 집행). 무는 문자 집합은 **U+2460–U+2487**(`①`~`⑳`·`⑴`~`⒇`,
     40자)이며 **두 러너가 같은 집합을 쓰는지 각자 자기 단언한다** — 양쪽 모두 문자를 **코드포인트로
     조립**하므로(`run.ps1`은 ASCII-only 규율 때문에 필수이고 `run.sh`도 같은 방식으로 맞췄다) 집합이
@@ -3506,15 +3507,47 @@ C-3·C-4가, 인용은 Part G가 물지만 **두 문단이 반대되는 사실�
   ② 사이트 셸 페이지와 nav 항목을 **같은 사이클에** 만든다(위 "규약 ↔ 실행/인프라 동기화" 절)
   ③ 본체에 그 조각을 가리키는 **포인터 한 줄**을 남긴다 — 독자가 본체만 읽고 절이 통째로 사라졌다고
   오해하지 않도록. 포인터는 앵커가 아니라 파일을 가리키는 문장이므로 따옴표 인용 골격을 쓰지 않는다.
-- **집행**: `tests/discover` Part G가 **FAIL**로 집행한다(advisory 아님). 대조는 **파일별 앵커 집합**
-  기준이다 — 인용 줄에 등장한 규약 파일명으로 대조할 집합을 고르고, 한 줄에 두 파일명이 있으면 어느
-  쪽 집합에든 있으면 통과로 본다(안전 측 — 오탐을 만들지 않는다). 추출 0건도 FAIL이고(공허 통과
-  차단), 집합 전체에 정규화 후 중복 이름이 있어도 FAIL이다.
+- **집행**: `tests/discover` Part G가 **FAIL**로 집행한다(advisory 아님). 무는 판정은 아래 `xr-asks:`가 이름으로 들고, 이름마다 정의
+  항목이 하나다(M91). 판정마다 그것을 무는 Part G 케이스는 `xr-ask-cases:`가 `이름=케이스` 토큰으로 든다(한 이름이 여러 케이스를, 한
+  케이스가 여러 이름을 가질 수 있다 — Part G는 한 ID를 본 검사와 그 통제에 함께 쓴다). `xr-ask-from:`은 이 축이 시작하는 케이스다. 두 러너의
+  Part G 케이스 중 시작 번호 이상인 것은 전부 어느 판정에든 대응해야 한다 — Part G는 이 절 하나의 축이라 제외 선언을 두지 않는다. 판정 선언도
+  다른 이름 선언과 같은 위생 판정을 받고, 대응 판정의 본체는 안전 바닥 절 · 공통 통제 절 · 완료 기준 대조 절의 고지 대응과 같은 함수다(축의
+  키와 파트 표지만 인자로 다르다). 위 항목들의 「기계가 묻지 않는 것」과 G3의 알려진 잔여 한계는 판정이 아니라 열린 쪽 고지라 이름에 올리지 않는다.
+
+    - `xr-asks:` xr-extract xr-cite-resolves xr-anchor-unique xr-one-line xr-self-resolves xr-ext-resolves xr-no-ordinal xr-decl-unique xr-no-seps xr-name-unique xr-def-each xr-def-orphan xr-def-order xr-ask-has-case xr-ask-known xr-case-exists xr-case-mapped
+    - `xr-ask-cases:` xr-extract=G2 xr-extract=G4 xr-extract=G6 xr-extract=G8b0 xr-extract=G17 xr-cite-resolves=G1 xr-cite-resolves=G2 xr-anchor-unique=G2 xr-one-line=G3 xr-self-resolves=G4 xr-ext-resolves=G5 xr-ext-resolves=G7 xr-no-ordinal=G8a xr-no-ordinal=G8b xr-no-ordinal=G8c xr-decl-unique=G9 xr-decl-unique=G10 xr-decl-unique=G11 xr-no-seps=G12 xr-name-unique=G13 xr-def-each=G14 xr-def-orphan=G15 xr-def-order=G16 xr-ask-has-case=G18 xr-ask-known=G19 xr-case-exists=G20 xr-case-mapped=G21 xr-ask-has-case=G22 xr-case-mapped=G23 xr-case-exists=G24 xr-ask-known=G25 xr-case-mapped=G26 xr-case-mapped=G27
+    - `xr-ask-from:` G1
+
+    - **`xr-extract`** — 추출이 비지 않는다. 인용 골격 · 앵커 제목 · 자기참조 · 규약 밖 인용 · 열거 번호를 훑을 인용 줄의 추출이 각각 0건이면
+      FAIL이다(루프가 통째로 공허 통과하는 것을 막는다). 이 축의 판정 선언의 이름 · 대응 추출도 비지 않고, `xr-ask-from:`이 `G`+숫자 꼴로 읽힌다.
+    - **`xr-cite-resolves`** — 살아 있는 문서의 인용 골격이 **그 줄에 등장한 규약 파일**의 `##` · `###` 제목 집합에 실재한다. 대조는 **파일별
+      앵커 집합** 기준이고, 한 줄에 규약 파일명이 둘이면 어느 쪽 집합에든 있으면 통과로 본다(안전 측). 대조 전에 공백만 지운다. 끊긴 인용을
+      주입한 픽스처는 잡히고, 가짜 이름은 집합 어디에도 없다.
+    - **`xr-anchor-unique`** — `##` · `###` 제목이 정규화 뒤 규약 문서 집합 전체에서 유일하다(중복 0).
+    - **`xr-one-line`** — 인용 후보 줄의 따옴표가 종결된다(줄바꿈 인용 0). 구획이 통째로 다음 줄인 형태는 묻지 않는다(위 「인용은 한 줄 안에
+      쓴다」 항목의 한계).
+    - **`xr-self-resolves`** — 파일명 없는 자기참조가 **그 파일 자신의** 앵커 집합에 실재한다. 후보 표지와 범위는 아래 「자기참조도 집행한다」
+      항목의 「기계가 무는 것(양쪽 중 이쪽)」이 적는다. 미해소 자기참조를 주입한 픽스처는 잡힌다.
+    - **`xr-ext-resolves`** — 규약 집합 밖 문서를 골격으로 가리킨 인용이 그 파일 자신의 앵커 집합에 실재한다(아래 「규약 집합 밖 대상도
+      집행한다」 항목). 깨진 인용을 주입한 픽스처는 잡힌다.
+    - **`xr-no-ordinal`** — 인용 줄에서 `절` 표지 뒤에 열거 번호가 0건이다. 무는 문자 집합을 두 러너가 각자 자기 단언하고, 주입한 위반 한 줄은
+      잡힌다(위 「절 안의 항목은 번호가 아니라 이름으로 가리킨다」 항목).
+    - **`xr-decl-unique`** — 이 축의 판정 선언 줄이 키마다 정확히 하나다.
+    - **`xr-no-seps`** — 이 축의 판정 선언 줄 꼬리에 금지 구분자가 없다.
+    - **`xr-name-unique`** — `xr-asks:`의 이름이 유일하다.
+    - **`xr-def-each`** — 선언된 판정 이름마다 정의 항목이 정확히 하나다.
+    - **`xr-def-orphan`** — 정의 항목마다 선언된 이름이 있다.
+    - **`xr-def-order`** — 정의 항목의 순서가 선언의 이름 순서와 같다.
+    - **`xr-ask-has-case`** — 판정 이름마다 대응하는 케이스가 하나 이상이다.
+    - **`xr-ask-known`** — 대응의 이름이 전부 `xr-asks:`에 있다.
+    - **`xr-case-exists`** — 대응의 케이스가 두 러너 모두에 케이스로 있다. 케이스의 꼴은 안전 바닥 절의 고지 대응과 같다 — 같은 함수라
+      숫자 꼬리(`G8b0` — M91)도 이 축만이 아니라 그 함수를 쓰는 축 모두에서 받는다.
+    - **`xr-case-mapped`** — 두 러너의 Part G 케이스 중 `xr-ask-from:` 이상인 것(접미 ID는 앞 숫자 부분으로 견준다)이 전부 대응에 있다.
 - **범위**: 대상은 규약을 인용하는 **살아 있는 문서**다. `docs/milestones/*`·`docs/reports/*`는 역사
   기록이라 대상이 아니다(위 "카운트 단일 선언처"의 소급 금지와 같은 취지).
 - **규약 집합 밖 대상도 집행한다(M42)**: 인용 골격이 가리키는 것은 규약만이 아니다 —
   `skills/*/SKILL.md`·`docs/*.md` 같은 **규약 집합 밖 문서**를 가리킨 인용도 **그 파일 자신의 앵커**와
-  대조한다(**G5~G7**). 네 사이클 동안 대조 집합이 `docs/conventions*.md`뿐이라 그 인용들은 어느 가드도
+  대조한다(**G5~G7** — 판정 이름 `xr-ext-resolves`). 네 사이클 동안 대조 집합이 `docs/conventions*.md`뿐이라 그 인용들은 어느 가드도
   보지 않았고, 실제로 **세 자리가 어긋나 있었다**(M41이 그중 하나를 사람 눈으로 찾아 후속에 남겼고,
   나머지 둘은 이 검사가 처음 드러냈다).
   - **닫는 방향**: 세 인용이 모두 같은 **짧은 이름**으로 합의하고 있었으므로 인용 셋을 고치는 대신
@@ -3537,7 +3570,7 @@ C-3·C-4가, 인용은 Part G가 물지만 **두 문단이 반대되는 사실�
   - **대조는 그 파일 자신의 앵커 집합**이다. 자기참조는 정의상 같은 파일을 가리키므로, 집합 전체와
     대조하면 **다른 파일의 절을 가리켜도 통과**한다(좁은 범위에서는 안전 측이던 선택이 범위를 넓히면
     과대 허용으로 뒤집힌다).
-  - **기계가 무는 것(양쪽 중 이쪽)**: `"{앵커 이름}" 절` 형태이면서 ⑴ 백틱 파일 경로가 없고 ⑵ 그 줄에
+  - **기계가 무는 것(양쪽 중 이쪽 — 판정 이름 `xr-self-resolves`)**: `"{앵커 이름}" 절` 형태이면서 ⑴ 백틱 파일 경로가 없고 ⑵ 그 줄에
     규약 파일명이 없으며 ⑶ **앞 줄에도** 규약 파일명이 없는 줄. 표지는 전부 실측으로 정했다 —
     살아 있는 문서 전체에서 후보 **46건·미해소 0건**이고, 표지 ⑵를 빼면 후보 50건 중 **마크다운 링크
     인용 4건**이, ⑶을 빼면 후보 50건 중 **줄바꿈 인용 3건**이 오탐이 된다.

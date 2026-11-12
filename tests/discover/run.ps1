@@ -3529,8 +3529,8 @@ try {
             $t = $ln.TrimStart($ws)
             if ($t.StartsWith('chk ' + $q, [System.StringComparison]::Ordinal) -or $t.StartsWith('Chk ' + $q, [System.StringComparison]::Ordinal)) {
                 $r = $t.Substring(5); $j = $r.IndexOf(':', [System.StringComparison]::Ordinal)
-                # An ID is <part> + digits with an optional lowercase suffix (this harness uses F1b / G8a forms -- M79 review blocker 1).
-                if ($j -gt 0) { $id = $r.Substring(0, $j); if ($id.Length -gt 1 -and $id.StartsWith($part, [System.StringComparison]::Ordinal) -and [regex]::IsMatch($id.Substring(1), '^[0-9]+[a-z]*$')) { $out.Add($id) } }
+                # An ID is <part> + digits with an optional lowercase suffix (this harness uses F1b / G8a forms -- M79 review blocker 1) (M91) A digit tail after the suffix is taken too -- G8b0.
+                if ($j -gt 0) { $id = $r.Substring(0, $j); if ($id.Length -gt 1 -and $id.StartsWith($part, [System.StringComparison]::Ordinal) -and [regex]::IsMatch($id.Substring(1), '^[0-9]+[a-z]*[0-9]*$')) { $out.Add($id) } }
                 continue
             }
             # (M88) A declaration-registry case row (<part>|<ID>|<check>|...) is a case too -- same shape as SrcCaseIds (F29). The common-control
@@ -5256,11 +5256,12 @@ try {
     }
     # drop: the top row of the first open key of the previous section removed / dispose: that row moved to disposed /
     # dropdone: the top row of the first key that was done in the previous section removed.
-    function RtLostFixture([string]$mode) {
+    function RtLostFixture([string]$mode, [string]$src = '') {
+        if ($src -eq '') { $src = $RETRO }
         $fx = Join-Path $sbx ('retro-lost-' + $mode + '.md')
-        $k = if ($mode -eq 'dropdone') { @(@(RtPrevRows) | Where-Object { $_.Split(' ')[1] -ceq $rFirst } | ForEach-Object { $_.Split(' ')[0] }) | Select-Object -First 1 } else { @(RtPrevOpen) | Select-Object -First 1 }
+        $k = if ($mode -eq 'dropdone') { @(@(RtPrevRows $src) | Where-Object { $_.Split(' ')[1] -ceq $rFirst } | ForEach-Object { $_.Split(' ')[0] }) | Select-Object -First 1 } else { @(RtPrevOpen $src) | Select-Object -First 1 }
         $inb = $false
-        $out = foreach ($l in [System.IO.File]::ReadAllLines($RETRO)) {
+        $out = foreach ($l in [System.IO.File]::ReadAllLines($src)) {
             if ($l.Contains('<!-- ' + $rBlk + ':start -->')) { $inb = $true; $l; continue }
             if ($l.Contains('<!-- ' + $rBlk + ':end -->')) { $inb = $false; $l; continue }
             if ($inb -and $null -ne $k -and $l.StartsWith('|', [System.StringComparison]::Ordinal)) {
@@ -5278,9 +5279,58 @@ try {
         [System.IO.File]::WriteAllLines($fx, [string[]]@($out), (New-Object System.Text.UTF8Encoding($false)))
         return $fx
     }
-    Chk "O124: previous-section open-row extraction positive-control (>0)" $(if (@(RtPrevOpen).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # (M91 rf-117) NO PREVIOUS SECTION MEANS NOTHING TO CHECK -- splitting past sections off into retro-archive.md (the retro skill allows
+    # it) leaves one section in the retro document, and a red extraction positive-control there would block an allowed edit. "Nothing to
+    # check" is decided by the SECTION COUNT ONLY -- two or more sections with an empty extraction stay red (deciding it by the extraction
+    # result would pass silently when the extraction breaks).
+    function RtSecCount([string]$path = '') {
+        if ($path -eq '') { $path = $RETRO }
+        return @([System.IO.File]::ReadAllLines($path) | Where-Object { $_.StartsWith('## ', [System.StringComparison]::Ordinal) }).Count
+    }
+    function RtPrevVerdict([string]$path = '') {
+        if ((RtSecCount $path) -lt 2) { return 'ok' }
+        if (@(RtPrevOpen $path).Count -gt 0) { return 'ok' }
+        return 'no'
+    }
+    # one: only the top section kept / noopen: after the top section, one previous section holding the top table's rows all moved to done.
+    # prev: after the top section, one previous section holding the top table's rows unchanged.
+    function RtSecFixture([string]$mode, [string]$src = '') {
+        if ($src -eq '') { $src = $RETRO }
+        $fx = Join-Path $sbx ('retro-sec-' + $mode + '.md')
+        $s = 0; $inb = $false
+        $out = New-Object System.Collections.Generic.List[string]
+        $rows = New-Object System.Collections.Generic.List[string]
+        foreach ($l in [System.IO.File]::ReadAllLines($src)) {
+            if ($l.StartsWith('## ', [System.StringComparison]::Ordinal)) { $s++; if ($s -ge 2) { break } }
+            $out.Add($l)
+            if ($l.Contains('<!-- ' + $rBlk + ':start -->')) { $inb = $true; continue }
+            if ($l.Contains('<!-- ' + $rBlk + ':end -->')) { $inb = $false; continue }
+            if ($inb -and $l.StartsWith('|', [System.StringComparison]::Ordinal)) {
+                $fl = $l -split '\|'
+                if ($fl.Count -ge 5) { $a = $fl[1].Split([char]96); if ($a.Count -ge 3 -and $a[1] -cmatch '^rf-[0-9]+$') { if ($mode -eq 'prev') { $rows.Add($l); continue }; $fl[3] = ' **' + $rFirst + '** '; $rows.Add($fl -join '|') } }
+            }
+        }
+        if ($mode -eq 'noopen' -or $mode -eq 'prev') { $out.Add('## zz-prev'); $out.Add(''); foreach ($r in $rows) { $out.Add($r) } }
+        [System.IO.File]::WriteAllLines($fx, [string[]]@($out), (New-Object System.Text.UTF8Encoding($false)))
+        return $fx
+    }
+    # (M91 rf-117) THE VANISH CONTROL'S BASE -- the document itself with two or more sections, otherwise a copy with one previous section
+    # holding the top table's rows unchanged (RtSecFixture prev), so a document whose past sections were split off still has an open row
+    # and a done row for the control to remove. With two or more sections the output is the same as before this branch.
+    function RtLostBase([string]$path = '') {
+        if ($path -eq '') { $path = $RETRO }
+        if ((RtSecCount $path) -lt 2) { return (RtSecFixture 'prev' $path) }
+        return $path
+    }
+    function RtLostCtl([string]$path = '') {
+        $b = RtLostBase $path
+        $z = [int](RtOpenLost $b)
+        return ([string]([int](RtOpenLost (RtLostFixture 'drop' $b)) - $z) + '|' + [string]([int](RtOpenLost (RtLostFixture 'dispose' $b)) - $z) + '|' + [string]([int](RtOpenLost (RtLostFixture 'dropdone' $b)) - $z))
+    }
+    Chk "O124: previous-section open-row extraction positive-control (>0; nothing to check when there is only one section)" (RtPrevVerdict) 'ok'
     Chk "O125: main check -- no open row of the previous section vanished from the top table" (RtOpenLost) '0'
-    Chk "O126: vanish control -- an open row removed 1 / that row moved to disposed 0 / a row that was done before removed 0" (([string]([int](RtOpenLost (RtLostFixture 'drop')) - [int](RtOpenLost))) + '|' + ([string]([int](RtOpenLost (RtLostFixture 'dispose')) - [int](RtOpenLost))) + '|' + ([string]([int](RtOpenLost (RtLostFixture 'dropdone')) - [int](RtOpenLost)))) '1|0|0'
+    Chk "O126: vanish control -- an open row removed 1 / that row moved to disposed 0 / a row that was done before removed 0" (RtLostCtl) '1|0|0'
+    Chk "O127: section-count control -- a one-section copy has nothing to check for O124, vanishes 0 for O125 and still holds the O126 control; a two-section copy whose previous table has no open key reddens O124" ((RtPrevVerdict (RtSecFixture 'one')) + '|' + (RtOpenLost (RtSecFixture 'one')) + '|' + (RtLostCtl (RtSecFixture 'one')) + '|' + (RtPrevVerdict (RtSecFixture 'noopen')) + '|' + [string](RtSecCount (RtSecFixture 'noopen'))) 'ok|0|1|0|0|no|2'
     }
 
     # --- Part P: completion-criteria cross-check (M55) ----------------------
@@ -5678,6 +5728,7 @@ try {
     $CCF_KEY = 'cc-ask-from:'
     $CCS_KEY = 'cc-ask-skip:'
     # addname / droppair / nocase / unknown as in HcFixture; noskip: the skip declaration line removed; ghostskip: one case not in either runner added to the skip.
+    # dropskip (M91 rf-117): only the first case of the skip declaration removed.
     function CcFixture([string]$mode) {
         $f = Join-Path $sbx ('conv-cc-' + $mode + '.md')
         $bt = [string][char]0x60
@@ -5690,7 +5741,7 @@ try {
         $out = foreach ($l in [System.IO.File]::ReadAllLines($CONV)) {
             $t = $l.TrimStart($ws)
             if ($mode -eq 'addname' -and $t.StartsWith($ka, [System.StringComparison]::Ordinal)) { $l = $l + ' cc-zz-add' }
-            if ($t.StartsWith($ks, [System.StringComparison]::Ordinal)) { if ($mode -eq 'noskip') { continue }; if ($mode -eq 'ghostskip') { $l = $l + ' P999' } }
+            if ($t.StartsWith($ks, [System.StringComparison]::Ordinal)) { if ($mode -eq 'noskip') { continue }; if ($mode -eq 'ghostskip') { $l = $l + ' P999' }; if ($mode -eq 'dropskip') { $l = ([regex]($bt + ' [A-Z][0-9]+[a-z0-9]*')).Replace($l, $bt, 1) } }
             if ($t.StartsWith($kc, [System.StringComparison]::Ordinal)) {
                 if ($mode -eq 'droppair') { $s = $l + ' '; $i = $s.IndexOf($p1 + ' ', [System.StringComparison]::Ordinal); if ($i -ge 0) { $s = $s.Substring(0, $i) + $s.Substring($i + $p1.Length) }; $l = $s.Substring(0, $s.Length - 1) }
                 if ($mode -eq 'nocase') { $l = $l + ' ' + $n1 + '=P999' }
@@ -5729,6 +5780,64 @@ try {
     Chk "P44: control - two synthetic runners holding one skipped case give zero unmapped" (AkCaseUnmappedX $CCC_KEY $CCF_KEY $CCS_KEY 'P' '' (CcRunnerFixture 'skip-sh') (CcRunnerFixture 'skip-ps1')) '0'
     Chk "P45: control - a conventions copy without the skip declaration line adds unmapped cases (>0)" $(if (([int](AkCaseUnmappedX $CCC_KEY $CCF_KEY $CCS_KEY 'P' (CcFixture 'noskip')) - [int](AkCaseUnmappedX $CCC_KEY $CCF_KEY $CCS_KEY 'P')) -gt 0) { 'ok' } else { 'no' }) 'ok'
     Chk "P46: control - a conventions copy adding a case to the skip that no runner has adds one missing skip" ([string]([int](AkSkipMissing $CCS_KEY 'P' (CcFixture 'ghostskip')) - [int](AkSkipMissing $CCS_KEY 'P'))) '1'
+    Chk "P47: control - a conventions copy with only one case removed from the skip declaration adds exactly one unmapped case" ([string]([int](AkCaseUnmappedX $CCC_KEY $CCF_KEY $CCS_KEY 'P' (CcFixture 'dropskip')) - [int](AkCaseUnmappedX $CCC_KEY $CCF_KEY $CCS_KEY 'P'))) '1'
+    }
+
+    # (G9-G27, M91 rf-116) CROSS-REFERENCE INTEGRITY JUDGMENT NAMES AND THEIR CASES -- the "enforcement" item of the conventions section on
+    # cross-reference integrity is no longer prose but xr-asks: / xr-ask-cases: / xr-ask-from:. Declaration hygiene (G9-G16) comes from
+    # registry rows, the mapping (G18-G21) calls the Ak* bodies with Part G. Part G is the axis of that one section, so there is no skip
+    # declaration. This block has to follow the Ak* definitions, so it sits here, apart from the other Part G cases (G1-G8c).
+    # The controls (G22-G27) ask, as a DELTA, whether a verdict moves by one on a conventions copy / synthetic runner (control-reads-delta).
+    $XRA_KEY = 'xr-asks:'
+    $XRC_KEY = 'xr-ask-cases:'
+    $XRF_KEY = 'xr-ask-from:'
+    # addname / droppair / nocase / unknown as in CcFixture.
+    function XrFixture([string]$mode) {
+        $f = Join-Path $sbx ('conv-xr-' + $mode + '.md')
+        $bt = [string][char]0x60
+        $ka = '- ' + $bt + $XRA_KEY + $bt; $kc = '- ' + $bt + $XRC_KEY + $bt
+        $ps = @(AkPairs $XRC_KEY); $cnt = @{}
+        foreach ($x in $ps) { $k = FlPairMark $x; if ($cnt.ContainsKey($k)) { $cnt[$k]++ } else { $cnt[$k] = 1 } }
+        $ids = OrdSet @(AkCaseIds 'G' $RUN_SH)
+        $p1 = ' ' + (@($ps | Where-Object { $cnt[(FlPairMark $_)] -eq 1 -and $ids.Contains((FlPairMark $_)) }) | Select-Object -First 1); $n1 = @(DnNames $XRA_KEY) | Select-Object -First 1
+        $ws = [char[]]@([char]0x20, [char]0x09)
+        $out = foreach ($l in [System.IO.File]::ReadAllLines($CONV)) {
+            $t = $l.TrimStart($ws)
+            if ($mode -eq 'addname' -and $t.StartsWith($ka, [System.StringComparison]::Ordinal)) { $l = $l + ' xr-zz-add' }
+            if ($t.StartsWith($kc, [System.StringComparison]::Ordinal)) {
+                if ($mode -eq 'droppair') { $s = $l + ' '; $i = $s.IndexOf($p1 + ' ', [System.StringComparison]::Ordinal); if ($i -ge 0) { $s = $s.Substring(0, $i) + $s.Substring($i + $p1.Length) }; $l = $s.Substring(0, $s.Length - 1) }
+                if ($mode -eq 'nocase') { $l = $l + ' ' + $n1 + '=G999' }
+                if ($mode -eq 'unknown') { $l = $l + ' xr-zz-unknown=G3' }
+            }
+            $l
+        }
+        [System.IO.File]::WriteAllLines($f, [string[]]@($out), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    # in-sh / in-ps1: one in-range unmapped suffixed case / tail: a digit-tail ID, a comment line, another part's case and a plain ID.
+    function XrRunnerFixture([string]$mode) {
+        $f = Join-Path $sbx ('runner-xr-' + $mode + '.txt')
+        $q = [string][char]0x22
+        $ln = switch ($mode) {
+            'in-sh' { @('chk ' + $q + 'G7b: suffixed' + $q) }
+            'in-ps1' { @('    Chk ' + $q + 'G7b: suffixed' + $q) }
+            'tail' { @(('chk ' + $q + 'G8b0: tail' + $q), ('# chk ' + $q + 'G97b1: comment' + $q), ('chk ' + $q + 'P8b0: other' + $q), ('    Chk ' + $q + 'G96: plain' + $q)) }
+        }
+        [System.IO.File]::WriteAllLines($f, [string[]]@($ln), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    if (PartOn 'G') {
+    Chk "G17: cross-reference judgment name / mapping / start-case extraction positive control" $(if (@(DnNames $XRA_KEY).Count -ge 1 -and @(AkPairs $XRC_KEY).Count -ge 1 -and (AkFrom $XRF_KEY 'G') -ne '') { 'ok' } else { 'no' }) 'ok'
+    Chk "G18: main check - every cross-reference judgment name has a mapped case" (AkAskNoCase $XRA_KEY $XRC_KEY) '0'
+    Chk "G19: main check - every name in the mapping is in xr-asks" (AkAskUnknown $XRA_KEY $XRC_KEY) '0'
+    Chk "G20: main check - every mapped case exists as a case in both runners" (AkCaseMissing $XRC_KEY 'G') '0'
+    Chk "G21: main check - every case of this axis (xr-ask-from and above) is in the mapping" (AkCaseUnmapped $XRC_KEY $XRF_KEY 'G') '0'
+    Chk "G22: control - a conventions copy with one more judgment name adds one name without a case" ([string]([int](AkAskNoCase $XRA_KEY $XRC_KEY (XrFixture 'addname')) - [int](AkAskNoCase $XRA_KEY $XRC_KEY))) '1'
+    Chk "G23: control - a conventions copy with the first pair whose case appears once dropped adds one unmapped case" ([string]([int](AkCaseUnmapped $XRC_KEY $XRF_KEY 'G' (XrFixture 'droppair')) - [int](AkCaseUnmapped $XRC_KEY $XRF_KEY 'G'))) '1'
+    Chk "G24: control - a conventions copy with a pair naming a missing case adds one missing case" ([string]([int](AkCaseMissing $XRC_KEY 'G' (XrFixture 'nocase')) - [int](AkCaseMissing $XRC_KEY 'G'))) '1'
+    Chk "G25: control - a conventions copy with a pair naming an undeclared judgment adds one unknown name" ([string]([int](AkAskUnknown $XRA_KEY $XRC_KEY (XrFixture 'unknown')) - [int](AkAskUnknown $XRA_KEY $XRC_KEY))) '1'
+    Chk "G26: control - two synthetic runners holding one in-range unmapped suffixed case give one unmapped" (AkCaseUnmapped $XRC_KEY $XRF_KEY 'G' '' (XrRunnerFixture 'in-sh') (XrRunnerFixture 'in-ps1')) '1'
+    Chk "G27: control - the case-line reader takes a digit-tail ID (G8b0 form) and skips comment lines and other parts' cases" ((@(AkCaseIds 'G' (XrRunnerFixture 'tail')) | ForEach-Object { $_ + ',' }) -join '') 'G8b0,G96,'
     }
 
     # --- Part Q: the verdict comparison is pinned to Ordinal (M57) ------------
@@ -8169,6 +8278,14 @@ try {
     # so the Part K (`hc-asks:`) declaration hygiene lives here. The keys are literals in source and the
     # declaration's original is the conventions line itself -- the table only decides WHICH case ID asks WHICH key.
     $DECL_REG = @'
+G|G9|count|CONV|xr-asks:|exactly one xr-asks declaration line
+G|G10|count|CONV|xr-ask-cases:|exactly one xr-ask-cases declaration line
+G|G11|count|CONV|xr-ask-from:|exactly one xr-ask-from declaration line
+G|G12|seps|CONV|xr-asks: xr-ask-cases: xr-ask-from:|no forbidden separators at the tail of the three cross-reference judgment declaration lines
+G|G13|dup|CONV|xr-asks:|main check - cross-reference judgment names are unique
+G|G14|def|CONV|xr-asks:|main check - exactly one definition item per judgment name
+G|G15|orphan|CONV|xr-asks:|main check - every judgment definition item has a declared name (0 orphans)
+G|G16|order|CONV|xr-asks:|main check - judgment definition items follow the declared name order
 I|I7|count|CONV|state-neg:|exactly one state-neg declaration line in the convention
 I|I8|count|CONV|state-past:|exactly one state-past declaration line in the convention
 I|I10|seps|CONV|state-neg:|no forbidden separator in the state-neg declaration tail
