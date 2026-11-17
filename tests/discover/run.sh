@@ -5911,6 +5911,160 @@ chk "V31: 본 검사 - 규약이 그 병기어의 정의 줄을 정확히 하나
 # 토큰은 어느 파일에도 없으므로 기준선이 구조로 상수 0이다**(규약 `control-form:`이 요구하는 같은
 # 줄 서술). 이 케이스가 없으면 `cf_restated`가 인자를 무시해도 `V29`가 초록이다.
 chk "V32: 배선 - 다른 병기어를 주면 재서술처가 0이다" "$(cf_restated zzz-other-form)" "0"
+
+# (V40~V71 / M92) **케이스 은퇴** — 케이스를 **거두는** 규칙(규약 "케이스 은퇴" 절). 은퇴는 README 한 줄
+# `- retired: {ID}={갈래}@{보고서}[>{남는 ID},…]`이고, 갈래는 `retire-ways:` 이름 · 보고서는 실재하고 되돌림 표에
+# `retire-{ID}` 행 · 그 행들이 갈래를 보인다(은퇴 ID가 붉은 행마다 `retire-subsumed`는 남는 ID가 함께 붉고 `retire-impossible`은
+# 그런 행이 없다 · `retire-subsumed`는 은퇴 ID가 붉은 행이 하나 이상 있다 — M92 리뷰 라운드 1 권장 2) · ID는 두 러너에서 사라짐 · 두 번 은퇴하지 않음 · `retire-subsumed`는 두 러너에 사는 남는 ID를,
+# `retire-impossible`은 남는 ID 없음. `retire-ways:` 자신의 위생은 등록표 행 V34~V39다.
+# **번호 대장**(M92 재작업 — 리뷰 차단 1): 선언 없이 케이스를 지우면 위 판정은 읽을 줄이 없어 초록이었다. 그래서 파트마다 1부터
+# 가장 큰 번호까지 각 번호가 **러너에 살아 있거나 · 은퇴 줄에 있거나 · 빈 번호 줄(`- number-gap: {ID}@{보고서}`)에 있는지** 묻는다.
+# 빈 번호 줄은 이 규칙 이전부터 비어 있던 번호다(쓰인 적 없는 번호 · M73의 산문 은퇴). 접미 꼴(`G8a`)은 바탕 번호를 채운다.
+# 대장은 **번호를 단 ID 단위**다(M92 리뷰 라운드 1 차단 1) — 번호 없는 라벨(`A:` · `D:` 등)과 한 ID를 여러 케이스 줄이 쓰는 자리(`B1` · `C3` 등)의
+# 남는 줄은 대장 밖이라 그 삭제를 여기서 묻지 않는다(규약 "케이스 은퇴" 절 「기계가 묻지 않는 것」).
+# **목록 꼴 이탈**(리뷰 차단 2): 은퇴 줄을 들여쓰거나 다른 목록 기호로 적으면 정본 꼴 추출이 0이 되어 판정이 공허했다 —
+# 정본 꼴이 아닌 목록 줄에 그 키가 있으면 센다.
+rt_ways() { decl_tail "$CONV" 'retire-ways:' | tr -s ' ' '\n' | LC_ALL=C grep -v '^$'; }
+rt_marker() { decl_tail "$CONV" 'reversal-block:' | tr -s ' ' '\n' | LC_ALL=C grep -v '^$' | head -1; }
+rt_ids() { # <러너 소스> → 케이스 ID 한 줄씩(중복 없이) — `src_case_ids`와 같은 규칙(줄 머리 공백을 벗긴 `chk "ID:` · `Chk "ID:` ·
+    # 등록표 케이스 행, 주석 줄 제외)에 접미 뒤 숫자 꼬리(`G8b0` — `ak_case_ids`가 받는 꼴)를 더 받는다. 주석으로만 남은 케이스는 살아 있지 않다(리뷰 권장 3).
+    LC_ALL=C awk -v q='"' '{ sub(/\r$/, ""); t = $0; sub(/^[ \t]+/, "", t)
+        if (substr(t, 1, 5) == "chk " q || substr(t, 1, 5) == "Chk " q) { r = substr(t, 6); j = index(r, ":"); if (j > 1) { id = substr(r, 1, j - 1); if (id ~ /^[A-Z][0-9]+[a-z]*[0-9]*$/) print id }; next }
+        if (t ~ /^[A-Z][|][A-Z][0-9]+[a-z]*[0-9]*[|][a-z-]+[|]/) { split(t, f, "|"); print f[2] } }' "$1" | LC_ALL=C sort -u
+}
+rt_rows() { # <보고서> <마커> → 표 데이터 행마다 「행 이름 붉은 케이스…」 한 줄(열 위치는 `reversal-columns:`, 붉은 칸은 `reversal-sep:`로 가른다)
+    [ -f "$1" ] || return 0
+    tr -d '\r' < "$1" | LC_ALL=C awk -v s="<!-- $2:start -->" -v e="<!-- $2:end -->" -v ri="$(rv_col row)" -v ci="$(rv_col reddened)" -v sp="$RVSEP" '
+        { t = $0; gsub(/^[ \t]+|[ \t]+$/, "", t) }
+        t == s { o = 1; h = 0; next }
+        t == e { o = 0; next }
+        !o || substr(t, 1, 1) != "|" { next }
+        !h { if (index(t, "---") > 0) h = 1; next }
+        { n = split(t, f, "|"); if (ri < 1 || ci < 1 || n < ri + 2 || n < ci + 2) next
+          r = f[ri + 1]; c = f[ci + 1]; gsub(/[ \t*`]/, "", r); gsub(/[ \t*`]/, "", c)
+          if (r == "") next
+          out = r; m = split(c, a, sp); for (k = 1; k <= m; k++) if (a[k] != "") out = out " " a[k]
+          print out }'
+}
+# → "form way report row live dup surv incl stray gap und lines"
+rt_audit() { # <readme> <root> <ps1> <sh>
+    _ways=" $(rt_ways | tr '\n' ' ')"; _mk=$(rt_marker)
+    _idre='[A-Z][0-9]+[a-z]*[0-9]*'
+    _t="$SBX/rt.$$"
+    rt_ids "$3" > "$_t.ps"; rt_ids "$4" > "$_t.sh"
+    if [ -f "$1" ]; then tr -d '\r' < "$1" > "$_t.rd"; else : > "$_t.rd"; fi
+    LC_ALL=C grep '^- retired:' "$_t.rd" > "$_t.ret" || true
+    LC_ALL=C grep '^- number-gap:' "$_t.rd" > "$_t.gap" || true
+    _st=$(LC_ALL=C awk '{ t = $0; sub(/^[ \t]+/, "", t); if (t !~ /^([-*+]|[0-9]+[.)])[ \t]+(retired|number-gap):/) next; if ($0 ~ /^- (retired|number-gap): /) next; c++ } END { print c + 0 }' "$_t.rd")
+    _fo=0; _wa=0; _re=0; _ro=0; _li=0; _du=0; _su=0; _in=0; _n=0; _seen=" "
+    while IFS= read -r _ln; do
+        _n=$((_n + 1))
+        if ! printf '%s\n' "$_ln" | LC_ALL=C grep -Eq "^- retired: $_idre=[a-z-]+@[^ >]+(>$_idre(,$_idre)*)?\$"; then _fo=$((_fo + 1)); continue; fi
+        _b=${_ln#- retired: }
+        _id=${_b%%=*}; _r=${_b#*=}; _w=${_r%%@*}; _r=${_r#*@}
+        case "$_r" in *'>'*) _rp=${_r%%>*}; _sv=${_r#*>} ;; *) _rp=$_r; _sv= ;; esac
+        case "$_ways" in *" $_w "*) ;; *) _wa=$((_wa + 1)) ;; esac
+        if [ ! -f "$2/$_rp" ]; then _re=$((_re + 1))
+        else
+            rt_rows "$2/$_rp" "$_mk" | LC_ALL=C awk -v a="retire-$_id" '$1 == a || index($1, a "-") == 1' > "$_t.rows"
+            if [ ! -s "$_t.rows" ]; then _ro=$((_ro + 1))
+            elif ! LC_ALL=C awk -v id="$_id" -v w="$_w" -v sv=",$_sv," '
+                { r = 0; s = 0; for (k = 2; k <= NF; k++) { if ($k == id) r = 1; if (index(sv, "," $k ",") > 0) s = 1 }
+                  if (r) any = 1
+                  if (r && ((w == "retire-subsumed" && !s) || w == "retire-impossible")) bad = 1 }
+                END { if (w == "retire-subsumed" && !any) bad = 1; exit bad ? 1 : 0 }' "$_t.rows"; then _in=$((_in + 1)); fi
+        fi
+        if LC_ALL=C grep -qxF -- "$_id" "$_t.ps" || LC_ALL=C grep -qxF -- "$_id" "$_t.sh"; then _li=$((_li + 1)); fi
+        case "$_seen" in *" $_id "*) _du=$((_du + 1)) ;; *) _seen="$_seen$_id " ;; esac
+        if [ "$_w" = retire-subsumed ]; then
+            _bad=0; [ -z "$_sv" ] && _bad=1
+            for _s in $(printf '%s' "$_sv" | tr ',' ' '); do
+                { LC_ALL=C grep -qxF -- "$_s" "$_t.ps" && LC_ALL=C grep -qxF -- "$_s" "$_t.sh"; } || _bad=1
+            done
+            [ "$_bad" -eq 1 ] && _su=$((_su + 1))
+        elif [ "$_w" = retire-impossible ] && [ -n "$_sv" ]; then _su=$((_su + 1)); fi
+    done < "$_t.ret"
+    _gb=0; _gseen=" "
+    while IFS= read -r _ln; do
+        if ! printf '%s\n' "$_ln" | LC_ALL=C grep -Eq "^- number-gap: $_idre@[^ ]+\$"; then _gb=$((_gb + 1)); continue; fi
+        _b=${_ln#- number-gap: }; _id=${_b%%@*}; _rp=${_b#*@}; _bad=0
+        [ -f "$2/$_rp" ] || _bad=1
+        if LC_ALL=C grep -qxF -- "$_id" "$_t.ps" || LC_ALL=C grep -qxF -- "$_id" "$_t.sh"; then _bad=1; fi
+        case "$_seen" in *" $_id "*) _bad=1 ;; esac
+        case "$_gseen" in *" $_id "*) _bad=1 ;; *) _gseen="$_gseen$_id " ;; esac
+        _gb=$((_gb + _bad))
+    done < "$_t.gap"
+    # 번호 대장 — 파트마다 (살아 있음 ∪ 은퇴 ∪ 빈 번호)의 가장 큰 번호까지, 그 합집합에 없는 번호의 수
+    _un=$({ cat "$_t.ps" "$_t.sh"; printf '%s\n' $_seen $_gseen; } | LC_ALL=C awk '
+        match($0, /^[A-Z][0-9]+/) { p = substr($0, 1, 1); n = substr($0, 2, RLENGTH - 1) + 0; if (n < 1) next
+            if (!((p, n) in C)) { C[p, n] = 1; k[p]++ }; if (n > mx[p]) mx[p] = n }
+        END { for (p in mx) u += mx[p] - k[p]; print u + 0 }')
+    rm -f "$_t".*
+    echo "$_fo $_wa $_re $_ro $_li $_du $_su $_in $_st $_gb $_un $_n"
+}
+rt_field() { printf '%s\n' "$1" | LC_ALL=C awk -v i="$2" '{ print $(i + 1) }'; }
+RT_PS1="$ROOT/tests/discover/run.ps1"; RT_SH="$ROOT/tests/discover/run.sh"
+RT_REAL=$(rt_audit "$DISC_README" "$ROOT" "$RT_PS1" "$RT_SH")
+# (V40) 추출 positive-control — 갈래 이름 · 되돌림 마커 · 두 러너의 케이스 ID가 비면 아래 판정이 공허하고, 이 README에는 은퇴가
+# 있으므로(은퇴는 되돌리지 않는다) 정본 꼴 은퇴 줄 추출이 0이면 선언이 있는데 추출이 0인 것이다(리뷰 차단 2 · 마일스톤 T03 ⑴).
+chk "V40: 은퇴 추출 positive-control(갈래 이름 · 되돌림 마커 · 러너 케이스 ID · 은퇴 줄)" "$([ -n "$(rt_ways)" ] && [ -n "$(rt_marker)" ] && [ -n "$(rt_ids "$RT_PS1")" ] && [ -n "$(rt_ids "$RT_SH")" ] && [ "$(rt_field "$RT_REAL" 11)" -gt 0 ] && echo ok || echo no)" "ok"
+chk "V41: 본 검사 - 은퇴 줄이 모두 선언된 꼴이다" "$(rt_field "$RT_REAL" 0)" "0"
+chk "V42: 본 검사 - 은퇴 갈래가 모두 retire-ways 이름이다" "$(rt_field "$RT_REAL" 1)" "0"
+chk "V43: 본 검사 - 은퇴 근거 보고서가 모두 실재한다" "$(rt_field "$RT_REAL" 2)" "0"
+chk "V44: 본 검사 - 근거 보고서마다 retire-{ID} 되돌림 행이 있다" "$(rt_field "$RT_REAL" 3)" "0"
+chk "V45: 본 검사 - 은퇴 ID가 어느 러너에도 케이스로 남지 않았다" "$(rt_field "$RT_REAL" 4)" "0"
+chk "V46: 본 검사 - 같은 ID가 두 번 은퇴하지 않았다" "$(rt_field "$RT_REAL" 5)" "0"
+chk "V47: 본 검사 - retire-subsumed의 남는 ID는 두 러너에 살고 retire-impossible은 남는 ID가 없다" "$(rt_field "$RT_REAL" 6)" "0"
+chk "V58: 본 검사 - 근거 행이 갈래를 보인다(포함 은퇴는 은퇴 ID가 붉은 행이 있고 그 행마다 남는 ID가 함께 붉다 · 불가능 은퇴는 그런 행이 없다)" "$(rt_field "$RT_REAL" 7)" "0"
+chk "V59: 본 검사 - 은퇴 · 빈 번호 키를 든 목록 줄이 모두 정본 꼴이다" "$(rt_field "$RT_REAL" 8)" "0"
+chk "V60: 본 검사 - 빈 번호 줄이 모두 꼴 · 보고서 실재 · 러너 부재 · 은퇴와 겹치지 않음 · 유일을 지킨다" "$(rt_field "$RT_REAL" 9)" "0"
+chk "V61: 본 검사 - 파트마다 가장 큰 번호까지 모든 번호가 살아 있거나 은퇴 · 빈 번호 줄에 있다(가장 큰 번호 아래의 선언 없는 삭제 0 — 대장 밖은 규약 경계)" "$(rt_field "$RT_REAL" 10)" "0"
+# (V48~V57 · V62~V71) **픽스처 통제** — 샌드박스의 합성 README · 보고서 · **합성 러너**를 쓴다(실물 러너의 번호 대장에 기대지 않는다).
+# 합성 러너는 X1(Chk) · 들여쓴 X2(chk) · 등록표 행 X3 · 접미 꼴 X4b0 · X7과 **주석으로만 남은** X5 · X9를 갖는다 — 그래서 X5 · X6이 빈
+# 번호이고, 정상 사본(V48)의 러너 잔존 0이 주석 줄을 케이스로 세지 않는다는 확인이다. 납작한 러너(X1~X3)는 빈 번호가 없다(V57).
+RT_DIR="$SBX/retire-fx"; mkdir -p "$RT_DIR/r"
+RT_MK=$(rt_marker)
+printf '%s\n' 'Chk "X1: a" "x" "x"' '    chk "X2: b" "x" "x"' 'X|X3|count|CONV|zz:|c' 'chk "X4b0: d" "x" "x"' '# chk "X5: retired, comment only" "x" "x"' '    # chk "X9: comment only" "x" "x"' 'chk "X7: e" "x" "x"' > "$RT_DIR/fx.run"
+printf '%s\n' 'Chk "X1: a" "x" "x"' 'chk "X2: b" "x" "x"' 'X|X3|count|CONV|zz:|c' > "$RT_DIR/flat.run"
+rt_fxrep() { # <파일> <행 이름 붉은 칸>… → 선언된 열 순서대로 합성 되돌림 표
+    _p="$RT_DIR/r/$1"; shift
+    { printf '<!-- %s:start -->\n| a | b | c | d | e |\n|---|---|---|---|---|\n' "$RT_MK"
+      for _rw in "$@"; do printf '%s\n' "$_rw" | LC_ALL=C awk -v ri="$(rv_col row)" -v ci="$(rv_col reddened)" '{ o = "|"; for (i = 1; i <= 5; i++) o = o " " (i == ri ? $1 : (i == ci ? $2 : "x")) " |"; print o }'; done
+      printf '<!-- %s:end -->\n' "$RT_MK"; } > "$_p"
+}
+rt_fxrep ok.md 'retire-X5-a X5;X1' 'retire-X5-b X1' 'retire-X1 X1;X2'
+rt_fxrep norow.md 'other-X5 X5;X1'
+rt_fxrep imp.md 'retire-X5 X1'
+rt_fxrep bad.md 'retire-X5 X5;X2'
+printf 'X6 was never assigned\n' > "$RT_DIR/r/gap.md"
+rt_fx() { # <이름> <러너> <줄>… → 그 합성 README의 감사 값
+    _p="$RT_DIR/$1.md"; _rn="$RT_DIR/$2.run"; shift 2
+    { echo '# fixture'; for _l in "$@"; do printf '%s\n' "$_l"; done; } > "$_p"
+    rt_audit "$_p" "$RT_DIR" "$_rn" "$_rn"
+}
+RT_GOOD='- retired: X5=retire-subsumed@r/ok.md>X1'
+RT_GAP='- number-gap: X6@r/gap.md'
+chk "V48: 통제 - 꼴이 맞는 은퇴 · 빈 번호는 깨끗하다(주석으로만 남은 은퇴 ID는 살아 있지 않다)" "$(rt_fx good fx "$RT_GOOD" "$RT_GAP")" "0 0 0 0 0 0 0 0 0 0 0 1"
+chk "V49: 통제 - retire-ways 밖 갈래를 잡는다" "$(rt_fx way fx '- retired: X5=retire-cheap@r/ok.md>X1' "$RT_GAP")" "0 1 0 0 0 0 0 0 0 0 0 1"
+chk "V50: 통제 - 없는 근거 보고서를 잡는다" "$(rt_fx rep fx '- retired: X5=retire-subsumed@r/none.md>X1' "$RT_GAP")" "0 0 1 0 0 0 0 0 0 0 0 1"
+chk "V51: 통제 - retire-{ID} 행이 없는 보고서를 잡는다" "$(rt_fx row fx '- retired: X5=retire-subsumed@r/norow.md>X1' "$RT_GAP")" "0 0 0 1 0 0 0 0 0 0 0 1"
+chk "V52: 통제 - 살아 있는 케이스의 은퇴를 잡는다" "$(rt_fx live fx "$RT_GOOD" "$RT_GAP" '- retired: X1=retire-subsumed@r/ok.md>X2')" "0 0 0 0 1 0 0 0 0 0 0 2"
+chk "V53: 통제 - 같은 ID의 두 번 은퇴를 잡는다" "$(rt_fx dup fx "$RT_GOOD" "$RT_GOOD" "$RT_GAP")" "0 0 0 0 0 1 0 0 0 0 0 2"
+chk "V54: 통제 - 남는 ID가 케이스가 아닌 포함 은퇴를 잡는다" "$(rt_fx surv fx '- retired: X5=retire-subsumed@r/ok.md>X1,Z9' "$RT_GAP")" "0 0 0 0 0 0 1 0 0 0 0 1"
+chk "V55: 통제 - 남는 ID를 적은 불가능 은퇴를 잡는다" "$(rt_fx imp fx '- retired: X5=retire-impossible@r/imp.md>X1' "$RT_GAP")" "0 0 0 0 0 0 1 0 0 0 0 1"
+chk "V56: 통제 - 꼴이 깨진 은퇴 줄을 잡는다" "$(rt_fx form fx "$RT_GOOD" '- retired: X5 = retire-subsumed@r/ok.md' "$RT_GAP")" "1 0 0 0 0 0 0 0 0 0 0 2"
+chk "V57: 통제 - 빈 번호가 없고 은퇴 줄도 없는 README는 대상 없음이다" "$(rt_fx none flat '- cases: 1')" "0 0 0 0 0 0 0 0 0 0 0 0"
+chk "V62: 통제 - 은퇴 ID가 남는 ID 없이 붉은 근거 행을 잡는다" "$(rt_fx incls fx '- retired: X5=retire-subsumed@r/bad.md>X1' "$RT_GAP")" "0 0 0 0 0 0 0 1 0 0 0 1"
+chk "V63: 통제 - 은퇴 ID가 붉은 근거 행을 가진 불가능 은퇴를 잡는다" "$(rt_fx incli fx '- retired: X5=retire-impossible@r/ok.md' "$RT_GAP")" "0 0 0 0 0 0 0 1 0 0 0 1"
+chk "V64: 통제 - 주석으로만 남은 남는 ID를 잡는다" "$(rt_fx survc fx '- retired: X5=retire-subsumed@r/ok.md>X1,X9' "$RT_GAP")" "0 0 0 0 0 0 1 0 0 0 0 1"
+chk "V65: 통제 - 들여쓴 은퇴 줄을 잡는다" "$(rt_fx indent fx "$RT_GOOD" "$RT_GAP" '  - retired: X8=retire-subsumed@r/ok.md>X1')" "0 0 0 0 0 0 0 0 1 0 0 1"
+chk "V66: 통제 - 다른 목록 기호의 빈 번호 줄을 잡는다" "$(rt_fx bullet fx "$RT_GOOD" "$RT_GAP" '* number-gap: X8@r/gap.md')" "0 0 0 0 0 0 0 0 1 0 0 1"
+chk "V67: 통제 - 살아 있는 번호의 빈 번호 줄을 잡는다" "$(rt_fx gaplive fx "$RT_GOOD" "$RT_GAP" '- number-gap: X1@r/gap.md')" "0 0 0 0 0 0 0 0 0 1 0 1"
+chk "V68: 통제 - 없는 보고서를 가리키는 빈 번호 줄을 잡는다" "$(rt_fx gaprep fx "$RT_GOOD" '- number-gap: X6@r/none.md')" "0 0 0 0 0 0 0 0 0 1 0 1"
+chk "V69: 통제 - 꼴이 깨진 빈 번호 줄을 잡는다" "$(rt_fx gapform fx "$RT_GOOD" "$RT_GAP" '- number-gap: X8')" "0 0 0 0 0 0 0 0 0 1 0 1"
+chk "V70: 통제 - 선언 없이 빈 번호를 잡는다(케이스를 지우고 아무 줄도 더하지 않은 상태)" "$(rt_fx undecl fx "$RT_GOOD")" "0 0 0 0 0 0 0 0 0 0 1 1"
+# (V71) 은퇴 ID가 한 번도 붉지 않은 근거 행만 가진 포함 은퇴 — 「붉은 행마다」 전칭이 공허하게 참이던 자리(M92 리뷰 라운드 1 권장 2).
+chk "V71: 통제 - 은퇴 ID가 붉은 근거 행이 없는 포함 은퇴를 잡는다" "$(rt_fx inclv fx '- retired: X5=retire-subsumed@r/imp.md>X1' "$RT_GAP")" "0 0 0 0 0 0 0 1 0 0 0 1"
 fi
 
 # --- Part W: 검사 범위 선언 (M62) --------------------------------------------
@@ -6163,9 +6317,8 @@ MC_ALIAS=$(decl_tail "$CONV" "$MC_KEY" | LC_ALL=C awk '{ print $1 }')
 [ -n "$MC_ALIAS" ] || MC_ALIAS=zzz-measure-cache-unset
 # (W14) 추출 positive-control — `W2`와 같은 사유(폴백으로 돌면 원인이 가려진다).
 chk "W14: 캐시 병기어 추출 positive-control" "$([ "$MC_ALIAS" != zzz-measure-cache-unset ] && echo ok || echo no)" "ok"
-# (W15~W17) **본 검사** — 병기어가 규약과 impl 스킬 둘 다에 있고(`in_both`), 규약 쪽은 **정의 줄**을,
+# (W16 · W17) **본 검사** — W15(병기어가 규약과 impl 스킬 둘 다에)는 M92에 retire-subsumed로 은퇴했다(W17이 받는다). 규약 쪽은 **정의 줄**을,
 # 스킬 쪽은 **백틱 토큰**을 따로 문다(`W4`~`W6`과 같은 층위 분담).
-chk "W15: 캐시 병기어($MC_ALIAS) 규약↔impl SKILL 정합" "$(in_both "$MC_ALIAS" "$CONV" "$IMPL_SKILL")" "yes"
 chk "W16: 규약이 캐시 병기어의 정의 줄을 정확히 하나 갖는다" "$(scope_defn "$MC_ALIAS")" "1"
 chk "W17: impl SKILL이 캐시 병기어를 백틱 토큰으로 갖는다" "$(scope_tok "$IMPL_SKILL" "$MC_ALIAS")" "yes"
 # 음성 통제 · 교차 통제 — 위 두 통제와 동형(구별력 입증 · 자산 경계).
@@ -6229,7 +6382,7 @@ chk "W65: 배선 - 다른 기대는 분기 병기어를 주면 결합이 성립�
 # (W67~W72 · M66) **스캔 양성 통제** — 규약 "릴리즈 빌드 출력 검증" 절의 병기어와 재서술처 하나
 # (`skills/release/SKILL.md`). 재서술처가 하나라 결합이 자리별 단언과 겹치므로 결합 케이스를 두지 않고
 # 규약 정의 줄(`W69`)과 재서술처 백틱 토큰(`W70`)만 문다. 여기서 release 스킬의 토큰은 **파일 전역**으로 찾고,
-# 단계 앵커와 같은 항목 창에 있는지는 아래 `W81`·`W82`(M68)가 따로 문다.
+# 단계 앵커와 같은 항목 창에 있는지는 아래 `W82`(M68)가 따로 문다(`W81`은 M92에 `W82`가 받는 포함으로 은퇴했다).
 SCAN_KEY='scan-control:'
 SCAN_ALIAS=$(decl_tail "$CONV" "$SCAN_KEY" | LC_ALL=C awk '{ print $1 }')
 [ -n "$SCAN_ALIAS" ] || SCAN_ALIAS=zzz-scan-control-unset
@@ -6242,7 +6395,7 @@ chk "W71: 배선 - 다른 스캔 양성 통제 병기어는 release SKILL에 없
 # (W73~W78 · M67) **판정 없는 부재 잡** — 규약 측정 배당 블록의 병기어(`absent-job:`)와 재서술처 하나
 # (`skills/release/SKILL.md`의 `pr` 모드 마무리). `W67`~`W72`와 같은 층·같은 형태다. 재서술처가 하나라 결합이
 # 자리별 단언과 겹치므로 결합 케이스를 두지 않고 정의 줄(`W75`)과 재서술처 백틱 토큰(`W76`)만 문다.
-# 여기서 release 스킬의 토큰은 **파일 전역**으로 찾고, 단계 앵커와 같은 항목 창에 있는지는 아래 `W87`·`W88`(M68)이
+# 여기서 release 스킬의 토큰은 **파일 전역**으로 찾고, 단계 앵커와 같은 항목 창에 있는지는 아래 `W88`(`W87`은 M92에 포함으로 은퇴 · M68)이
 # 따로 문다.
 # 마무리에서 그 갈래를 **실제로 밟았는가**는 절차라 묻지 않는다.
 ABSENT_KEY='absent-job:'
@@ -6310,11 +6463,9 @@ ABSENT_WIN=$(item_win_probe "$REL_SKILL" "$ABSENT_ALIAS" "$ABSENT_ANCHOR")
 printf '1. step %s\n   - a `%s`\n   - b %s\n' "$SCAN_ANCHOR" "$SCAN_ALIAS" "$SCAN_ANCHOR" > "$SBX/winfx_scan.md"
 printf '1. step %s\n   - a `%s`\n   - b %s\n' "$ABSENT_ANCHOR" "$ABSENT_ALIAS" "$ABSENT_ANCHOR" > "$SBX/winfx_absent.md"
 chk "W80: 스캔 단계 앵커 추출 positive-control" "$([ "$SCAN_ANCHOR" != zzz-scan-anchor-unset ] && echo ok || echo no)" "ok"
-chk "W81: 스캔 양성 통제 토큰이 앵커와 같은 항목 창에 있다" "${SCAN_WIN%% *}" "yes"
 chk "W82: 스캔 단계 앵커가 파일에서 그 창 안에만 있다" "$(win_unique "$SCAN_WIN")" "ok"
 chk "W83: 통제 - 앵커 밖 항목 창의 스캔 토큰을 잡는다" "$(item_win_probe "$SBX/winfx_scan.md" "$SCAN_ALIAS" "$SCAN_ANCHOR" | LC_ALL=C awk '{ print $1 }')" "no"
 chk "W86: 부재 잡 단계 앵커 추출 positive-control" "$([ "$ABSENT_ANCHOR" != zzz-absent-anchor-unset ] && echo ok || echo no)" "ok"
-chk "W87: 부재 잡 토큰이 앵커와 같은 항목 창에 있다" "${ABSENT_WIN%% *}" "yes"
 chk "W88: 부재 잡 단계 앵커가 파일에서 그 창 안에만 있다" "$(win_unique "$ABSENT_WIN")" "ok"
 chk "W89: 통제 - 앵커 밖 항목 창의 부재 잡 토큰을 잡는다" "$(item_win_probe "$SBX/winfx_absent.md" "$ABSENT_ALIAS" "$ABSENT_ANCHOR" | LC_ALL=C awk '{ print $1 }')" "no"
 # (W91~W98 · M70) **새 판정의 생명주기 상태표** — 규약 "새 판정의 생명주기 상태표" 소절의 병기어와 재서술처
@@ -6324,7 +6475,6 @@ LIFE_KEY='lifecycle-decl:'
 LIFE_ALIAS=$(decl_tail "$CONV" "$LIFE_KEY" | LC_ALL=C awk '{ print $1 }')
 [ -n "$LIFE_ALIAS" ] || LIFE_ALIAS=zzz-lifecycle-decl-unset
 chk "W92: 생명주기 병기어 추출 positive-control" "$([ "$LIFE_ALIAS" != zzz-lifecycle-decl-unset ] && echo ok || echo no)" "ok"
-chk "W93: 생명주기 병기어($LIFE_ALIAS) 세 파일 전부에 등장" "$(in_all_three "$LIFE_ALIAS" "$CONV" "$IMPL_SKILL" "$IMPL_TPL")" "yes"
 chk "W94: 규약이 생명주기 병기어의 정의 줄을 정확히 하나 갖는다" "$(scope_defn "$LIFE_ALIAS")" "1"
 chk "W95: impl SKILL이 생명주기 병기어를 백틱 토큰으로 갖는다" "$(scope_tok "$IMPL_SKILL" "$LIFE_ALIAS")" "yes"
 chk "W96: impl 템플릿이 생명주기 병기어를 백틱 토큰으로 갖는다" "$(scope_tok "$IMPL_TPL" "$LIFE_ALIAS")" "yes"
@@ -6411,7 +6561,7 @@ chk "W110: 통제 - 픽스처에서 표 밖의 인용을 센다" "$(ltr_orphans 
 #   왜 판정 값(`가능`/`불가`)을 앵커로 쓰지 않는가: 두 낱말은 이 스킬에 **이미 여러 번** 있었다(M72 편집
 #   전 3회·7회). 존재만 묻는 케이스는 갈래를 통째로 지워도 초록이라 **동어반복**이고, 그것이 체크리스트가
 #   「이미 초록이면 아무것도 증명하지 못한다」로 막는 부류다. `review-report`는 편집 전 0회였다.
-#   `W113`이 **파일 전역이 아니라 창**으로 묻는 이유는 `W81`·`W82`가 연 것과 같다 — 포인터만 남기고 갈래를
+#   `W113`이 **파일 전역이 아니라 창**으로 묻는 이유는 `W82`가 연 것과 같다 — 포인터만 남기고 갈래를
 #   다른 자리로 옮기면 전역 공존은 초록이다. 창 판정은 `item_win_probe`를 그대로 쓴다.
 CYC_SKILL="$ROOT/skills/cycle/SKILL.md"
 SI_ROW_TOK='review-report'
@@ -6420,8 +6570,7 @@ ST_ACC_TOK='st-fail-then-draft'
 # 빈 토큰으로 공허하게 성립한다(`W8`·`W20`과 같은 형태).
 chk "W111: 판정 읽기 결합의 규약 쪽 positive-control" \
     "$([ "$(grep -cF "$SI_ROW_TOK" "$CONV")" -gt 0 ] && [ "$(grep -cF "$ST_ACC_TOK" "$CONV")" -gt 0 ] && echo ok || echo no)" "ok"
-# (W112) 본 검사 — cycle 스킬이 판정을 읽는 법의 선언을 가리킨다.
-chk "W112: cycle 스킬이 판정 읽기 선언을 가리킨다" "$(has_token "$CYC_SKILL" "$SI_ROW_TOK")" "yes"
+# (W112) M92에 retire-subsumed로 은퇴했다 — 창 판정이 포인터 토큰을 요구하므로 포인터가 없으면 W113이 함께 붉는다.
 # (W113) 본 검사 — 그 포인터와 사고 상태 이름이 **같은 항목 창** 안에 있다(전역 공존이 아니다).
 chk "W113: 판정 갈래와 사고 상태가 같은 창" "$(item_win_probe "$CYC_SKILL" "$SI_ROW_TOK" "$ST_ACC_TOK" | LC_ALL=C awk '{ print $1 }')" "yes"
 # (W114) 통제 — 앵커를 창 밖으로 옮긴 픽스처를 잡는다(`W83`·`W89`와 동형).
@@ -6893,6 +7042,12 @@ V|V2|count|CONV|reversal-block:|reversal-block 선언 줄 정확히 1개
 V|V3|count|CONV|reversal-columns:|reversal-columns 선언 줄 정확히 1개
 V|V4|count|CONV|reversal-sep:|reversal-sep 선언 줄 정확히 1개
 V|V5|count|CONV|reversal-since:|reversal-since 선언 줄 정확히 1개
+V|V34|count|CONV|retire-ways:|retire-ways 선언 줄 정확히 1개
+V|V35|seps|CONV|retire-ways:|retire-ways 선언 줄 꼬리에 금지 구분자 0건
+V|V36|dup|CONV|retire-ways:|본 검사 - 은퇴 갈래 이름이 유일하다
+V|V37|def|CONV|retire-ways:|본 검사 - 은퇴 갈래마다 정의 항목이 정확히 하나
+V|V38|orphan|CONV|retire-ways:|본 검사 - 은퇴 갈래 정의 항목마다 선언된 이름이 있다(고아 정의 0)
+V|V39|order|CONV|retire-ways:|본 검사 - 은퇴 갈래 정의 항목의 순서가 선언의 이름 순서와 같다
 W|W1|count|CONV|scope-decl:|scope-decl 선언 줄 정확히 1개
 W|W7|count|CONV|scope-limits:|scope-limits 선언 줄 정확히 1개
 W|W13|count|CONV|measure-cache:|measure-cache 선언 줄 정확히 1개
