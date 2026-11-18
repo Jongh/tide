@@ -7153,6 +7153,224 @@ try {
     # same-line justification `control-form:` asks for). Without it `CfRestated` could ignore its
     # argument and `V29` would stay green.
     Chk "V32: wiring -- another alias leaves no restatement site" ([string](CfRestated 'zzz-other-form')) '0'
+
+    # (V40-V71 / M92) CASE RETIREMENT -- the rule that TAKES a case away (conventions "case retirement" section).
+    # A retirement is one README line `- retired: {ID}={way}@{report}[>{survivor},...]`; the way must be a
+    # `retire-ways:` name, the report must exist and hold a reversal-table row named `retire-{ID}`, those rows must SHOW the
+    # way (on every row where the retired ID reddened, a `retire-subsumed` survivor reddened too; a `retire-impossible` line has
+    # no such row; a `retire-subsumed` line also needs at least one row where the retired ID reddened -- M92 review round 1 rec 2),
+    # the ID must be gone from both runners, must not be retired twice, and a `retire-subsumed` line must name
+    # survivors that live in both runners while a `retire-impossible` line names none. Hygiene of `retire-ways:` itself is the
+    # registry rows V34-V39.
+    # NUMBER LEDGER (M92 rework -- review blocker 1): deleting a case WITHOUT any line left the checks above nothing to read, so it
+    # was green. So per part, every number from 1 up to the largest must be LIVE in a runner, on a retired line, or on a number-gap
+    # line (`- number-gap: {ID}@{report}`). A number-gap is a number that was empty BEFORE this rule (never assigned, or M73's prose
+    # retirement). A suffixed ID (G8a) fills its base number. The ledger is PER NUMBERED ID (M92 review round 1 blocker 1): a label
+    # with no number (A:, D:, ...) and the extra lines of an ID several case lines share (B1, C3, ...) are outside it -- deleting
+    # them is not caught here (conventions "case retirement" section, "not asked" item).
+    # LIST-FORM DRIFT (review blocker 2): indenting a retired line or writing it with another list mark made the canonical extraction
+    # zero and every check vacuous -- a list line that carries either key but is not in canonical form is counted.
+    function RtWays { $t = DeclTail $CONV 'retire-ways:'; if ($null -eq $t) { return @() }; return @($t -split '[ ]+' | Where-Object { $_ -ne '' }) }
+    function RtMarker { $t = DeclTail $CONV 'reversal-block:'; if ($null -eq $t) { return '' }; $a = @($t -split '[ ]+' | Where-Object { $_ -ne '' }); if ($a.Count -gt 0) { return $a[0] } else { return '' } }
+    # Case IDs of a runner source -- the SrcCaseIds rule (space/tab-stripped `chk "ID:` / `Chk "ID:` or a registry case row, comment
+    # lines excluded) plus the digit tail after a suffix (G8b0, the form AkCaseIds takes). A case left only in a comment is NOT live
+    # (review recommendation 3).
+    function RtIds([string]$src) {
+        $q = [string][char]0x22
+        $O = [System.StringComparison]::Ordinal
+        $s = New-Object 'System.Collections.Generic.HashSet[string]'([System.StringComparer]::Ordinal)
+        foreach ($ln in [System.IO.File]::ReadAllLines($src)) {
+            $t = $ln.TrimStart([char[]]@([char]0x20, [char]0x09))
+            if ($t.StartsWith('chk ' + $q, $O) -or $t.StartsWith('Chk ' + $q, $O)) {
+                $r = $t.Substring(5); $j = $r.IndexOf(':', $O)
+                if ($j -gt 0) { $id = $r.Substring(0, $j); if ([regex]::IsMatch($id, '^[A-Z][0-9]+[a-z]*[0-9]*$')) { [void]$s.Add($id) } }
+                continue
+            }
+            if ([regex]::IsMatch($t, '^[A-Z]\|[A-Z][0-9]+[a-z]*[0-9]*\|[a-z-]+\|')) { [void]$s.Add(($t -split '\|')[1]) }
+        }
+        return ,$s
+    }
+    # -> one entry per data row inside the marker window: @(row name, reddened IDs...). Column positions come from
+    # `reversal-columns:`, the reddened cell is split on `reversal-sep:`.
+    function RtRows([string]$path, [string]$marker) {
+        $out = New-Object System.Collections.ArrayList
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return ,$out }
+        $ri = RvCol 'row'; $ci = RvCol 'reddened'
+        $s = '<!-- ' + $marker + ':start -->'; $e = '<!-- ' + $marker + ':end -->'
+        $open = $false; $head = $false
+        foreach ($ln in [System.IO.File]::ReadAllLines($path)) {
+            $t = $ln.Trim()
+            if ($t -ceq $s) { $open = $true; $head = $false; continue }
+            if ($t -ceq $e) { $open = $false; continue }
+            if (-not $open -or -not $t.StartsWith('|', [System.StringComparison]::Ordinal)) { continue }
+            if (-not $head) { if ($t.IndexOf('---', [System.StringComparison]::Ordinal) -ge 0) { $head = $true }; continue }
+            $f = $t -split '\|'
+            if ($ri -lt 1 -or $ci -lt 1 -or $f.Count -lt ($ri + 2) -or $f.Count -lt ($ci + 2)) { continue }
+            $r = $f[$ri] -replace '[ \t\*`]', ''; $c = $f[$ci] -replace '[ \t\*`]', ''
+            if ($r -eq '') { continue }
+            $cells = @($r) + @($c -split [regex]::Escape($RVSEP) | Where-Object { $_ -ne '' })
+            [void]$out.Add($cells)
+        }
+        return ,$out
+    }
+    # -> "form way report row live dup surv incl stray gap und lines" (each a count of offending lines; lines = retired lines seen)
+    function RtAudit([string]$readme, [string]$root, [string]$ps1Path, [string]$shPath) {
+        $ways = @(RtWays); $mk = RtMarker
+        $P = RtIds $ps1Path; $S = RtIds $shPath
+        $form = 0; $way = 0; $rep = 0; $row = 0; $live = 0; $dup = 0; $surv = 0; $incl = 0; $stray = 0; $gap = 0; $n = 0
+        $seen = New-Object 'System.Collections.Generic.HashSet[string]'([System.StringComparer]::Ordinal)
+        $gseen = New-Object 'System.Collections.Generic.HashSet[string]'([System.StringComparer]::Ordinal)
+        $all = @()
+        if (Test-Path -LiteralPath $readme -PathType Leaf) { $all = @([System.IO.File]::ReadAllLines($readme)) }
+        foreach ($ln in $all) {
+            $t = $ln.TrimStart([char[]]@([char]0x20, [char]0x09))
+            if ([regex]::IsMatch($t, '^([-*+]|[0-9]+[.)])[ \t]+(retired|number-gap):') -and -not [regex]::IsMatch($ln, '^- (retired|number-gap): ')) { $stray++ }
+        }
+        $idre = '[A-Z][0-9]+[a-z]*[0-9]*'
+        foreach ($ln in @($all | Where-Object { $_.StartsWith('- retired:', [System.StringComparison]::Ordinal) })) {
+            $n++
+            $m = [regex]::Match($ln, '^- retired: (' + $idre + ')=([a-z-]+)@([^ >]+)(>(' + $idre + '(,' + $idre + ')*))?$')
+            if (-not $m.Success) { $form++; continue }
+            $id = $m.Groups[1].Value; $w = $m.Groups[2].Value; $rp = $m.Groups[3].Value; $sv = $m.Groups[5].Value
+            $svs = @($sv -split ',' | Where-Object { $_ -ne '' })
+            if ($ways -notcontains $w) { $way++ }
+            $rpath = Join-Path $root $rp
+            if (-not (Test-Path -LiteralPath $rpath -PathType Leaf)) { $rep++ }
+            else {
+                $hit = @((RtRows $rpath $mk) | Where-Object { $_[0] -ceq ('retire-' + $id) -or $_[0].StartsWith('retire-' + $id + '-', [System.StringComparison]::Ordinal) })
+                if ($hit.Count -eq 0) { $row++ }
+                else {
+                    $bad = $false; $anyRed = $false
+                    foreach ($h in $hit) {
+                        $rest = @($h | Select-Object -Skip 1)
+                        $red = ($rest -ccontains $id)
+                        if ($red) { $anyRed = $true }
+                        $withSurv = $false; foreach ($x in $svs) { if ($rest -ccontains $x) { $withSurv = $true } }
+                        if ($red -and (($w -eq 'retire-subsumed' -and -not $withSurv) -or $w -eq 'retire-impossible')) { $bad = $true }
+                    }
+                    # (review round 1 rec 2) a subsumed line needs at least one evidence row where the retired ID reddens -- otherwise
+                    # "every red row also reddens a survivor" holds vacuously and the rows look the same as impossible-way evidence.
+                    if ($w -eq 'retire-subsumed' -and -not $anyRed) { $bad = $true }
+                    if ($bad) { $incl++ }
+                }
+            }
+            if ($P.Contains($id) -or $S.Contains($id)) { $live++ }
+            if (-not $seen.Add($id)) { $dup++ }
+            if ($w -eq 'retire-subsumed') {
+                $bad = ($svs.Count -eq 0)
+                foreach ($x in $svs) { if (-not ($P.Contains($x) -and $S.Contains($x))) { $bad = $true } }
+                if ($bad) { $surv++ }
+            } elseif ($w -eq 'retire-impossible' -and $svs.Count -gt 0) { $surv++ }
+        }
+        foreach ($ln in @($all | Where-Object { $_.StartsWith('- number-gap:', [System.StringComparison]::Ordinal) })) {
+            $m = [regex]::Match($ln, '^- number-gap: (' + $idre + ')@([^ ]+)$')
+            if (-not $m.Success) { $gap++; continue }
+            $id = $m.Groups[1].Value; $bad = $false
+            if (-not (Test-Path -LiteralPath (Join-Path $root $m.Groups[2].Value) -PathType Leaf)) { $bad = $true }
+            if ($P.Contains($id) -or $S.Contains($id)) { $bad = $true }
+            if ($seen.Contains($id)) { $bad = $true }
+            if (-not $gseen.Add($id)) { $bad = $true }
+            if ($bad) { $gap++ }
+        }
+        # NUMBER LEDGER -- per part, up to the largest number in (live U retired U number-gap), count the numbers missing from that union.
+        $C = @{}; $mx = @{}
+        foreach ($x in (@($P) + @($S) + @($seen) + @($gseen))) {
+            $mm = [regex]::Match($x, '^([A-Z])([0-9]+)')
+            if (-not $mm.Success) { continue }
+            $pt = $mm.Groups[1].Value; $k = [int]$mm.Groups[2].Value
+            if ($k -lt 1) { continue }
+            $C[$pt + ':' + $k] = 1
+            if (-not $mx.ContainsKey($pt) -or $k -gt $mx[$pt]) { $mx[$pt] = $k }
+        }
+        $und = 0
+        foreach ($pt in @($mx.Keys)) { for ($k = 1; $k -le $mx[$pt]; $k++) { if (-not $C.ContainsKey($pt + ':' + $k)) { $und++ } } }
+        return ('{0} {1} {2} {3} {4} {5} {6} {7} {8} {9} {10} {11}' -f $form, $way, $rep, $row, $live, $dup, $surv, $incl, $stray, $gap, $und, $n)
+    }
+    function RtField([string]$audit, [int]$i) { return @($audit -split ' ')[$i] }
+    $RT_PS1 = Join-Path $ROOT 'tests/discover/run.ps1'
+    $RT_SH = Join-Path $ROOT 'tests/discover/run.sh'
+    $rtReal = RtAudit $DISC_README $ROOT $RT_PS1 $RT_SH
+    # (V40) extraction positive-control -- with no way names, no marker name or no runner case IDs every check below is vacuous, and
+    # this README carries retirements (a retirement is never undone), so a canonical retired-line extraction of 0 means "declared but
+    # extracted 0" (review blocker 2, milestone T03 (1)).
+    Chk "V40: retirement extraction positive-control (ways, reversal marker, runner case IDs, retired lines)" $(if (@(RtWays).Count -gt 0 -and (RtMarker) -ne '' -and (RtIds $RT_PS1).Count -gt 0 -and (RtIds $RT_SH).Count -gt 0 -and [int](RtField $rtReal 11) -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # (V41-V47 / V58-V61) MAIN CHECKS on the real README.
+    Chk "V41: main check -- every retired line has the declared form" (RtField $rtReal 0) '0'
+    Chk "V42: main check -- every retirement way is a retire-ways name" (RtField $rtReal 1) '0'
+    Chk "V43: main check -- every retirement evidence report exists" (RtField $rtReal 2) '0'
+    Chk "V44: main check -- every evidence report holds a retire-{ID} reversal row" (RtField $rtReal 3) '0'
+    Chk "V45: main check -- no retired ID is still a case in either runner" (RtField $rtReal 4) '0'
+    Chk "V46: main check -- no ID is retired twice" (RtField $rtReal 5) '0'
+    Chk "V47: main check -- survivors of retire-subsumed live in both runners, retire-impossible names none" (RtField $rtReal 6) '0'
+    Chk "V58: main check -- the evidence rows show the way (a subsumed line has a row where the retired ID reddens and a survivor reddens on every such row; an impossible line has no such row)" (RtField $rtReal 7) '0'
+    Chk "V59: main check -- every list line carrying the retired / number-gap key is in canonical form" (RtField $rtReal 8) '0'
+    Chk "V60: main check -- every number-gap line keeps form, report exists, absent from runners, not retired, unique" (RtField $rtReal 9) '0'
+    Chk "V61: main check -- per part every number up to the largest is live, retired or a number-gap (no undeclared deletion below the largest number; outside the ledger is a documented boundary)" (RtField $rtReal 10) '0'
+    # (V48-V57 / V62-V71) FIXTURE CONTROLS -- a synthetic README, reports AND SYNTHETIC RUNNERS in the sandbox (the real runners'
+    # ledger is not leaned on). The synthetic runner has X1 (Chk), an indented X2 (chk), a registry row X3, a suffixed X4b0, X7, and
+    # X5 / X9 left ONLY IN COMMENTS -- so X5 and X6 are empty numbers, and the clean fixture (V48) reading live 0 confirms a comment
+    # line is not a case. The flat runner (X1-X3) has no empty number (V57).
+    $rtDir = Join-Path $sbx 'retire-fx'
+    New-Item -ItemType Directory -Force -Path (Join-Path $rtDir 'r') | Out-Null
+    $u8r = New-Object System.Text.UTF8Encoding($false)
+    $rtMk = RtMarker
+    $rtFxLines = @(
+        'Chk "X1: a" "x" "x"',
+        '    chk "X2: b" "x" "x"',
+        'X|X3|count|CONV|zz:|c',
+        'chk "X4b0: d" "x" "x"',
+        '# chk "X5: retired, comment only" "x" "x"',
+        '    # chk "X9: comment only" "x" "x"',
+        'chk "X7: e" "x" "x"')
+    [System.IO.File]::WriteAllText((Join-Path $rtDir 'fx.run'), (($rtFxLines | ForEach-Object { $_ + "`n" }) -join ''), $u8r)
+    $rtFlatLines = @('Chk "X1: a" "x" "x"', 'chk "X2: b" "x" "x"', 'X|X3|count|CONV|zz:|c')
+    [System.IO.File]::WriteAllText((Join-Path $rtDir 'flat.run'), (($rtFlatLines | ForEach-Object { $_ + "`n" }) -join ''), $u8r)
+    function RtFxRep([string]$file, [string[]]$rows) {
+        $ri = RvCol 'row'; $ci = RvCol 'reddened'
+        $b = '<!-- ' + $rtMk + ":start -->`n| a | b | c | d | e |`n|---|---|---|---|---|`n"
+        foreach ($rw in $rows) {
+            $pr = $rw -split ' '
+            $o = '|'
+            for ($i = 1; $i -le 5; $i++) { if ($i -eq $ri) { $o += ' ' + $pr[0] + ' |' } elseif ($i -eq $ci) { $o += ' ' + $pr[1] + ' |' } else { $o += ' x |' } }
+            $b += $o + "`n"
+        }
+        $b += '<!-- ' + $rtMk + ":end -->`n"
+        [System.IO.File]::WriteAllText((Join-Path (Join-Path $rtDir 'r') $file), $b, $u8r)
+    }
+    RtFxRep 'ok.md' @('retire-X5-a X5;X1', 'retire-X5-b X1', 'retire-X1 X1;X2')
+    RtFxRep 'norow.md' @('other-X5 X5;X1')
+    RtFxRep 'imp.md' @('retire-X5 X1')
+    RtFxRep 'bad.md' @('retire-X5 X5;X2')
+    [System.IO.File]::WriteAllText((Join-Path (Join-Path $rtDir 'r') 'gap.md'), "X6 was never assigned`n", $u8r)
+    function RtFx([string]$name, [string]$runner, [string[]]$body) {
+        $p = Join-Path $rtDir ($name + '.md')
+        [System.IO.File]::WriteAllText($p, ("# fixture`n" + (($body | ForEach-Object { $_ + "`n" }) -join '')), $u8r)
+        $rn = Join-Path $rtDir ($runner + '.run')
+        return (RtAudit $p $rtDir $rn $rn)
+    }
+    $rtGood = '- retired: X5=retire-subsumed@r/ok.md>X1'
+    $rtGap = '- number-gap: X6@r/gap.md'
+    Chk "V48: control -- a well-formed retirement and number-gap audit clean (an ID left only in a comment is not live)" (RtFx 'good' 'fx' @($rtGood, $rtGap)) '0 0 0 0 0 0 0 0 0 0 0 1'
+    Chk "V49: control -- a way outside retire-ways is caught" (RtFx 'way' 'fx' @('- retired: X5=retire-cheap@r/ok.md>X1', $rtGap)) '0 1 0 0 0 0 0 0 0 0 0 1'
+    Chk "V50: control -- a missing evidence report is caught" (RtFx 'rep' 'fx' @('- retired: X5=retire-subsumed@r/none.md>X1', $rtGap)) '0 0 1 0 0 0 0 0 0 0 0 1'
+    Chk "V51: control -- a report with no retire-{ID} row is caught" (RtFx 'row' 'fx' @('- retired: X5=retire-subsumed@r/norow.md>X1', $rtGap)) '0 0 0 1 0 0 0 0 0 0 0 1'
+    Chk "V52: control -- retiring a live case is caught" (RtFx 'live' 'fx' @($rtGood, $rtGap, '- retired: X1=retire-subsumed@r/ok.md>X2')) '0 0 0 0 1 0 0 0 0 0 0 2'
+    Chk "V53: control -- retiring the same ID twice is caught" (RtFx 'dup' 'fx' @($rtGood, $rtGood, $rtGap)) '0 0 0 0 0 1 0 0 0 0 0 2'
+    Chk "V54: control -- a subsumed line whose survivor is not a case is caught" (RtFx 'surv' 'fx' @('- retired: X5=retire-subsumed@r/ok.md>X1,Z9', $rtGap)) '0 0 0 0 0 0 1 0 0 0 0 1'
+    Chk "V55: control -- an impossible line that names a survivor is caught" (RtFx 'imp' 'fx' @('- retired: X5=retire-impossible@r/imp.md>X1', $rtGap)) '0 0 0 0 0 0 1 0 0 0 0 1'
+    Chk "V56: control -- a malformed retired line is caught" (RtFx 'form' 'fx' @($rtGood, '- retired: X5 = retire-subsumed@r/ok.md', $rtGap)) '1 0 0 0 0 0 0 0 0 0 0 2'
+    Chk "V57: control -- a README with no empty number and no retired line is no target" (RtFx 'none' 'flat' @('- cases: 1')) '0 0 0 0 0 0 0 0 0 0 0 0'
+    Chk "V62: control -- an evidence row where the retired ID reddens without a survivor is caught" (RtFx 'incls' 'fx' @('- retired: X5=retire-subsumed@r/bad.md>X1', $rtGap)) '0 0 0 0 0 0 0 1 0 0 0 1'
+    Chk "V63: control -- an impossible line whose evidence row reddens the retired ID is caught" (RtFx 'incli' 'fx' @('- retired: X5=retire-impossible@r/ok.md', $rtGap)) '0 0 0 0 0 0 0 1 0 0 0 1'
+    Chk "V64: control -- a survivor left only in a comment is caught" (RtFx 'survc' 'fx' @('- retired: X5=retire-subsumed@r/ok.md>X1,X9', $rtGap)) '0 0 0 0 0 0 1 0 0 0 0 1'
+    Chk "V65: control -- an indented retired line is caught" (RtFx 'indent' 'fx' @($rtGood, $rtGap, '  - retired: X8=retire-subsumed@r/ok.md>X1')) '0 0 0 0 0 0 0 0 1 0 0 1'
+    Chk "V66: control -- a number-gap line with another list mark is caught" (RtFx 'bullet' 'fx' @($rtGood, $rtGap, '* number-gap: X8@r/gap.md')) '0 0 0 0 0 0 0 0 1 0 0 1'
+    Chk "V67: control -- a number-gap line for a live number is caught" (RtFx 'gaplive' 'fx' @($rtGood, $rtGap, '- number-gap: X1@r/gap.md')) '0 0 0 0 0 0 0 0 0 1 0 1'
+    Chk "V68: control -- a number-gap line pointing at a missing report is caught" (RtFx 'gaprep' 'fx' @($rtGood, '- number-gap: X6@r/none.md')) '0 0 0 0 0 0 0 0 0 1 0 1'
+    Chk "V69: control -- a malformed number-gap line is caught" (RtFx 'gapform' 'fx' @($rtGood, $rtGap, '- number-gap: X8')) '0 0 0 0 0 0 0 0 0 1 0 1'
+    Chk "V70: control -- an undeclared empty number is caught (a case deleted and no line added)" (RtFx 'undecl' 'fx' @($rtGood)) '0 0 0 0 0 0 0 0 0 0 1 1'
+    # (V71) a subsumed line whose evidence rows never redden the retired ID -- "on every red row" held vacuously (M92 review round 1 rec 2).
+    Chk "V71: control -- a subsumed line with no evidence row reddening the retired ID is caught" (RtFx 'inclv' 'fx' @('- retired: X5=retire-subsumed@r/imp.md>X1', $rtGap)) '0 0 0 0 0 0 0 1 0 0 0 1'
     }
 
     # --- Part W: inspection-scope declaration (M62) ---------------------------
@@ -7453,10 +7671,9 @@ try {
     if ($MC_ALIAS -eq '') { $MC_ALIAS = 'zzz-measure-cache-unset' }
     # (W14) extraction positive-control -- same reason as `W2` (running on the fallback hides the cause).
     Chk "W14: cache co-term extraction positive-control" $(if ($MC_ALIAS -ne 'zzz-measure-cache-unset') { 'ok' } else { 'no' }) 'ok'
-    # (W15-W17) MAIN CHECK -- the co-term lives in the convention and the impl skill, and each seat is
+    # (W16/W17) MAIN CHECK -- W15 (co-term in convention AND impl skill) retired in M92 as retire-subsumed by W17. Each seat is
     # also asked on its own: the convention for its DEFINITION line, the skill for a BACKTICKED token
     # (same division of layers as `W4`-`W6`).
-    Chk "W15: cache co-term ($MC_ALIAS) convention <-> impl SKILL" (InBoth $MC_ALIAS $CONV $IMPL_SKILL) 'yes'
     Chk "W16: the convention has exactly one definition line for the cache co-term" ([string](ScopeDefn $MC_ALIAS)) '1'
     Chk "W17: impl SKILL carries the cache co-term as a backticked token" (ScopeTok $IMPL_SKILL $MC_ALIAS) 'yes'
     # negative control / cross control -- same shape as the two above (discrimination / asset boundary).
@@ -7535,7 +7752,7 @@ try {
     # (W67-W72 / M66) SCAN POSITIVE CONTROL -- the co-term in the convention's release build-output section and
     # ONE restatement site (`skills/release/SKILL.md`). With one site a bind would duplicate the per-site check,
     # so only the definition line (`W69`) and the site token (`W70`) are asked. Here the release-skill token is
-    # found FILE-WIDE; co-presence with the step anchor in one item window is asked separately by `W81`/`W82` (M68).
+    # found FILE-WIDE; co-presence with the step anchor in one item window is asked separately by `W82` (M68; `W81` retired in M92 as subsumed by `W82`).
     $SCAN_KEY = 'scan-control:'
     $SCAN_ALIAS = ''
     $scanTail = DeclTail $CONV $SCAN_KEY
@@ -7554,7 +7771,7 @@ try {
     # (`absent-job:`) and ONE restatement site (the pr-mode finalize bullet of `skills/release/SKILL.md`).
     # Same layer and shape as `W67`-`W72`. With one site a bind would duplicate the per-site check, so only
     # the definition line (`W75`) and the site token (`W76`) are asked. Here the release-skill token is found
-    # FILE-WIDE; co-presence with the step anchor in one item window is asked separately by `W87`/`W88` (M68).
+    # FILE-WIDE; co-presence with the step anchor in one item window is asked separately by `W88` (M68; `W87` retired in M92 as subsumed by `W88`).
     # Whether finalize actually walked that branch is procedure and is not asked.
     $ABSENT_KEY = 'absent-job:'
     $ABSENT_ALIAS = ''
@@ -7656,11 +7873,9 @@ try {
     $winFxAbsent = Join-Path $sbx 'winfx_absent.md'
     [System.IO.File]::WriteAllText($winFxAbsent, ('1. step ' + $ABSENT_ANCHOR + "`n   - a " + $bq + $ABSENT_ALIAS + $bq + "`n   - b " + $ABSENT_ANCHOR + "`n"), $u8w)
     Chk "W80: scan step anchor extraction positive-control" $(if ($SCAN_ANCHOR -ne 'zzz-scan-anchor-unset') { 'ok' } else { 'no' }) 'ok'
-    Chk "W81: the scan positive-control token sits in the same item window as its anchor" ($scanWin.Split(' ')[0]) 'yes'
     Chk "W82: the scan step anchor appears in the file only inside that window" (WinUnique $scanWin) 'ok'
     Chk "W83: control -- a scan token in an item window without the anchor is caught" ((ItemWinProbe $winFxScan $SCAN_ALIAS $SCAN_ANCHOR).Split(' ')[0]) 'no'
     Chk "W86: absent-job step anchor extraction positive-control" $(if ($ABSENT_ANCHOR -ne 'zzz-absent-anchor-unset') { 'ok' } else { 'no' }) 'ok'
-    Chk "W87: the absent-job token sits in the same item window as its anchor" ($absentWin.Split(' ')[0]) 'yes'
     Chk "W88: the absent-job step anchor appears in the file only inside that window" (WinUnique $absentWin) 'ok'
     Chk "W89: control -- an absent-job token in an item window without the anchor is caught" ((ItemWinProbe $winFxAbsent $ABSENT_ALIAS $ABSENT_ANCHOR).Split(' ')[0]) 'no'
     # (W91-W98 / M70) LIFECYCLE STATE TABLE FOR NEW JUDGEMENTS -- the co-term of the convention's subsection and
@@ -7676,7 +7891,6 @@ try {
     }
     if ($LIFE_ALIAS -eq '') { $LIFE_ALIAS = 'zzz-lifecycle-decl-unset' }
     Chk "W92: lifecycle co-term extraction positive-control" $(if ($LIFE_ALIAS -ne 'zzz-lifecycle-decl-unset') { 'ok' } else { 'no' }) 'ok'
-    Chk "W93: lifecycle co-term ($LIFE_ALIAS) in all three files" (InAllThree $LIFE_ALIAS $CONV $IMPL_SKILL $IMPL_TPL) 'yes'
     Chk "W94: the convention has exactly one definition line for the lifecycle co-term" (ScopeDefn $LIFE_ALIAS) '1'
     Chk "W95: impl SKILL carries the lifecycle co-term as a backtick token" (ScopeTok $IMPL_SKILL $LIFE_ALIAS) 'yes'
     Chk "W96: impl template carries the lifecycle co-term as a backtick token" (ScopeTok $IMPL_TPL $LIFE_ALIAS) 'yes'
@@ -7810,7 +8024,7 @@ try {
     #   this skill before the M72 edit (3 and 7). A presence-only case stays green even if the whole
     #   branch is deleted -- a tautology, the class the checklist blocks with "already green proves
     #   nothing". `review-report` occurred zero times before the edit.
-    #   W113 asks by WINDOW rather than file-wide for the same reason W81/W82 exist -- keeping the
+    #   W113 asks by WINDOW rather than file-wide for the same reason W82 exists -- keeping the
     #   pointer while moving the branch elsewhere leaves file-wide coexistence green.
     $CYC_SKILL = Join-Path $ROOT 'skills/cycle/SKILL.md'
     $SI_ROW_TOK = 'review-report'
@@ -7820,8 +8034,7 @@ try {
     $siRowN = @(Select-String -Path $CONV -SimpleMatch $SI_ROW_TOK).Count
     $stAccN = @(Select-String -Path $CONV -SimpleMatch $ST_ACC_TOK).Count
     Chk "W111: positive-control for the convention side of the verdict-read coupling" $(if ($siRowN -gt 0 -and $stAccN -gt 0) { 'ok' } else { 'no' }) 'ok'
-    # (W112) main check -- the cycle skill points at the declaration of how the verdict is read.
-    Chk "W112: the cycle skill points at the verdict-read declaration" (HasToken $CYC_SKILL $SI_ROW_TOK) 'yes'
+    # (W112) retired in M92 as retire-subsumed by W113 (the window probe needs the pointer token, so no pointer reddens both).
     # (W113) main check -- that pointer and the accident-state name sit in the SAME item window.
     Chk "W113: verdict branch and accident state share one window" ((ItemWinProbe $CYC_SKILL $SI_ROW_TOK $ST_ACC_TOK).Split(' ')[0]) 'yes'
     # (W114) control -- a fixture with the anchor moved out of the window is caught (like W83/W89).
@@ -8375,6 +8588,12 @@ V|V2|count|CONV|reversal-block:|reversal-block declaration line is exactly 1
 V|V3|count|CONV|reversal-columns:|reversal-columns declaration line is exactly 1
 V|V4|count|CONV|reversal-sep:|reversal-sep declaration line is exactly 1
 V|V5|count|CONV|reversal-since:|reversal-since declaration line is exactly 1
+V|V34|count|CONV|retire-ways:|exactly one retire-ways declaration line
+V|V35|seps|CONV|retire-ways:|no forbidden separators at the tail of the retire-ways declaration line
+V|V36|dup|CONV|retire-ways:|main check - retirement way names are unique
+V|V37|def|CONV|retire-ways:|main check - exactly one definition item per retirement way
+V|V38|orphan|CONV|retire-ways:|main check - every retirement way definition item has a declared name (0 orphans)
+V|V39|order|CONV|retire-ways:|main check - retirement way definition items follow the declared name order
 W|W1|count|CONV|scope-decl:|scope-decl declaration line is exactly 1
 W|W7|count|CONV|scope-limits:|scope-limits declaration line is exactly 1
 W|W13|count|CONV|measure-cache:|measure-cache declaration line is exactly 1

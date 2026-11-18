@@ -112,6 +112,9 @@ git 쓰기 직전이다** — 버전 파일·CHANGELOG 편집은 git이 아니�
 3. `CHANGELOG.md` 최상단에 릴리즈 노트 추가 — CHANGELOG가 노트의 단일 원본이고 `README.md`는
    포인터만 두므로 건드리지 않는다(`docs/conventions.md`의 "버전 · CHANGELOG" 절). `pf-verdict`에서
    **debug 보고서도 근거가 됐다면 두 출처를 함께 반영한다**(리뷰의 사이클 변경 + debug의 증상·수정).
+   **집행 총량 줄** — 대상 레포의 하니스 README에 `cases:` 선언이 있으면 노트에 「집행 A → B」 한 줄(직전 태그의 값 → 이번 값, 어느 하니스의 수인지 이름을 함께 — tide 저장소는 `tests/discover`)을 적고,
+   이번 태그에 실리는 은퇴(하니스 README의 `- retired:` 줄 중 직전 태그에 없던 것)가 있으면 **같은 줄에 은퇴 수를 함께** 적는다.
+   이 줄이 집행 총량 추이의 단일 자리이고 회고 · 다른 문서에 수를 옮겨 적지 않는다 — 단일 원본은 `docs/conventions.md`의 "케이스 은퇴 (거두는 규칙 — 기계가 사유를 묻는다)" 절이다.
    **마일스톤 릴리즈 표지**(`milestone-release-mark`) — **이번 태그에 실리는 마일스톤 전부**에 그 문서
    (`docs/milestones/M{N}.md`)의 메타데이터에 `- released: v{버전}` 한 줄을 더한다. 대상은 표지 도입 번호
    이상이고 **impl 보고서(`docs/reports/M{N}-impl.md`)가 있고** 아직 표지가 없는 마일스톤 모두다 — **최대 번호 하나가
