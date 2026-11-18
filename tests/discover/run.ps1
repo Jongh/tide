@@ -123,6 +123,746 @@ if ($script:PART_SEL -ne '' -and (PartKnown $script:PART_SEL) -eq 'no') {
 function W($path, $text) { $d = Split-Path $path -Parent; if (-not (Test-Path $d)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }; Set-Content -Path $path -Value $text -Encoding utf8 }
 function GitInit($d) { New-Item -ItemType Directory -Force -Path $d | Out-Null; & git -C $d init -q }   # dir must exist before init
 
+    # === SHARED HELPERS (M93) -- functions used across parts, declaration-key constants, the declaration verdict registry ====
+    # Each definition used to sit inside the part block that first used it, and a later part's cases had to come after it, so some
+    # G / K / M / F cases sat outside their own block. M93 hoisted the definitions here and moved the cases into their part blocks;
+    # the bodies are unchanged and the case lines of both runners are the same before and after (M93 impl report). Definitions
+    # only: this block holds no part guard and no case line.
+    function DeclLines($path, $key) {
+        $raw = ReadUtf8 $path
+        if ($null -eq $raw) { return @() }
+        $re = '^[ \t]*-[ \t]+`' + [regex]::Escape($key) + '`'
+        return @($raw -split "`r?`n" | Where-Object { $_ -cmatch $re })
+    }
+    function DeclCount($path, $key) { return [string](@(DeclLines $path $key)).Count }
+    # The tail after the key on the declaration line -- the ONE place both the marker extraction and
+    # the separator check read, so they can never see different strings. The .sh twin does the same
+    # with awk index()+substr() (literal, no regex on either side).
+    function DeclTail($path, $key) {
+        $line = @(DeclLines $path $key) | Select-Object -First 1
+        if ($null -eq $line) { return $null }
+        $w = '`' + $key + '`'
+        $i = $line.IndexOf($w, [System.StringComparison]::Ordinal)
+        if ($i -lt 0) { return $null }
+        return $line.Substring($i + $w.Length)
+    }
+    # SEPARATOR SET -- every character EITHER shell may treat as whitespace, minus the ASCII space.
+    # .NET \s is [\f\n\r\t\v\x85\p{Z}] and \p{Z} carries NBSP / OGHAM / U+2000-200A / U+2028 / U+2029 /
+    # U+202F / U+205F / U+3000. The .sh twin spells the same set as UTF-8 bytes (octal escapes).
+    $SEP_RE = '[\t\v\f\r\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]'
+    function BadSeps($path, $key) {
+        $tail = DeclTail $path $key
+        if ($null -eq $tail) { return '0' }
+        if ([regex]::IsMatch($tail, $SEP_RE)) { return '1' } else { return '0' }
+    }
+    # FIRST match is pinned by DeclTail above on both sides (sed's greedy leading `.*` used to take the
+    # LAST occurrence while IndexOf takes the FIRST -- M42 review blocker 2).
+    # SPLIT WIDTH is pinned too: a single ASCII space, exactly like the .sh twin's `tr ' ' '\n'`.
+    # This used to be `-split '\s+'`, which made the two shells disagree on TAB and NBSP: one trailing
+    # tab on the declaration line killed the last marker in sh ONLY, and sh then stayed GREEN over a
+    # real contradiction that this runner caught (M42 review blocker 1). Matching the width is not
+    # enough on its own -- a character outside BOTH widths kills the marker in BOTH shells -- so
+    # I10..I13 below forbid every such character outright.
+    function MarkersOf($key) {
+        $tail = DeclTail $CONV $key
+        if ($null -eq $tail) { return @() }
+        return @(($tail -replace '[`*]', '') -split ' ' | Where-Object { $_ -ne '' })
+    }
+    # (M78) THE SAFETY FLOOR LIST IS A NAME DECLARATION -- `floor-items:` holds the floor names; `floor-mark-map:`, `floor-unmarked:`
+    # and `floor-excluded:` hold each name's slot (covered by a mark / no mark / deliberately excluded). The runner only READS the
+    # names and never spells them in source. What is asked is whether declaration, definition items, slots and the mark set agree;
+    # the meaning of a definition sentence and whether the map matches the real skill window are not asked (the conventions item).
+    # Helpers live OUTSIDE the part guard (rf-60). Parameters are NOT named `$conv` (case-insensitive shadowing of `$CONV`).
+    # (M79) The name-declaration helpers (Dn*) take a key and a conventions file -- floor names (`floor-items:`) and notice names
+    # (`floor-asks:`) are read by the same functions.
+    $FLI_KEY = 'floor-items:'
+    $FLM_KEY = 'floor-mark-map:'
+    $FLU_KEY = 'floor-unmarked:'
+    $FLX_KEY = 'floor-excluded:'
+    $FAS_KEY = 'floor-asks:'
+    $FAC_KEY = 'floor-ask-cases:'
+    $FAF_KEY = 'floor-ask-from:'
+    # (M86) $key may hold several keys joined by single spaces -- names are concatenated in declaration order, so the two
+    # start-point predicate declarations (one shared definition list) are read by the SAME functions (the old Sp* helpers are
+    # absorbed). A single key behaves as before.
+    function DnNames([string]$key, [string]$flConv = '') {
+        if ($flConv -eq '') { $flConv = $CONV }
+        $ws = [char[]]@([char]0x20, [char]0x09, [char]0x0D, [char]0x0B, [char]0x0C)
+        $out = New-Object System.Collections.Generic.List[string]
+        foreach ($k in ($key -split ' ' | Where-Object { $_ -ne '' })) {
+            $tail = DeclTail $flConv $k
+            if ($null -eq $tail) { continue }
+            foreach ($t in ($tail -split ' ')) { if ($t.Trim($ws) -ne '') { $out.Add($t) } }
+        }
+        return @($out)
+    }
+    # Backtick spans of a declaration, one "name=value" each (split at the FIRST `=`; spans without one are dropped).
+    function DnPairs([string]$key, [string]$flConv = '') {
+        if ($flConv -eq '') { $flConv = $CONV }
+        $t = DeclTail $flConv $key
+        $out = New-Object System.Collections.Generic.List[string]
+        if ($null -eq $t) { return @() }
+        $parts = $t.Split([char]0x60)
+        for ($i = 1; $i -lt $parts.Count; $i += 2) {
+            $j = $parts[$i].IndexOf('=', [System.StringComparison]::Ordinal)
+            if ($j -gt 0 -and $j -lt ($parts[$i].Length - 1)) { [void]$out.Add($parts[$i]) }
+        }
+        return @($out)
+    }
+    function FlPairName([string]$p) { return $p.Substring(0, $p.IndexOf('=', [System.StringComparison]::Ordinal)) }
+    function FlPairMark([string]$p) { return $p.Substring($p.IndexOf('=', [System.StringComparison]::Ordinal) + 1) }
+    # Definition ITEM names in order -- from the declaration line up to (not including) the first non-blank line indented LESS
+    # than it (or a heading), the lines at the SAME depth as the declaration line whose space/tab-stripped text starts with
+    # "- **`name`**" (M79 -- deeper lines are not items, so notice definitions nested inside the floor range do not mix in).
+    # Indentation counts spaces only (same as the .sh twin).
+    function DnDefs([string]$key, [string]$flConv = '') {
+        if ($flConv -eq '') { $flConv = $CONV }
+        # (M86) several keys -> the window runs from the line after the FIRST key's declaration line up to the next heading ('#')
+        # at ANY depth -- the window of the absorbed SpDefs, as the convention's start-point section states. One key keeps the M79 window.
+        $dnKeys = @($key -split ' ' | Where-Object { $_ -ne '' })
+        $any = ($dnKeys.Count -gt 1)
+        $k = '- `' + ($dnKeys | Select-Object -First 1) + '`'
+        $ws = [char[]]@([char]0x20, [char]0x09)
+        $on = $false; $d = 0
+        $out = New-Object System.Collections.Generic.List[string]
+        foreach ($ln in [System.IO.File]::ReadAllLines($flConv)) {
+            $t = $ln.TrimStart($ws)
+            $ind = $ln.Length - $ln.TrimStart([char]0x20).Length
+            if (-not $on) { if ($t.StartsWith($k, [System.StringComparison]::Ordinal)) { $on = $true; $d = $ind }; continue }
+            if ($ln.StartsWith('#', [System.StringComparison]::Ordinal)) { break }
+            if ($any) {
+                if ($t.StartsWith('- **`', [System.StringComparison]::Ordinal)) {
+                    $r = $t.Substring(5); $j = $r.IndexOf('`**', [System.StringComparison]::Ordinal)
+                    if ($j -gt 0) { $out.Add($r.Substring(0, $j)) }
+                }
+                continue
+            }
+            if ($t -eq '') { continue }
+            if ($ind -lt $d) { break }
+            if ($ind -eq $d -and $t.StartsWith('- **`', [System.StringComparison]::Ordinal)) {
+                $r = $t.Substring(5); $j = $r.IndexOf('`**', [System.StringComparison]::Ordinal)
+                if ($j -gt 0) { $out.Add($r.Substring(0, $j)) }
+            }
+        }
+        return $out
+    }
+    function OrdSet($items) {
+        $s = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($x in @($items)) { if ($null -ne $x) { [void]$s.Add([string]$x) } }
+        return ,$s
+    }
+    function DnDup([string]$key, [string]$flConv = '') {
+        $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        $dup = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($nm in @(DnNames $key $flConv)) { if (-not $seen.Add($nm)) { [void]$dup.Add($nm) } }
+        return [string]$dup.Count
+    }
+    function DnDefBad([string]$key, [string]$flConv = '') {
+        $defs = @(DnDefs $key $flConv)
+        $bad = 0
+        foreach ($nm in @(DnNames $key $flConv)) {
+            $c = @($defs | Where-Object { [string]::Equals($_, $nm, [System.StringComparison]::Ordinal) }).Count
+            if ($c -ne 1) { $bad++ }
+        }
+        return [string]$bad
+    }
+    function DnDefOrphan([string]$key, [string]$flConv = '') {
+        $names = OrdSet @(DnNames $key $flConv)
+        return [string]@(@(DnDefs $key $flConv) | Where-Object { -not $names.Contains($_) }).Count
+    }
+    # Definition order equals declaration name order -- count how often the declaration position steps back (normal 0).
+    # Undeclared definitions are skipped (that is the orphan check's place).
+    function DnDefOrder([string]$key, [string]$flConv = '') {
+        $idx = New-Object 'System.Collections.Generic.Dictionary[string,int]'([System.StringComparer]::Ordinal)
+        $i = 0
+        foreach ($nm in @(DnNames $key $flConv)) { $i++; if (-not $idx.ContainsKey($nm)) { $idx[$nm] = $i } }
+        $p = 0; $c = 0
+        foreach ($d in @(DnDefs $key $flConv)) {
+            if ($idx.ContainsKey($d)) { $v = $idx[$d]; if ($p -gt 0 -and $v -lt $p) { $c++ }; $p = $v }
+        }
+        return [string]$c
+    }
+    # Per `floor-items:` name, "name=<number of slots it sits in>" (normal 1 -- in the map at least once / unmarked / excluded).
+    function FlClass([string]$flConv = '') {
+        $m = OrdSet @(@(DnPairs $FLM_KEY $flConv) | ForEach-Object { FlPairName $_ })
+        $u = OrdSet @(DnNames $FLU_KEY $flConv)
+        $x = OrdSet @(DnNames $FLX_KEY $flConv)
+        $out = New-Object System.Collections.Generic.List[string]
+        foreach ($nm in @(DnNames $FLI_KEY $flConv)) {
+            $k = 0
+            if ($m.Contains($nm)) { $k++ }
+            if ($u.Contains($nm)) { $k++ }
+            if ($x.Contains($nm)) { $k++ }
+            $out.Add($nm + '=' + $k)
+        }
+        return $out
+    }
+    function FlClassBad([string]$flConv = '') {
+        return [string]@(@(FlClass $flConv) | Where-Object { -not $_.EndsWith('=1', [System.StringComparison]::Ordinal) }).Count
+    }
+    function FlStray([string]$flConv = '') {
+        $names = OrdSet @(DnNames $FLI_KEY $flConv)
+        $all = OrdSet (@(@(DnPairs $FLM_KEY $flConv) | ForEach-Object { FlPairName $_ }) + @(DnNames $FLU_KEY $flConv) + @(DnNames $FLX_KEY $flConv))
+        return [string]@($all | Where-Object { -not $names.Contains($_) }).Count
+    }
+    function FlMarkMissing([string]$flConv = '') {
+        $mapped = OrdSet @(@(DnPairs $FLM_KEY $flConv) | ForEach-Object { FlPairMark $_ })
+        return [string]@((OrdSet @(FloorMarks $flConv)) | Where-Object { -not $mapped.Contains($_) }).Count
+    }
+    function FlMarkExtra([string]$flConv = '') {
+        $marks = OrdSet @(FloorMarks $flConv)
+        return [string]@((OrdSet @(@(DnPairs $FLM_KEY $flConv) | ForEach-Object { FlPairMark $_ })) | Where-Object { -not $marks.Contains($_) }).Count
+    }
+    # (M79) NOTICE JUDGMENTS AND THEIR CASES -- `floor-asks:` holds the judgment names, `floor-ask-cases:` the "name=case" tokens and
+    # `floor-ask-from:` the first case of this axis. Case lines are read from BOTH runners' source -- a line whose space/tab-stripped
+    # text starts with a case call (`chk "` / `Chk "`); comment lines start with `#` and are not counted. The mapping asks only
+    # "this judgment has this case", not how wide the case bites.
+    $RUN_SH = Join-Path $ROOT 'tests/discover/run.sh'
+    $RUN_PS1 = Join-Path $ROOT 'tests/discover/run.ps1'
+    # (M88) The verdicts below are NOT tied to one axis -- the Ak* bodies take the ask / case / from keys and the part letter as
+    # arguments; Fa* are thin wrappers fixing the safety-floor axis (floor-asks: / Part N). The common-control axis (hc-asks: / Part K)
+    # uses the same bodies. That Part N gives identical output before and after is recorded in the impl report ("same window").
+    function AkPairs([string]$key, [string]$akConv = '') {
+        return @(@(DnNames $key $akConv) | Where-Object { $j = $_.IndexOf('=', [System.StringComparison]::Ordinal); $j -gt 0 -and $j -lt ($_.Length - 1) })
+    }
+    function AkFrom([string]$key, [string]$part, [string]$akConv = '') {
+        $t = @(DnNames $key $akConv) | Select-Object -First 1
+        if ($null -ne $t -and $t.Length -gt 1 -and $t.StartsWith($part, [System.StringComparison]::Ordinal) -and [regex]::IsMatch($t.Substring(1), '^[0-9]+$')) { return [string][int]$t.Substring(1) }
+        return ''
+    }
+    function AkCaseIds([string]$part, [string]$path) {
+        $q = [string][char]0x22
+        $ws = [char[]]@([char]0x20, [char]0x09)
+        $out = New-Object System.Collections.Generic.List[string]
+        foreach ($ln in [System.IO.File]::ReadAllLines($path)) {
+            $t = $ln.TrimStart($ws)
+            if ($t.StartsWith('chk ' + $q, [System.StringComparison]::Ordinal) -or $t.StartsWith('Chk ' + $q, [System.StringComparison]::Ordinal)) {
+                $r = $t.Substring(5); $j = $r.IndexOf(':', [System.StringComparison]::Ordinal)
+                # An ID is <part> + digits with an optional lowercase suffix (this harness uses F1b / G8a forms -- M79 review blocker 1) (M91) A digit tail after the suffix is taken too -- G8b0.
+                if ($j -gt 0) { $id = $r.Substring(0, $j); if ($id.Length -gt 1 -and $id.StartsWith($part, [System.StringComparison]::Ordinal) -and [regex]::IsMatch($id.Substring(1), '^[0-9]+[a-z]*[0-9]*$')) { $out.Add($id) } }
+                continue
+            }
+            # (M88) A declaration-registry case row (<part>|<ID>|<check>|...) is a case too -- same shape as SrcCaseIds (F29). The common-control
+            # axis gets its declaration hygiene from registry rows. Part N has no registry case rows, so the safety-floor axis is unchanged.
+            if ($t.StartsWith($part + '|', [System.StringComparison]::Ordinal) -and [regex]::IsMatch($t, '^[A-Z]\|[A-Z][0-9]+[a-z]*\|[a-z-]+\|')) { $id = ($t -split '\|')[1]; if ($id.StartsWith($part, [System.StringComparison]::Ordinal)) { $out.Add($id) } }
+        }
+        return $out
+    }
+    function AkAskNoCase([string]$asks, [string]$cases, [string]$akConv = '') {
+        $mapped = OrdSet @(@(AkPairs $cases $akConv) | ForEach-Object { FlPairName $_ })
+        return [string]@(@(DnNames $asks $akConv) | Where-Object { -not $mapped.Contains($_) }).Count
+    }
+    function AkAskUnknown([string]$asks, [string]$cases, [string]$akConv = '') {
+        $names = OrdSet @(DnNames $asks $akConv)
+        return [string]@((OrdSet @(@(AkPairs $cases $akConv) | ForEach-Object { FlPairName $_ })) | Where-Object { -not $names.Contains($_) }).Count
+    }
+    function AkCaseMissing([string]$cases, [string]$part, [string]$akConv = '', [string]$shRun = '', [string]$psRun = '') {
+        if ($shRun -eq '') { $shRun = $RUN_SH }
+        if ($psRun -eq '') { $psRun = $RUN_PS1 }
+        $s = OrdSet @(AkCaseIds $part $shRun); $p = OrdSet @(AkCaseIds $part $psRun)
+        return [string]@((OrdSet @(@(AkPairs $cases $akConv) | ForEach-Object { FlPairMark $_ })) | Where-Object { -not ($s.Contains($_) -and $p.Contains($_)) }).Count
+    }
+    # (M89 rf-114) <skip> names a declaration of cases that sit in the same part but belong to ANOTHER section's verdict
+    # (cc-ask-skip: on the completion-criteria axis). An empty skip key means no skip -- AkCaseUnmapped is that shape, and Part N / K
+    # give the same values as before the widening (the impl report's "same window" comparison).
+    function AkCaseUnmappedX([string]$cases, [string]$from, [string]$skip, [string]$part, [string]$akConv = '', [string]$shRun = '', [string]$psRun = '') {
+        if ($shRun -eq '') { $shRun = $RUN_SH }
+        if ($psRun -eq '') { $psRun = $RUN_PS1 }
+        $f = AkFrom $from $part $akConv
+        if ($f -eq '') { $f = '0' }
+        $mapped = OrdSet @(@(AkPairs $cases $akConv) | ForEach-Object { FlPairMark $_ })
+        $skipped = OrdSet @(if ($skip -ne '') { DnNames $skip $akConv })
+        $all = OrdSet (@(AkCaseIds $part $shRun) + @(AkCaseIds $part $psRun))
+        return [string]@($all | Where-Object { [int]([regex]::Match($_.Substring(1), '^([0-9]+)').Groups[1].Value) -ge [int]$f -and -not $mapped.Contains($_) -and -not $skipped.Contains($_) }).Count
+    }
+    function AkCaseUnmapped([string]$cases, [string]$from, [string]$part, [string]$akConv = '', [string]$shRun = '', [string]$psRun = '') {
+        return (AkCaseUnmappedX $cases $from '' $part $akConv $shRun $psRun)
+    }
+    # -> the number of cases in the skip declaration missing as a case from either runner (counted as distinct cases).
+    function AkSkipMissing([string]$skip, [string]$part, [string]$akConv = '', [string]$shRun = '', [string]$psRun = '') {
+        if ($shRun -eq '') { $shRun = $RUN_SH }
+        if ($psRun -eq '') { $psRun = $RUN_PS1 }
+        $s = OrdSet @(AkCaseIds $part $shRun); $p = OrdSet @(AkCaseIds $part $psRun)
+        return [string]@((OrdSet @(DnNames $skip $akConv)) | Where-Object { -not ($s.Contains($_) -and $p.Contains($_)) }).Count
+    }
+    function FaPairs([string]$flConv = '') { return @(AkPairs $FAC_KEY $flConv) }
+    function FaFrom([string]$flConv = '') { return (AkFrom $FAF_KEY 'N' $flConv) }
+    function CaseIds([string]$path) { return (AkCaseIds 'N' $path) }
+    function FaAskNoCase([string]$flConv = '') { return (AkAskNoCase $FAS_KEY $FAC_KEY $flConv) }
+    function FaAskUnknown([string]$flConv = '') { return (AkAskUnknown $FAS_KEY $FAC_KEY $flConv) }
+    function FaCaseMissing([string]$flConv = '', [string]$shRun = '', [string]$psRun = '') { return (AkCaseMissing $FAC_KEY 'N' $flConv $shRun $psRun) }
+    function FaCaseUnmapped([string]$flConv = '', [string]$shRun = '', [string]$psRun = '') { return (AkCaseUnmapped $FAC_KEY $FAF_KEY 'N' $flConv $shRun $psRun) }
+    # Case-line control -- a synthetic runner with one commented case, one indented case, one case outside Part N and one suffixed ID.
+    function FaRunnerFixture {
+        $f = Join-Path $sbx 'runner-fa.txt'
+        $q = [string][char]0x22
+        $lines = @(('# chk ' + $q + 'N30: commented' + $q), ('    chk ' + $q + 'N99: indented' + $q), ('chk ' + $q + 'O1: other part' + $q), ('    # Chk ' + $q + 'N31: commented' + $q), ('chk ' + $q + 'N98b: suffixed' + $q))
+        [System.IO.File]::WriteAllLines($f, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    # Boundary-filter control fixture -- a synthetic runner holding ONE suffixed case only (N63 / M82 rf-87).
+    function FaSuffixFixture([string]$mode) {
+        $f = Join-Path $sbx ('runner-fas-' + $mode + '.txt')
+        $q = [string][char]0x22
+        if ($mode -eq 'ps1') { $ln = '    Chk ' + $q + 'N98b: suffixed' + $q } else { $ln = 'chk ' + $q + 'N98b: suffixed' + $q }
+        [System.IO.File]::WriteAllLines($f, [string[]]@($ln), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    # (M90) NAME DECLARATION + SITE PAIRS: CO-PRESENCE AND STRAY CHECKS -- `retro-flow:` / `retro-flow-sites:` (Part O, O90 / O92) and
+    # `epic-flow:` / `epic-flow-sites:` (Part M, M24 / M26) share one body. It takes the keys and the token prefix as arguments; Part O's
+    # RtSiteBad / RtStray are thin wrappers pinning their keys. Part O output of both runners was byte-identical before and after the move
+    # (M90 impl report). The site names `retro` / `milestone` and their two files (SKILL.md / template.md) are the same map for both
+    # declarations (conventions section on consuming retro follow-ups).
+    function FlowSiteBad([string]$nameKey, [string]$siteKey, [string]$f = '', [string]$skRoot = '') {
+        # -> names without exactly one site pair + pair names not declared + unknown sites + site files (of the two) not carrying the backticked name.
+        if ($f -eq '') { $f = $CONV }
+        if ($skRoot -eq '') { $skRoot = $ROOT }
+        $names = @(DnNames $nameKey $f)
+        $pairs = @(DnPairs $siteKey $f)
+        $bad = 0
+        $bt = [string][char]0x60
+        foreach ($n in $names) {
+            $hit = @($pairs | Where-Object { (FlPairName $_) -ceq $n })
+            if ($hit.Count -ne 1) { $bad++; continue }
+            $site = FlPairMark $hit[0]
+            if (-not ($site -ceq 'retro' -or $site -ceq 'milestone')) { $bad++; continue }
+            foreach ($x in @('SKILL.md', 'template.md')) {
+                $p = Join-Path $skRoot ('skills/' + $site + '/' + $x)
+                if (-not (Test-Path -LiteralPath $p) -or -not ([System.IO.File]::ReadAllText($p).Contains($bt + $n + $bt))) { $bad++ }
+            }
+        }
+        $nset = OrdSet $names
+        foreach ($p in $pairs) { if (-not $nset.Contains((FlPairName $p))) { $bad++ } }
+        return [string]$bad
+    }
+    function FlowStray([string]$nameKey, [string]$prefix, [string]$f = '', [string]$skRoot = '') {
+        # -> backtick tokens starting with the prefix (the part before `=` for site pairs) in the conventions (the whole conventions set
+        #    when no file argument) and the retro / milestone skills and templates that are not declared names (distinct tokens).
+        $conv = if ($f -eq '') { $CONV } else { $f }
+        if ($skRoot -eq '') { $skRoot = $ROOT }
+        $names = OrdSet @(DnNames $nameKey $conv)
+        $files = New-Object System.Collections.Generic.List[string]
+        if ($f -ne '') { [void]$files.Add($f) } else {
+            $cf = @(Get-ChildItem (Join-Path $ROOT 'docs') -File -Force -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name.StartsWith('conventions', [System.StringComparison]::Ordinal) -and $_.Name.EndsWith('.md', [System.StringComparison]::Ordinal) } |
+                ForEach-Object { $_.FullName })
+            foreach ($c in $cf) { [void]$files.Add($c) }
+        }
+        foreach ($s in @('retro', 'milestone')) { foreach ($x in @('SKILL.md', 'template.md')) { [void]$files.Add((Join-Path $skRoot ('skills/' + $s + '/' + $x))) } }
+        $bt = [string][char]0x60
+        $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($p in $files) {
+            if (-not (Test-Path -LiteralPath $p)) { continue }
+            foreach ($ln in [System.IO.File]::ReadAllLines($p)) {
+                $s = $ln
+                while (($i = $s.IndexOf($bt + $prefix, [System.StringComparison]::Ordinal)) -ge 0) {
+                    $s = $s.Substring($i + 1)
+                    $j = $s.IndexOf($bt, [System.StringComparison]::Ordinal)
+                    if ($j -lt 0) { break }
+                    $t = $s.Substring(0, $j)
+                    $e = $t.IndexOf('=', [System.StringComparison]::Ordinal)
+                    if ($e -ge 0) { $t = $t.Substring(0, $e) }
+                    [void]$seen.Add($t)
+                    $s = $s.Substring($j + 1)
+                }
+            }
+        }
+        return [string]@($seen | Where-Object { $_ -ne '' -and -not $names.Contains($_) }).Count
+    }
+    # (M75) Start-point predicate NAMES are read from the declarations -- the block and form verdicts get one name per value from
+    # `start-point-block-predicates:` / `start-point-form-predicates:` and the runner emits `name=value` (names are NOT spelled
+    # in this source -- that would make a second declaration site). Name order = value position. W156/W157 go red when the
+    # declared count differs from the number of values a verdict emits. Helpers live OUTSIDE the part guard (rf-60).
+    $SPB_KEY = 'start-point-block-predicates:'
+    $SPF_KEY = 'start-point-form-predicates:'
+    # (M87, rest of retro rf-104) The old Sp* wrappers (three) and fixtures (two) moved to shared name-declaration helper names (Dn*)
+    # -- they take the KEY as an argument, so any other name declaration labels its values with the same function. Bodies are the old
+    # ones; only the names and the "B|F letter -> key" argument changed (same input, same output -- M87 impl report T06 copy check).
+    # Parameter is NOT named `$conv` -- PowerShell variables are case-insensitive, so it would shadow the global `$CONV`.
+    function DnCount([string]$key, [string]$dcConv = '') { return [string](@(DnNames $key $dcConv).Count) }
+    function DnLabel([string]$key, [string]$vals, [string]$spConv = '') {
+        $n = @(DnNames $key $spConv)
+        $v = @(($vals.Trim(' ')) -split ' +' | Where-Object { $_ -ne '' })
+        $k = [Math]::Max($n.Count, $v.Count)
+        $parts = New-Object System.Collections.Generic.List[string]
+        for ($i = 0; $i -lt $k; $i++) {
+            $nm = if ($i -lt $n.Count) { $n[$i] } else { '?' }
+            $vv = if ($i -lt $v.Count) { $v[$i] } else { '?' }
+            $parts.Add($nm + '=' + $vv)
+        }
+        return ($parts -join ' ')
+    }
+    # (M86) NAME / DEFINITION / ORPHAN / UNIQUE / ORDER verdicts come from the shared Dn* helpers -- pass the two declarations as
+    # one space-joined key list ($SP_KEYS). With several keys DnDefs' window runs from the block declaration line to the next
+    # heading at ANY depth -- the window of the absorbed SpDefs (M86 review blocker 1: round 0 narrowed it to the SAME depth and
+    # left an indented orphan definition green). Control: W164.
+    $SP_KEYS = $SPB_KEY + ' ' + $SPF_KEY
+    # Order control fixture -- a SYNTHETIC conventions file holding only the two declaration lines and three definition items;
+    # 'swap' reverses the first two definitions. Not a copy of the real conventions: if the real order is already broken, swapping
+    # its first two items can REDUCE the violations and the control would measure the baseline (M76 reversal measurement).
+    function DnOrderFixture([string]$mode, [string]$k1, [string]$k2) {
+        # (M86 round 1) 'deep' indents the second definition deeper and puts a column-0 prose line before it -- the control that
+        # the several-key window ignores depth (W164). 'deepx' adds one deeper-indented orphan definition 'zz-od'.
+        $f = Join-Path $sbx ('conv-spo-' + $mode + '.md')
+        if ($mode -eq 'swap') { $d1 = 'zz-ob'; $d2 = 'zz-oa' } else { $d1 = 'zz-oa'; $d2 = 'zz-ob' }
+        $bt = [string][char]0x60
+        $lines = @('## fixture', '', ('  - ' + $bt + $k1 + $bt + ' zz-oa zz-ob'), '', ('  - ' + $bt + $k2 + $bt + ' zz-oc'), '',
+            ('  - **' + $bt + $d1 + $bt + '** - x'), ('  - **' + $bt + $d2 + $bt + '** - x'), ('  - **' + $bt + 'zz-oc' + $bt + '** - x'))
+        if ($mode -eq 'deep' -or $mode -eq 'deepx') {
+            $lines = @('## fixture', '', ('  - ' + $bt + $k1 + $bt + ' zz-oa zz-ob'), '', ('  - ' + $bt + $k2 + $bt + ' zz-oc'), '',
+                ('  - **' + $bt + 'zz-oa' + $bt + '** - x'), 'zz prose', ('      - **' + $bt + 'zz-ob' + $bt + '** - x'), ('  - **' + $bt + 'zz-oc' + $bt + '** - x'))
+            if ($mode -eq 'deepx') { $lines += ('      - **' + $bt + 'zz-od' + $bt + '** - x') }
+        }
+        [System.IO.File]::WriteAllLines($f, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    function DnWireFixture([string]$key) {
+        $f = Join-Path $sbx 'conv-spw.md'
+        $first = @(DnNames $key) | Select-Object -First 1
+        $w = '`' + $key + '`'
+        $lines = New-Object System.Collections.ArrayList
+        foreach ($l in [System.IO.File]::ReadAllLines($CONV)) {
+            $i = $l.IndexOf($w, [System.StringComparison]::Ordinal)
+            if ($null -ne $first -and $i -ge 0) {
+                $head = $l.Substring(0, $i + $w.Length); $t = $l.Substring($i + $w.Length)
+                $j = $t.IndexOf(' ' + $first, [System.StringComparison]::Ordinal)
+                if ($j -ge 0) { $l = $head + $t.Substring(0, $j + 1) + 'zzz-wired' + $t.Substring($j + 1 + $first.Length) }
+            }
+            [void]$lines.Add($l)
+        }
+        [System.IO.File]::WriteAllLines($f, $lines.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    # --- DECLARATION VERDICT REGISTRY (M86) ---------------------------------------------------------------------
+    # Declaration hygiene and the name-declaration main checks come from ONE row of this table -- "part|case ID|check|conventions
+    # file|keys|label". Checks: count (exactly one declaration line) / seps (no forbidden separator per key; several keys concatenate
+    # the values) / dup def orphan order (the shared Dn* helpers; several keys are read as one name list) / their -sum forms (summed
+    # per key -- the two docs-commit declarations). IDs, labels and expected values equal the hand-written case lines they replace
+    # (M86 impl report T02/T03 -- label lists compared before and after). Rows run only in their own part (PartOn). `cover` rows emit
+    # no case; they only list a declaration key this harness knows -- the coverage check (F27) compares the key set discovered in the
+    # conventions document set with this table's key set. Part N's declaration cases are NOT in this table: at M79 CaseIds read only the runner
+    # source case lines to check the `floor-ask-cases:` mapping (those keys are `cover` rows). From M88 AkCaseIds also reads this table's case rows,
+    # so the Part K (`hc-asks:`) declaration hygiene lives here. The keys are literals in source and the
+    # declaration's original is the conventions line itself -- the table only decides WHICH case ID asks WHICH key.
+    $DECL_REG = @'
+G|G9|count|CONV|xr-asks:|exactly one xr-asks declaration line
+G|G10|count|CONV|xr-ask-cases:|exactly one xr-ask-cases declaration line
+G|G11|count|CONV|xr-ask-from:|exactly one xr-ask-from declaration line
+G|G12|seps|CONV|xr-asks: xr-ask-cases: xr-ask-from:|no forbidden separators at the tail of the three cross-reference judgment declaration lines
+G|G13|dup|CONV|xr-asks:|main check - cross-reference judgment names are unique
+G|G14|def|CONV|xr-asks:|main check - exactly one definition item per judgment name
+G|G15|orphan|CONV|xr-asks:|main check - every judgment definition item has a declared name (0 orphans)
+G|G16|order|CONV|xr-asks:|main check - judgment definition items follow the declared name order
+I|I7|count|CONV|state-neg:|exactly one state-neg declaration line in the convention
+I|I8|count|CONV|state-past:|exactly one state-past declaration line in the convention
+I|I10|seps|CONV|state-neg:|no forbidden separator in the state-neg declaration tail
+I|I11|seps|CONV|state-past:|no forbidden separator in the state-past declaration tail
+I|I18|count|CONV|sep-cps:|exactly one sep-cps declaration line in the convention
+I|I19|count|CONV|sep-ok-cps:|exactly one sep-ok-cps declaration line in the convention
+K|K7|count|CONV|hc-asks:|exactly one hc-asks declaration line
+K|K8|count|CONV|hc-ask-cases:|exactly one hc-ask-cases declaration line
+K|K9|count|CONV|hc-ask-from:|exactly one hc-ask-from declaration line
+K|K11|seps|CONV|hc-asks: hc-ask-cases: hc-ask-from:|no forbidden separator in the three common-control judgment declaration tails
+K|K12|dup|CONV|hc-asks:|main check - common-control judgment names are unique
+K|K13|def|CONV|hc-asks:|main check - every judgment name has exactly one definition item
+K|K14|orphan|CONV|hc-asks:|main check - every judgment definition item has a declared name (orphan definitions 0)
+K|K15|order|CONV|hc-asks:|main check - judgment definition items follow the declared name order
+L|L1|count|CONV|count-word:|exactly one count-word declaration line
+L|L2|count|CONV|count-copula:|exactly one count-copula declaration line
+M|M1|count|CONV|epic-status:|epic-status declaration line is exactly 1
+M|M2|count|CONV|epic-since:|epic-since declaration line is exactly 1
+M|M11|count|CONV|epic-members:|epic-members declaration line is exactly 1
+M|M16|count|CONV|epic-flow:|exactly one epic-flow declaration line
+M|M17|count|CONV|epic-flow-sites:|exactly one epic-flow-sites declaration line
+M|M18|seps|CONV|epic-flow: epic-flow-sites:|no forbidden separators at the tail of the two trunk-emergence declaration lines
+M|M19|dup|CONV|epic-flow:|main check - trunk-emergence names are unique
+M|M20|def|CONV|epic-flow:|main check - exactly one definition item per name
+M|M21|orphan|CONV|epic-flow:|main check - every definition item has a declared name (0 orphans)
+M|M22|order|CONV|epic-flow:|main check - definition items follow the declared name order
+O|O1|count|CONV|retro-status:|retro-status declaration line is exactly 1
+O|O2|count|CONV|retro-block:|retro-block declaration line is exactly 1
+O|O15|count|CONV|retro-cadence:|retro-cadence declaration line is exactly 1
+O|O16|count|CONV|retro-pick:|retro-pick declaration line is exactly 1
+O|O26|seps|CONV|retro-cadence:|no forbidden separator in the retro-cadence declaration tail
+O|O27|seps|CONV|retro-pick:|no forbidden separator in the retro-pick declaration tail
+O|O46|count|CONV|retro-release-mark:|retro-release-mark declaration line is exactly 1
+O|O47|count|CONV|retro-mark-since:|retro-mark-since declaration line is exactly 1
+O|O52|seps|CONV|retro-release-mark: retro-mark-since: retro-mark-derive:|no forbidden separator in the three declaration tails
+O|O58|count|CONV|retro-mark-derive:|retro-mark-derive declaration line is exactly 1
+O|O60|count|CONV|retro-order-branches:|retro-order-branches declaration line is exactly 1
+O|O61|count|CONV|retro-order-verdict:|retro-order-verdict declaration line is exactly 1
+O|O63|seps|CONV|retro-order-branches: retro-order-verdict:|no forbidden separator in the tails of the two branch declarations
+O|O64|dup|CONV|retro-order-branches:|main check -- branch names are unique
+O|O65|def|CONV|retro-order-branches:|main check -- every branch name has exactly one definition item
+O|O66|orphan|CONV|retro-order-branches:|main check -- every branch definition item has a declared name (0 orphans)
+O|O67|order|CONV|retro-order-branches:|main check -- branch definition order equals declaration name order
+O|O100|count|CONV|mark-since-steps:|mark-since-steps declaration line is exactly 1
+O|O101|seps|CONV|mark-since-steps:|no forbidden separator in the mark-since-steps declaration tail
+O|O102|dup|CONV|mark-since-steps:|main check -- since-derivation step names are unique
+O|O103|def|CONV|mark-since-steps:|main check -- every step name has exactly one definition item
+O|O104|orphan|CONV|mark-since-steps:|main check -- every step definition item has a declared name (0 orphans)
+O|O105|order|CONV|mark-since-steps:|main check -- step definition order equals declaration name order
+P|P1|count|CONV|criteria-verdict:|criteria-verdict declaration line is exactly 1
+P|P2|count|CONV|criteria-since:|criteria-since declaration line is exactly 1
+P|P20|count|CONV|metrics-filled-since:|exactly one metrics-filled-since declaration line
+P|P24|count|CONV|cc-asks:|exactly one cc-asks declaration line
+P|P25|count|CONV|cc-ask-cases:|exactly one cc-ask-cases declaration line
+P|P26|count|CONV|cc-ask-from:|exactly one cc-ask-from declaration line
+P|P27|count|CONV|cc-ask-skip:|exactly one cc-ask-skip declaration line
+P|P28|seps|CONV|cc-asks: cc-ask-cases: cc-ask-from: cc-ask-skip:|no forbidden separators at the tail of the four completion-criteria judgment declaration lines
+P|P29|dup|CONV|cc-asks:|main check - completion-criteria judgment names are unique
+P|P30|def|CONV|cc-asks:|main check - exactly one definition item per judgment name
+P|P31|orphan|CONV|cc-asks:|main check - every judgment definition item has a declared name (0 orphans)
+P|P32|order|CONV|cc-asks:|main check - judgment definition items follow the declared name order
+R|R1|count|CONV|coverage-bookkeeping:|coverage-bookkeeping declaration line is exactly 1
+S|S1|count|CONV_REL|push-availability:|push-availability declaration line is exactly 1
+S|S2|count|CONV_REL|terminal-state:|terminal-state declaration line is exactly 1
+S|S8|count|CONV_REL|docs-commit-paths:|exactly one docs-commit-paths declaration line
+S|S9|seps|CONV_REL|docs-commit-paths:|no forbidden separator in the docs-commit-paths declaration tail
+S|S20|count|CONV_REL|docs-commit-deny:|exactly one docs-commit-deny declaration line
+S|S22|seps|CONV_REL|docs-commit-deny:|no forbidden separator in the docs-commit-deny declaration tail
+S|S23|count|CONV_REL|docs-commit-parts:|exactly one docs-commit-parts declaration line
+S|S24|seps|CONV_REL|docs-commit-parts:|no forbidden separator in the docs-commit-parts declaration tail
+S|S31|count|CONV_REL|docs-commit-preconds:|exactly one docs-commit-preconds declaration line
+S|S32|count|CONV_REL|docs-commit-epic-cases:|exactly one docs-commit-epic-cases declaration line
+S|S35|dup-sum|CONV_REL|docs-commit-preconds: docs-commit-epic-cases:|main check -- names of both declarations are unique
+S|S36|def-sum|CONV_REL|docs-commit-preconds: docs-commit-epic-cases:|main check -- every name has exactly one definition item
+S|S37|orphan-sum|CONV_REL|docs-commit-preconds: docs-commit-epic-cases:|main check -- no definition item outside the declarations
+S|S38|order-sum|CONV_REL|docs-commit-preconds: docs-commit-epic-cases:|main check -- definition order equals declaration name order
+S|S48|count|CONV|release-preflights:|exactly one release-preflights declaration line
+S|S49|seps|CONV|release-preflights:|no forbidden separator in the release-preflights declaration tail
+S|S51|dup|CONV|release-preflights:|main check -- preflight names are unique
+S|S52|def|CONV|release-preflights:|main check -- every name has exactly one definition item
+S|S53|orphan|CONV|release-preflights:|main check -- no definition item outside the declaration
+S|S54|order|CONV|release-preflights:|main check -- definition order equals declaration name order
+T|T1|count|CONV|source-eol:|source-eol declaration line is exactly 1
+U|U1|count|CONV|measure-order:|measure-order declaration line is exactly 1
+V|V1|count|CONV|control-form:|control-form declaration line is exactly 1
+V|V2|count|CONV|reversal-block:|reversal-block declaration line is exactly 1
+V|V3|count|CONV|reversal-columns:|reversal-columns declaration line is exactly 1
+V|V4|count|CONV|reversal-sep:|reversal-sep declaration line is exactly 1
+V|V5|count|CONV|reversal-since:|reversal-since declaration line is exactly 1
+V|V34|count|CONV|retire-ways:|exactly one retire-ways declaration line
+V|V35|seps|CONV|retire-ways:|no forbidden separators at the tail of the retire-ways declaration line
+V|V36|dup|CONV|retire-ways:|main check - retirement way names are unique
+V|V37|def|CONV|retire-ways:|main check - exactly one definition item per retirement way
+V|V38|orphan|CONV|retire-ways:|main check - every retirement way definition item has a declared name (0 orphans)
+V|V39|order|CONV|retire-ways:|main check - retirement way definition items follow the declared name order
+W|W1|count|CONV|scope-decl:|scope-decl declaration line is exactly 1
+W|W7|count|CONV|scope-limits:|scope-limits declaration line is exactly 1
+W|W13|count|CONV|measure-cache:|measure-cache declaration line is exactly 1
+W|W19|count|CONV|verify-scope:|verify-scope declaration line is exactly 1
+W|W26|seps|CONV|scope-decl:|no forbidden separator in the scope-decl declaration tail
+W|W49|count|CONV|infeasible-decl:|infeasible-decl declaration line is exactly 1
+W|W57|seps|CONV|infeasible-decl:|no forbidden separator in the infeasible-decl declaration tail
+W|W58|count|CONV|lean-decl:|lean-decl declaration line is exactly 1
+W|W66|seps|CONV|lean-decl:|no forbidden separator in the lean-decl declaration tail
+W|W67|count|CONV|scan-control:|scan-control declaration line is exactly 1
+W|W72|seps|CONV|scan-control:|no forbidden separator in the scan-control declaration tail
+W|W73|count|CONV|absent-job:|absent-job declaration line is exactly 1
+W|W78|seps|CONV|absent-job:|no forbidden separator in the absent-job declaration tail
+W|W79|count|CONV|scan-control-anchor:|scan-control-anchor declaration line is exactly 1
+W|W84|seps|CONV|scan-control-anchor:|no forbidden separator in the scan-control-anchor declaration tail
+W|W85|count|CONV|absent-job-anchor:|absent-job-anchor declaration line is exactly 1
+W|W90|seps|CONV|absent-job-anchor:|no forbidden separator in the absent-job-anchor declaration tail
+W|W91|count|CONV|lifecycle-decl:|lifecycle-decl declaration line is exactly 1
+W|W98|seps|CONV|lifecycle-decl:|no forbidden separator in the lifecycle-decl declaration tail
+W|W99|count|CONV|lifecycle-transitions:|lifecycle-transitions declaration line is exactly 1
+W|W101|seps|CONV|lifecycle-transitions:|no forbidden separator in the lifecycle-transitions declaration tail
+W|W27|seps|CONV|measure-cache:|no forbidden separator in the measure-cache declaration tail
+W|W28|seps|CONV|scope-limits:|no forbidden separator in the scope-limits declaration tail
+W|W29|seps|CONV|verify-scope:|no forbidden separator in the verify-scope declaration tail
+W|W127|count|CONV|start-point-map:|exactly one start-point-map declaration line
+W|W138|seps|CONV|start-point-map:|no forbidden separator in the start-point-map declaration tail
+W|W139|count|CONV|start-point-parent:|exactly one start-point-parent declaration line
+W|W140|seps|CONV|start-point-parent:|no forbidden separator in the start-point-parent declaration tail
+W|W148|count|CONV|start-point-pointer:|exactly one start-point-pointer declaration line
+W|W149|seps|CONV|start-point-pointer:|no forbidden separator in the start-point-pointer declaration tail
+W|W152|count|CONV|start-point-block-predicates:|exactly one start-point-block-predicates declaration line
+W|W153|count|CONV|start-point-form-predicates:|exactly one start-point-form-predicates declaration line
+W|W155|seps|CONV|start-point-block-predicates: start-point-form-predicates:|no forbidden separator in either predicate declaration tail
+W|W158|def|CONV|start-point-block-predicates: start-point-form-predicates:|main check -- exactly one definition item per predicate name
+W|W160|orphan|CONV|start-point-block-predicates: start-point-form-predicates:|main check -- every definition item has a declared name (orphan definitions 0)
+W|W161|dup|CONV|start-point-block-predicates: start-point-form-predicates:|main check -- names are unique across both predicate declarations
+W|W162|order|CONV|start-point-block-predicates: start-point-form-predicates:|main check -- definition item order equals the declaration name order
+W|W31|count|CONV|measure-axis:|measure-axis declaration line is exactly 1
+W|W32|count|CONV|measure-axis-job:|measure-axis-job declaration line is exactly 1
+W|W40|seps|CONV|measure-axis:|no forbidden separator in the measure-axis declaration tail
+W|W41|seps|CONV|measure-axis-job:|no forbidden separator in the measure-axis-job declaration tail
+W|W44|count|CONV|measure-axis-names:|measure-axis-names declaration line is exactly 1
+W|W48|seps|CONV|measure-axis-names:|no forbidden separator in the measure-axis-names declaration tail
+-|-|cover|CONV|status-items:|N1
+-|-|cover|CONV|autonomy-level:|N2
+-|-|cover|CONV|autonomy-default:|N10
+-|-|cover|CONV|autonomy-lines:|N11 N12
+-|-|cover|CONV|floor-marks:|N18
+-|-|cover|CONV|floor-items:|N30
+-|-|cover|CONV|floor-mark-map:|N31
+-|-|cover|CONV|floor-unmarked:|N32
+-|-|cover|CONV|floor-excluded:|N33
+-|-|cover|CONV|floor-asks:|N46
+-|-|cover|CONV|floor-ask-cases:|N47
+-|-|cover|CONV|floor-ask-from:|N48
+-|-|cover|CONV|retro-flow:|O88
+-|-|cover|CONV|retro-flow-sites:|O88
+-|-|cover|CONV|retro-gate-since:|O88
+-|-|cover|CONV|retro-review-after:|O88
+-|-|cover|CONV|tr-draft:|W102 W103 W106
+-|-|cover|CONV|tr-impl:|W102 W103 W106
+-|-|cover|CONV|tr-review:|W102 W103 W106
+-|-|cover|CONV|tr-release-commit:|W102 W103 W106
+-|-|cover|CONV|tr-tag:|W102 W103 W106
+-|-|cover|CONV|tr-retro:|W102 W103 W106
+-|-|cover|CONV|tr-retro-skip:|W102 W103 W106
+-|-|cover|CONV|tr-forced:|W102 W103 W106
+-|-|cover|CONV|tr-debug-open:|W102 W103 W106
+-|-|cover|CONV|tr-debug-done:|W102 W103 W106
+-|-|cover|CONV|tr-debug-release:|W102 W103 W106
+-|-|cover|CONV|tr-pr-create:|W102 W103 W106
+-|-|cover|CONV|tr-pr-finalize:|W102 W103 W106
+-|-|cover|CONV|tr-continuous-stop:|W102 W103 W106
+-|-|cover|CONV|tr-downstream:|W102 W103 W106
+-|-|cover|CONV|tr-part-select:|W102 W103 W106
+-|-|cover|CONV|mutation-axes:|N24
+'@
+    function DeclReg { return @($DECL_REG -split "`r?`n" | Where-Object { $_ -ne '' }) }
+    # (F24-F28, M86) COVERAGE -- discover the declaration lines of the conventions document set (glob 'docs/conventions*.md') in ONE
+    # pass and ask that each key has exactly one declaration line, that no tail carries a forbidden separator, and that the
+    # discovered key set equals this table's key set. The line shape equals DeclLines (leading spaces/tabs, '-', one or more
+    # spaces/tabs, the backticked key); only keys of the form [a-z][a-z0-9-]*: are counted.
+    function DeclDiscFiles([string]$dir) {
+        $fs = @(Get-ChildItem $dir -File -Force -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name.StartsWith('conventions', [System.StringComparison]::Ordinal) -and
+                               $_.Name.EndsWith('.md', [System.StringComparison]::Ordinal) } | ForEach-Object { $_.FullName })
+        $lst = New-Object 'System.Collections.Generic.List[string]'
+        foreach ($f in $fs) { [void]$lst.Add($f) }
+        $lst.Sort([System.StringComparer]::Ordinal)
+        return @($lst.ToArray())
+    }
+    function DeclDisc([string]$dir = '', [string]$what = 'k') {
+        if ($dir -eq '') { $dir = Join-Path $ROOT 'docs' }
+        $out = New-Object System.Collections.Generic.List[string]
+        foreach ($f in (DeclDiscFiles $dir)) {
+            $raw = ReadUtf8 $f
+            if ($null -eq $raw) { continue }
+            foreach ($ln in ($raw -split "`r?`n")) {
+                $m = [regex]::Match($ln, '^[ \t]*-[ \t]+`([a-z][a-z0-9-]*:)`(.*)$')
+                if ($m.Success) { if ($what -eq 'k') { $out.Add($m.Groups[1].Value) } else { $out.Add($m.Groups[2].Value) } }
+            }
+        }
+        return @($out)
+    }
+    function DeclRegKeys {
+        $s = New-Object 'System.Collections.Generic.SortedSet[string]'([System.StringComparer]::Ordinal)
+        foreach ($row in (DeclReg)) { foreach ($k in (($row -split '\|', 6)[4] -split ' ')) { if ($k -ne '') { [void]$s.Add($k) } } }
+        return @($s)
+    }
+    function DeclDiscDup([string]$dir = '') {
+        $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        $dup = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($k in (DeclDisc $dir 'k')) { if (-not $seen.Add($k)) { [void]$dup.Add($k) } }
+        return [string]$dup.Count
+    }
+    function DeclDiscSeps([string]$dir = '') {
+        return [string]@(DeclDisc $dir 't' | Where-Object { [regex]::IsMatch($_, $SEP_RE) }).Count
+    }
+    function DeclDiscUnreg([string]$dir = '') {
+        $d = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($k in (DeclDisc $dir 'k')) { [void]$d.Add($k) }
+        $r = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($k in (DeclRegKeys)) { [void]$r.Add($k) }
+        $n = 0
+        foreach ($k in $d) { if (-not $r.Contains($k)) { $n++ } }
+        foreach ($k in $r) { if (-not $d.Contains($k)) { $n++ } }
+        return [string]$n
+    }
+    function DeclFixture([string]$mode) {
+        $fx = Join-Path $sbx ('declfx-' + $mode)
+        if (Test-Path $fx) { Remove-Item -Recurse -Force $fx }
+        [void](New-Item -ItemType Directory -Path $fx)
+        foreach ($f in (DeclDiscFiles (Join-Path $ROOT 'docs'))) { Copy-Item $f $fx }
+        $fc = Join-Path $fx 'conventions.md'
+        $bt = [string][char]0x60
+        $enc = New-Object System.Text.UTF8Encoding($false)
+        $lines = New-Object System.Collections.Generic.List[string]
+        foreach ($l in ((ReadUtf8 $fc) -split "`r?`n")) { $lines.Add($l) }
+        $k = '- ' + $bt + 'retro-status:' + $bt
+        $out = New-Object System.Collections.Generic.List[string]
+        foreach ($l in $lines) {
+            $t = $l.TrimStart([char[]]@([char]0x20, [char]0x09))
+            $hit = $t.StartsWith($k, [System.StringComparison]::Ordinal)
+            if ($mode -eq 'drop' -and $hit) { continue }
+            if ($mode -eq 'sep' -and $hit) {
+                $w = $bt + 'retro-status:' + $bt + ' '
+                $i = $l.IndexOf($w, [System.StringComparison]::Ordinal)
+                if ($i -ge 0) { $l = $l.Substring(0, $i + $w.Length - 1) + [string][char]0x09 + $l.Substring($i + $w.Length) }
+            }
+            $out.Add($l)
+            if ($mode -eq 'dup' -and $hit) { $out.Add($l) }
+        }
+        if ($mode -eq 'add') { $out.Add(''); $out.Add('  - ' + $bt + 'zz-m86-unreg:' + $bt + ' zz') }
+        [System.IO.File]::WriteAllText($fc, ($out -join "`n"), $enc)
+        if ($mode -eq 'frag') {
+            [System.IO.File]::WriteAllText((Join-Path $fx 'conventions-zz-m86.md'), ('# fixture' + "`n`n" + '  - ' + $bt + 'zz-m86-frag:' + $bt + ' zz' + "`n"), $enc)
+        }
+        return $fx
+    }
+    # (F29-F31, M87, retro rf-108) A `cover` row names the case IDs that ask its key -- one or more, space-separated, in the row's last
+    # field (the label field of a case row). No field is added, so rows of the other check kinds read unchanged. Every ID must have a case
+    # in BOTH runner sources -- a case is a line whose space/tab-stripped text starts with `chk "ID:` / `Chk "ID:`, or a case row of that
+    # source's registry ("part|ID|check|..."); comment lines are not cases. What is re-checked is that the ID EXISTS -- whether that case
+    # really asks that key (its meaning) is not asked (the conventions' "what the machine asks" item).
+    function SrcCaseIds([string]$src) {
+        $q = [string][char]0x22
+        $O = [System.StringComparison]::Ordinal
+        $s = New-Object 'System.Collections.Generic.SortedSet[string]'([System.StringComparer]::Ordinal)
+        foreach ($ln in [System.IO.File]::ReadAllLines($src)) {
+            $t = $ln.TrimStart([char[]]@([char]0x20, [char]0x09))
+            if ($t.StartsWith('chk ' + $q, $O) -or $t.StartsWith('Chk ' + $q, $O)) {
+                $r = $t.Substring(5); $j = $r.IndexOf(':', $O)
+                if ($j -gt 0) { $id = $r.Substring(0, $j); if ([regex]::IsMatch($id, '^[A-Z][0-9]+[a-z]*$')) { [void]$s.Add($id) } }
+                continue
+            }
+            if ([regex]::IsMatch($t, '^[A-Z]\|[A-Z][0-9]+[a-z]*\|[a-z-]+\|')) { [void]$s.Add(($t -split '\|')[1]) }
+        }
+        return @($s)
+    }
+    function CoverIdBad([string]$regFile = '', [string]$shSrc = '', [string]$psSrc = '') {
+        if ($shSrc -eq '') { $shSrc = $RUN_SH }
+        if ($psSrc -eq '') { $psSrc = $RUN_PS1 }
+        $rows = if ($regFile -ne '') { @([System.IO.File]::ReadAllLines($regFile) | Where-Object { $_ -ne '' }) } else { @(DeclReg) }
+        $S = OrdSet @(SrcCaseIds $shSrc); $P = OrdSet @(SrcCaseIds $psSrc)
+        $c = 0
+        foreach ($row in $rows) {
+            $f = $row -split '\|', 6
+            if ($f.Count -lt 6 -or $f[2] -cne 'cover') { continue }
+            $k = 0; $bad = $false
+            foreach ($id in ($f[5] -split ' +')) {
+                if ($id -eq '' -or $id -eq '-') { continue }
+                $k++
+                if (-not $S.Contains($id) -or -not $P.Contains($id)) { $bad = $true }
+            }
+            if ($k -eq 0 -or $bad) { $c++ }
+        }
+        return [string]$c
+    }
+    # noid / empty / oneside: a registry copy (the real rows + one synthetic cover row -- oneside names F29). oneside-src: a ps1 source copy
+    # without the F29 case line (no real row is relied on -- a real row going off does not leak into the control).
+    function CoverFixture([string]$mode) {
+        $enc = New-Object System.Text.UTF8Encoding($false)
+        if ($mode -eq 'oneside-src') {
+            $pfx = 'Chk "F29:'
+            $out = New-Object System.Collections.Generic.List[string]
+            foreach ($l in [System.IO.File]::ReadAllLines($RUN_PS1)) { if (-not $l.TrimStart([char[]]@([char]0x20, [char]0x09)).StartsWith($pfx, [System.StringComparison]::Ordinal)) { $out.Add($l) } }
+            $fx = Join-Path $sbx 'cov-fx-ps1.txt'
+            [System.IO.File]::WriteAllLines($fx, $out.ToArray(), $enc)
+            return $fx
+        }
+        $extra = if ($mode -eq 'noid') { '-|-|cover|CONV|zz-cov:|Z999' } elseif ($mode -eq 'oneside') { '-|-|cover|CONV|zz-cov:|F29' } else { '-|-|cover|CONV|zz-cov:|' }
+        $fx = Join-Path $sbx ('cov-fx-' + $mode + '.txt')
+        [System.IO.File]::WriteAllLines($fx, [string[]](@(DeclReg) + $extra), $enc)
+        return $fx
+    }
 # === Part A -- detection threshold =====================================
 
 # IsTideRepo/Discover: tests\lib\discover.ps1 (single source)
@@ -165,13 +905,13 @@ try {
     MkTideRepo (Join-Path $PH 'svc-b')
     MkTideRepo (Join-Path $PH '.hidden-svc')    # hidden (dot) -> excluded from discovery
 
-    Chk "A: 2 child tide repos -> hint N=2"            (DetectHint $P2) 'hint N=2'
-    Chk "A: 1 child tide repo -> none"                (DetectHint $P1) 'none'
-    Chk "A: 0 child tide repos -> none"               (DetectHint $P0) 'none'
-    Chk "A: single repo root (children src etc, non-tide) -> none" (DetectHint $SR) 'none'
-    Chk "A: 2 children + hidden tide child -> hint N=2 (hidden not counted)" (DetectHint $PH) 'hint N=2'
-    Chk "A: hidden child (.hidden-svc) not discovered" ([bool]((Discover $PH) -match 'hidden')).ToString() 'False'
-    Chk "A: discover = svc-a,svc-b (hidden excluded)" ((Discover $PH) -join ',') 'svc-a,svc-b'
+    Chk "A1: 2 child tide repos -> hint N=2"            (DetectHint $P2) 'hint N=2'
+    Chk "A2: 1 child tide repo -> none"                (DetectHint $P1) 'none'
+    Chk "A3: 0 child tide repos -> none"               (DetectHint $P0) 'none'
+    Chk "A4: single repo root (children src etc, non-tide) -> none" (DetectHint $SR) 'none'
+    Chk "A5: 2 children + hidden tide child -> hint N=2 (hidden not counted)" (DetectHint $PH) 'hint N=2'
+    Chk "A6: hidden child (.hidden-svc) not discovered" ([bool]((Discover $PH) -match 'hidden')).ToString() 'False'
+    Chk "A7: discover = svc-a,svc-b (hidden excluded)" ((Discover $PH) -join ',') 'svc-a,svc-b'
     }
 
     # === Part B -- single-source freeze: canonical catalog + drift guard ====
@@ -193,7 +933,7 @@ try {
         Where-Object { -not $_.Name.StartsWith('.', [System.StringComparison]::Ordinal) } |
         Where-Object { Test-Path (Join-Path $_.FullName 'SKILL.md') }).Count
     if (PartOn 'B') {
-    Chk "B: actual command skill count measured (>0)" $(if ($N -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "B4: actual command skill count measured (>0)" $(if ($N -gt 0) { 'ok' } else { 'no' }) 'ok'
     }
 
     $README    = Join-Path $ROOT 'README.md'
@@ -221,10 +961,10 @@ try {
     }
     if (PartOn 'B') {
     Chk "B1: docs/commands.md declares N$JONG (canonical)" (DeclaredHasCount $CANON_CMD $N) 'yes'
-    Chk "B1: README.md declares N$JONG"                    (DeclaredHasCount $README $N)    'yes'
-    Chk "B1: docs/conventions.md declares N$JONG"          (DeclaredHasCount $CONV $N)      'yes'
-    Chk "B1: site/docs/getting-started.md declares N$JONG" (DeclaredHasCount $SITE_GS $N)   'yes'
-    Chk "B1: docs/orchestration.md declares N$JONG"        (DeclaredHasCount $ORCH $N)      'yes'
+    Chk "B5: README.md declares N$JONG"                    (DeclaredHasCount $README $N)    'yes'
+    Chk "B6: docs/conventions.md declares N$JONG"          (DeclaredHasCount $CONV $N)      'yes'
+    Chk "B7: site/docs/getting-started.md declares N$JONG" (DeclaredHasCount $SITE_GS $N)   'yes'
+    Chk "B8: docs/orchestration.md declares N$JONG"        (DeclaredHasCount $ORCH $N)      'yes'
     }
 
     # (B2) the site catalog page is a snippet shell -- has the include AND re-declares neither the count
@@ -263,15 +1003,15 @@ try {
     Chk "B3: all command names appear in docs/commands.md catalog" $allNamesOk 'yes'
 
     # name negative control: a bogus command (/tide:bogus) must NOT appear (name check discriminates).
-    Chk "B3: name control -- /tide:bogus not in catalog" (HasCommand $CANON_CMD 'bogus') 'no'
+    Chk "B14: name control -- /tide:bogus not in catalog" (HasCommand $CANON_CMD 'bogus') 'no'
 
     # count negative control: a different count (N+1) must NOT appear in any count-declaration file.
     $WRONG = $N + 1
-    Chk "B1: drift control -- docs/commands.md has no $WRONG$JONG"     (DeclaredHasCount $CANON_CMD $WRONG) 'no'
-    Chk "B1: drift control -- README has no $WRONG$JONG"               (DeclaredHasCount $README $WRONG)    'no'
-    Chk "B1: drift control -- conventions has no $WRONG$JONG"          (DeclaredHasCount $CONV $WRONG)      'no'
-    Chk "B1: drift control -- site/getting-started has no $WRONG$JONG" (DeclaredHasCount $SITE_GS $WRONG)   'no'
-    Chk "B1: drift control -- orchestration has no $WRONG$JONG"        (DeclaredHasCount $ORCH $WRONG)      'no'
+    Chk "B9: drift control -- docs/commands.md has no $WRONG$JONG"     (DeclaredHasCount $CANON_CMD $WRONG) 'no'
+    Chk "B10: drift control -- README has no $WRONG$JONG"               (DeclaredHasCount $README $WRONG)    'no'
+    Chk "B11: drift control -- conventions has no $WRONG$JONG"          (DeclaredHasCount $CONV $WRONG)      'no'
+    Chk "B12: drift control -- site/getting-started has no $WRONG$JONG" (DeclaredHasCount $SITE_GS $WRONG)   'no'
+    Chk "B13: drift control -- orchestration has no $WRONG$JONG"        (DeclaredHasCount $ORCH $WRONG)      'no'
     }
 
     # === Part C -- declaration-consistency drift guard ======================
@@ -305,15 +1045,15 @@ try {
 
     # status negative control: a non-existent status ($ST_BOGUS) must appear in NONE of the three files,
     # proving the guard discriminates -- same intent as B1's N+1<jong> absence control.
-    Chk "C1: status control -- conventions has no '$ST_BOGUS'"    (HasToken $CONV $ST_BOGUS)      'no'
-    Chk "C1: status control -- debug SKILL has no '$ST_BOGUS'"    (HasToken $DBG_SKILL $ST_BOGUS) 'no'
-    Chk "C1: status control -- debug template has no '$ST_BOGUS'" (HasToken $DBG_TPL $ST_BOGUS)   'no'
+    Chk "C7: status control -- conventions has no '$ST_BOGUS'"    (HasToken $CONV $ST_BOGUS)      'no'
+    Chk "C8: status control -- debug SKILL has no '$ST_BOGUS'"    (HasToken $DBG_SKILL $ST_BOGUS) 'no'
+    Chk "C9: status control -- debug template has no '$ST_BOGUS'" (HasToken $DBG_TPL $ST_BOGUS)   'no'
 
     # (C2) baseline-declaration consistency -- the three templates sharing the add/modify/delete table all
     #      state the baseline. Fixing one template alone splits the table's meaning per file (the drift).
     Chk "C2: skills/milestone/template.md declares '$BASELINE'" (HasToken $MS_TPL $BASELINE)   'yes'
-    Chk "C2: skills/impl/template.md declares '$BASELINE'"      (HasToken $IMPL_TPL $BASELINE) 'yes'
-    Chk "C2: skills/debug/template.md declares '$BASELINE'"     (HasToken $DBG_TPL $BASELINE)  'yes'
+    Chk "C10: skills/impl/template.md declares '$BASELINE'"      (HasToken $IMPL_TPL $BASELINE) 'yes'
+    Chk "C11: skills/debug/template.md declares '$BASELINE'"     (HasToken $DBG_TPL $BASELINE)  'yes'
 
     # (C3) phase-writing command ROSTER (M37) -- conventions declares its own "state file" section the
     # SOLE place enumerating this roster, with the published page site/docs/concepts.md as the ONLY
@@ -597,11 +1337,14 @@ try {
     function CntCaseScan([string]$path) {
         $q = [string][char]0x22; $sq = [string][char]0x27
         $ws = [char[]]@([char]0x20, [char]0x09)
-        $n = 0; $b = 0
+        $n = 0; $b = 0; $kinds = New-Object 'System.Collections.Generic.HashSet[string]'([System.StringComparer]::Ordinal)
         foreach ($ln in [System.IO.File]::ReadAllLines($path)) {
             $t = $ln.TrimStart($ws)
             $ok = $false
-            foreach ($h in @(('chk ' + $q + 'C3:'), ('chk ' + $q + 'C4:'), ('Chk ' + $q + 'C3:'), ('Chk ' + $q + 'C4:'))) { if ($t.StartsWith($h, [System.StringComparison]::Ordinal)) { $ok = $true } }
+            # (M93) do not pick case lines by ID (C3 / C4) -- after M93 gave each shared-ID line its own number, the ID-picking version saw
+            # one count case of six and stayed green (both runners found the same non-zero number, so C5 did not redden). Only the shape of
+            # the measured cell picks a line.
+            foreach ($h in @(('chk ' + $q), ('Chk ' + $q))) { if ($t.StartsWith($h, [System.StringComparison]::Ordinal)) { $ok = $true } }
             if (-not $ok) { continue }
             $r = $t.Substring(5); $j = $r.IndexOf($q, [System.StringComparison]::Ordinal); if ($j -lt 0) { continue }; $r = $r.Substring($j + 1)
             if ($t.StartsWith('c', [System.StringComparison]::Ordinal)) {
@@ -613,9 +1356,9 @@ try {
                 $v = @{ 'RosterCount' = 'NWRITER'; 'NonWriterCount' = 'NNONWRITER'; 'StableCount' = 'NSTABLE' }[$m.Groups[1].Value]
                 $bad = ($r.Substring($m.Length).TrimEnd($ws) -cne ('$' + $v))
             }
-            $n++; if ($bad) { $b++ }
+            $n++; if ($bad) { $b++ }; [void]$kinds.Add($v)
         }
-        return ([string]$n + '|' + [string]$b)
+        return ([string]$n + '|' + [string]$b + '|' + [string]$kinds.Count)
     }
     # sh-lit / sh-var / ps1-lit / ps1-var -> a synthetic runner holding one count case line (lit: a number literal / var: the derived variable).
     function CntCaseFixture([string]$mode) {
@@ -662,35 +1405,38 @@ try {
         $(if ($NWRITER -ne '' -and $NNONWRITER -ne '' -and $NSTABLE -ne '') { 'ok' } else { 'no' }) 'ok'
     $dnGrow = DeclNFixture 'grow'
     $dnDrop = DeclNFixture 'drop'
-    Chk "C3: control -- a copy with one more writer name and the number +1 counts equal to the declared number; a copy with the number removed extracts nothing" `
+    Chk "C12: control -- a copy with one more writer name and the number +1 counts equal to the declared number; a copy with the number removed extracts nothing" `
         ($(if ([string](RosterCount $dnGrow) -eq [string](DeclN $dnGrow $DN_WRITER)) { 'same' } else { 'diff' }) + '|' + (DeclN $dnDrop $DN_WRITER)) 'same|'
     # (C5 / C6, M89 rf-115) ask the place that USES the derived value and the source boundary directly -- the control above only
     # checked that the derivation is right.
     $ccs = CntCaseScan (Join-Path $ROOT 'tests/discover/run.sh'); $ccp = CntCaseScan (Join-Path $ROOT 'tests/discover/run.ps1')
-    Chk "C5: count-case line extraction positive control -- both runners find the same non-zero number" $(if ([int]($ccs.Split('|')[0]) -gt 0 -and $ccs.Split('|')[0] -ceq $ccp.Split('|')[0]) { 'ok' } else { 'no' }) 'ok'
-    Chk "C5: main check -- every count case in both runners expects its own helper's derived variable" ([string]([int]($ccs.Split('|')[1]) + [int]($ccp.Split('|')[1]))) '0'
-    Chk "C5: control -- literal counts of synthetic runners (sh-shape literal / sh-shape variable / ps1-shape literal / ps1-shape variable)" ((@('sh-lit', 'sh-var', 'ps1-lit', 'ps1-var') | ForEach-Object { (CntCaseScan (CntCaseFixture $_)).Split('|')[1] }) -join '|') '1|0|1|0'
+    # (C5, M93) all three count helpers (writer / non-writer / stable) must be found in both runners -- reverting to the version that picked
+    # case lines by ID finds, after M93 renumbered the shared IDs, only the stable helper's lines, and "same non-zero number" stayed green.
+    # 3 is the number of helpers this function's regex knows.
+    Chk "C5: count-case line extraction positive control -- both runners find the same non-zero number and all three count helpers" $(if ([int]($ccs.Split('|')[0]) -gt 0 -and $ccs.Split('|')[0] -ceq $ccp.Split('|')[0] -and $ccs.Split('|')[2] -ceq '3' -and $ccp.Split('|')[2] -ceq '3') { 'ok' } else { 'no' }) 'ok'
+    Chk "C27: main check -- every count case in both runners expects its own helper's derived variable" ([string]([int]($ccs.Split('|')[1]) + [int]($ccp.Split('|')[1]))) '0'
+    Chk "C28: control -- literal counts of synthetic runners (sh-shape literal / sh-shape variable / ps1-shape literal / ps1-shape variable)" ((@('sh-lit', 'sh-var', 'ps1-lit', 'ps1-var') | ForEach-Object { (CntCaseScan (CntCaseFixture $_)).Split('|')[1] }) -join '|') '1|0|1|0'
     Chk "C6: main check -- every restatement of the writer / non-writer / stable numbers under the same bold prefix equals the first line-head occurrence" ([string]([int](DeclNRepeatBad $DN_WRITER $NWRITER) + [int](DeclNRepeatBad $DN_NONWRITER $NNONWRITER) + [int](DeclNRepeatBad $DN_STABLE $NSTABLE))) '0'
-    Chk "C6: control -- a copy with another number planted mid-line keeps the derived value; a copy bumping only the second writer-count occurrence adds one" `
+    Chk "C29: control -- a copy with another number planted mid-line keeps the derived value; a copy bumping only the second writer-count occurrence adds one" `
         ($(if ([string](DeclN (DeclNFixture 'stray') $DN_NONWRITER) -ceq [string]$NNONWRITER) { 'same' } else { 'diff' }) + '|' + [string]([int](DeclNRepeatBad $DN_WRITER $NWRITER (DeclNRepeatRoot 'bump')) - [int](DeclNRepeatBad $DN_WRITER $NWRITER (DeclNRepeatRoot 'base')))) 'same|1'
-    Chk "C3: conventions roster holds 6 names"    (RosterCount $CONV)     $NWRITER
-    Chk "C3: published page roster holds 6 names" (RosterCount $CONCEPTS) $NWRITER
-    Chk "C3: the two rosters are identical" (SetsEqual (RosterSet $CONV) (RosterSet $CONCEPTS)) 'yes'
-    Chk "C3: only conventions + published page enumerate" (RosterFiles) 'docs/conventions.md site/docs/concepts.md'
+    Chk "C13: conventions roster holds 6 names"    (RosterCount $CONV)     $NWRITER
+    Chk "C14: published page roster holds 6 names" (RosterCount $CONCEPTS) $NWRITER
+    Chk "C15: the two rosters are identical" (SetsEqual (RosterSet $CONV) (RosterSet $CONCEPTS)) 'yes'
+    Chk "C16: only conventions + published page enumerate" (RosterFiles) 'docs/conventions.md site/docs/concepts.md'
 
     # The non-writer half is bitten at the same width -- the conventions declaration binds both lists.
-    Chk "C3: conventions non-writer roster holds 6 names"    (NonWriterCount $CONV)     $NNONWRITER
-    Chk "C3: published page non-writer roster holds 6 names" (NonWriterCount $CONCEPTS) $NNONWRITER
-    Chk "C3: the two non-writer rosters are identical" (SetsEqual (NonWriterSet $CONV) (NonWriterSet $CONCEPTS)) 'yes'
-    Chk "C3: only conventions + published page enumerate non-writers" (NonWriterFiles) 'docs/conventions.md site/docs/concepts.md'
-    Chk "C3: conventions writer/non-writer rosters are disjoint"    (RostersDisjoint $CONV)     'yes'
-    Chk "C3: published page writer/non-writer rosters are disjoint" (RostersDisjoint $CONCEPTS) 'yes'
+    Chk "C17: conventions non-writer roster holds 6 names"    (NonWriterCount $CONV)     $NNONWRITER
+    Chk "C18: published page non-writer roster holds 6 names" (NonWriterCount $CONCEPTS) $NNONWRITER
+    Chk "C19: the two non-writer rosters are identical" (SetsEqual (NonWriterSet $CONV) (NonWriterSet $CONCEPTS)) 'yes'
+    Chk "C20: only conventions + published page enumerate non-writers" (NonWriterFiles) 'docs/conventions.md site/docs/concepts.md'
+    Chk "C21: conventions writer/non-writer rosters are disjoint"    (RostersDisjoint $CONV)     'yes'
+    Chk "C22: published page writer/non-writer rosters are disjoint" (RostersDisjoint $CONCEPTS) 'yes'
 
     # Negative control -- a non-existent name is in neither roster (same intent as C1's bogus status).
-    Chk "C3: roster control -- conventions has no 'phantom-cmd'"    (RosterHas $CONV 'phantom-cmd')     'no'
-    Chk "C3: roster control -- published page has no 'phantom-cmd'" (RosterHas $CONCEPTS 'phantom-cmd') 'no'
-    Chk "C3: non-writer control -- conventions has no 'phantom-cmd'"    (NonWriterHas $CONV 'phantom-cmd')     'no'
-    Chk "C3: non-writer control -- published page has no 'phantom-cmd'" (NonWriterHas $CONCEPTS 'phantom-cmd') 'no'
+    Chk "C23: roster control -- conventions has no 'phantom-cmd'"    (RosterHas $CONV 'phantom-cmd')     'no'
+    Chk "C24: roster control -- published page has no 'phantom-cmd'" (RosterHas $CONCEPTS 'phantom-cmd') 'no'
+    Chk "C25: non-writer control -- conventions has no 'phantom-cmd'"    (NonWriterHas $CONV 'phantom-cmd')     'no'
+    Chk "C26: non-writer control -- published page has no 'phantom-cmd'" (NonWriterHas $CONCEPTS 'phantom-cmd') 'no'
 
     # (C4) 2.0 stable command ROSTER (M41) -- same class as C-3, so it lives in this part instead of a
     # new one. The conventions section "2.0 stability" fixes the roster's enumerators at TWO files
@@ -757,11 +1503,11 @@ try {
 
     if (PartOn 'C') {
     Chk "C4: conventions stable roster holds 11 names" (StableCount $CONV)   $NSTABLE
-    Chk "C4: README stable roster holds 11 names"      (StableCount $README) $NSTABLE
-    Chk "C4: the two stable rosters are identical" (SetsEqual (StableSet $CONV) (StableSet $README)) 'yes'
-    Chk "C4: only conventions + README enumerate the stable roster" (StableFiles) 'README.md docs/conventions.md'
-    Chk "C4: stable control -- conventions has no 'phantom-stable'" (StableHas $CONV 'phantom-stable')   'no'
-    Chk "C4: stable control -- README has no 'phantom-stable'"      (StableHas $README 'phantom-stable') 'no'
+    Chk "C30: README stable roster holds 11 names"      (StableCount $README) $NSTABLE
+    Chk "C31: the two stable rosters are identical" (SetsEqual (StableSet $CONV) (StableSet $README)) 'yes'
+    Chk "C32: only conventions + README enumerate the stable roster" (StableFiles) 'README.md docs/conventions.md'
+    Chk "C33: stable control -- conventions has no 'phantom-stable'" (StableHas $CONV 'phantom-stable')   'no'
+    Chk "C34: stable control -- README has no 'phantom-stable'"      (StableHas $README 'phantom-stable') 'no'
     }
 
     # === Part D -- cross-branch collaboration safety (M31) declaration consistency ==========
@@ -786,11 +1532,11 @@ try {
     $PRCI_TOK = 'gh pr checks'
 
     Chk "D1: conventions declares coverage check ($COV_TOK)"      (HasToken $CONV $COV_TOK)      'yes'
-    Chk "D1: release SKILL wires coverage check"                  (HasToken $REL_SKILL $COV_TOK) 'yes'
+    Chk "D8: release SKILL wires coverage check"                  (HasToken $REL_SKILL $COV_TOK) 'yes'
     Chk "D2: conventions declares number pre-warning ($WARN_TOK)" (HasToken $CONV $WARN_TOK)     'yes'
-    Chk "D2: milestone SKILL wires number pre-warning"            (HasToken $MS_SKILL $WARN_TOK) 'yes'
+    Chk "D9: milestone SKILL wires number pre-warning"            (HasToken $MS_SKILL $WARN_TOK) 'yes'
     Chk "D3: conventions declares uncommitted scope ($UNCOMMITTED_TOK)" (HasToken $CONV $UNCOMMITTED_TOK)      'yes'
-    Chk "D3: release SKILL wires uncommitted scope"                     (HasToken $REL_SKILL $UNCOMMITTED_TOK) 'yes'
+    Chk "D10: release SKILL wires uncommitted scope"                     (HasToken $REL_SKILL $UNCOMMITTED_TOK) 'yes'
 
     # (D4/M39 review rec.2) the user-facing CANONICAL CATALOG must declare the same scope. M39 fixed the
     # conventions and the skill but left the catalog on the old scope, so the published page (the site
@@ -803,7 +1549,7 @@ try {
     # deleting the wiring from the release skill still scored 107/0 green. The conventions single source
     # here is a FRAGMENT (conventions-release.md), so only the bound file differs; the technique is D1's.
     Chk "D5: conventions fragment declares PR CI check ($PRCI_TOK)" (HasToken $CONV_REL $PRCI_TOK)  'yes'
-    Chk "D5: release SKILL wires PR CI check"                       (HasToken $REL_SKILL $PRCI_TOK) 'yes'
+    Chk "D11: release SKILL wires PR CI check"                       (HasToken $REL_SKILL $PRCI_TOK) 'yes'
 
     # (D6/D7/M46) The two MATCHING axes of the coverage check, bound conventions<->skill. D1 (scope 1)
     # and D3 (scope 2) anchor WHAT IS COLLECTED; these anchor HOW THE COLLECTED SET IS COMPARED --
@@ -820,20 +1566,20 @@ try {
     $DECL_TOK  = 'declared-change-set'
 
     Chk "D6: conventions declares brace expansion ($BRACE_TOK)" (HasToken $CONV $BRACE_TOK)      'yes'
-    Chk "D6: release SKILL wires brace expansion"               (HasToken $REL_SKILL $BRACE_TOK) 'yes'
+    Chk "D12: release SKILL wires brace expansion"               (HasToken $REL_SKILL $BRACE_TOK) 'yes'
     Chk "D7: conventions declares reverse check ($DECL_TOK)"    (HasToken $CONV $DECL_TOK)       'yes'
-    Chk "D7: release SKILL wires reverse check"                 (HasToken $REL_SKILL $DECL_TOK)  'yes'
+    Chk "D13: release SKILL wires reverse check"                 (HasToken $REL_SKILL $DECL_TOK)  'yes'
 
     # cross control: each mechanism must be ABSENT from the opposite skill (token discriminates).
-    Chk "D: control -- milestone SKILL has no coverage token"  (HasToken $MS_SKILL $COV_TOK)  'no'
-    Chk "D: control -- milestone SKILL has no uncommitted-scope token" (HasToken $MS_SKILL $UNCOMMITTED_TOK) 'no'
-    Chk "D: control -- release SKILL has no number-warn token" (HasToken $REL_SKILL $WARN_TOK) 'no'
-    Chk "D: control -- milestone SKILL has no PR CI token"      (HasToken $MS_SKILL $PRCI_TOK) 'no'
-    Chk "D: control -- milestone SKILL has no brace-expansion token" (HasToken $MS_SKILL $BRACE_TOK) 'no'
-    Chk "D: control -- milestone SKILL has no declared-set token"    (HasToken $MS_SKILL $DECL_TOK)  'no'
+    Chk "D14: control -- milestone SKILL has no coverage token"  (HasToken $MS_SKILL $COV_TOK)  'no'
+    Chk "D15: control -- milestone SKILL has no uncommitted-scope token" (HasToken $MS_SKILL $UNCOMMITTED_TOK) 'no'
+    Chk "D16: control -- release SKILL has no number-warn token" (HasToken $REL_SKILL $WARN_TOK) 'no'
+    Chk "D17: control -- milestone SKILL has no PR CI token"      (HasToken $MS_SKILL $PRCI_TOK) 'no'
+    Chk "D18: control -- milestone SKILL has no brace-expansion token" (HasToken $MS_SKILL $BRACE_TOK) 'no'
+    Chk "D19: control -- milestone SKILL has no declared-set token"    (HasToken $MS_SKILL $DECL_TOK)  'no'
 
     # negative control: a bogus mechanism token must NOT appear in conventions (guard discriminates).
-    Chk "D: control -- conventions has no bogus token" (HasToken $CONV 'git diff --bogus-only') 'no'
+    Chk "D20: control -- conventions has no bogus token" (HasToken $CONV 'git diff --bogus-only') 'no'
     }
 
     # === Part E -- review verification discipline (M32) declaration consistency =============
@@ -929,8 +1675,8 @@ try {
     # E10 guards the presence of the NEW FIELD.
     $STREAK_TOK = 'fallback-streak'
     Chk "E10: fallback streak ($STREAK_TOK) present in all three files" (InAllThree $STREAK_TOK $CONV $REV_SKILL $REV_TPL) 'yes'
-    Chk "E10: metrics-line skeleton carries streak field (conventions)" (SameLine $CONV $MEAS_TOK "($STREAK_TOK)") 'yes'
-    Chk "E10: metrics-line skeleton carries streak field (template)"    (SameLine $REV_TPL $MEAS_TOK "($STREAK_TOK)") 'yes'
+    Chk "E12: metrics-line skeleton carries streak field (conventions)" (SameLine $CONV $MEAS_TOK "($STREAK_TOK)") 'yes'
+    Chk "E13: metrics-line skeleton carries streak field (template)"    (SameLine $REV_TPL $MEAS_TOK "($STREAK_TOK)") 'yes'
 
     # (E11 / M58) precedent-waiver metric. E7 already binds `precedent-waiver` across the three
     # files, but that guards the `next steps` RECORDING slot -- it never asks whether the token
@@ -940,31 +1686,31 @@ try {
     # field's ASCII term binds across all three files (same shape as E10).
     $WAIVER_STREAK_TOK = 'waiver-streak'
     Chk "E11: waiver streak ($WAIVER_STREAK_TOK) present in all three files" (InAllThree $WAIVER_STREAK_TOK $CONV $REV_SKILL $REV_TPL) 'yes'
-    Chk "E11: metrics-line skeleton carries waiver-count field (conventions)" (SameLine $CONV $MEAS_TOK "($WAIVER_TOK)") 'yes'
-    Chk "E11: metrics-line skeleton carries waiver-count field (template)"    (SameLine $REV_TPL $MEAS_TOK "($WAIVER_TOK)") 'yes'
-    Chk "E11: metrics-line skeleton carries waiver-streak field (conventions)" (SameLine $CONV $MEAS_TOK "($WAIVER_STREAK_TOK)") 'yes'
-    Chk "E11: metrics-line skeleton carries waiver-streak field (template)"    (SameLine $REV_TPL $MEAS_TOK "($WAIVER_STREAK_TOK)") 'yes'
+    Chk "E14: metrics-line skeleton carries waiver-count field (conventions)" (SameLine $CONV $MEAS_TOK "($WAIVER_TOK)") 'yes'
+    Chk "E15: metrics-line skeleton carries waiver-count field (template)"    (SameLine $REV_TPL $MEAS_TOK "($WAIVER_TOK)") 'yes'
+    Chk "E16: metrics-line skeleton carries waiver-streak field (conventions)" (SameLine $CONV $MEAS_TOK "($WAIVER_STREAK_TOK)") 'yes'
+    Chk "E17: metrics-line skeleton carries waiver-streak field (template)"    (SameLine $REV_TPL $MEAS_TOK "($WAIVER_STREAK_TOK)") 'yes'
 
     # negative control: a bogus exit-condition token must NOT appear in conventions (same shape as the
     # bogus precedent token control below -- proves this new bind discriminates).
-    Chk "E: control -- conventions has no bogus exit-condition token" (HasToken $CONV "$RESIDUAL_TOK-bogus") 'no'
+    Chk "E18: control -- conventions has no bogus exit-condition token" (HasToken $CONV "$RESIDUAL_TOK-bogus") 'no'
 
     # negative control: a bogus precedent token must NOT appear in conventions (same shape as the bogus
     # refutation token control -- proves this guard discriminates rather than passing vacuously).
-    Chk "E: control -- conventions has no bogus precedent token" (HasToken $CONV "$VACUOUS_TOK-bogus") 'no'
+    Chk "E19: control -- conventions has no bogus precedent token" (HasToken $CONV "$VACUOUS_TOK-bogus") 'no'
 
     # cross control: refutation is a review asset -> must be ABSENT from the impl template (discriminates).
-    Chk "E: control -- impl template has no refutation token" (HasToken $IMPL_TPL $REFUT_TOK) 'no'
+    Chk "E20: control -- impl template has no refutation token" (HasToken $IMPL_TPL $REFUT_TOK) 'no'
 
     # cross control: the metrics line is a review asset -> the impl template carries only the rework value.
-    Chk "E: control -- impl template has no metrics-line skeleton" (SameLine $IMPL_TPL $MEAS_TOK "($REWORK_TOK)") 'no'
+    Chk "E21: control -- impl template has no metrics-line skeleton" (SameLine $IMPL_TPL $MEAS_TOK "($REWORK_TOK)") 'no'
 
     # negative control: a bogus streak token must NOT appear in conventions (same shape as E8's control).
-    Chk "E: control -- conventions has no bogus streak token" (HasToken $CONV "$STREAK_TOK-bogus") 'no'
-    Chk "E: control -- conventions has no bogus waiver-streak token" (HasToken $CONV "$WAIVER_STREAK_TOK-bogus") 'no'
+    Chk "E22: control -- conventions has no bogus streak token" (HasToken $CONV "$STREAK_TOK-bogus") 'no'
+    Chk "E23: control -- conventions has no bogus waiver-streak token" (HasToken $CONV "$WAIVER_STREAK_TOK-bogus") 'no'
 
     # negative control: a bogus token must NOT appear in conventions (same intent as B1's N+1 absence).
-    Chk "E: control -- conventions has no bogus refutation token" (HasToken $CONV "$REFUT_TOK-bogus") 'no'
+    Chk "E24: control -- conventions has no bogus refutation token" (HasToken $CONV "$REFUT_TOK-bogus") 'no'
     }
 
     # === Part F -- document self-description consistency (M33) ==============
@@ -1025,8 +1771,8 @@ try {
     foreach ($p in $pairs) {
         $aname = $p.Split('=')[0]; $atok = $p.Split('=')[1]
         Chk "F2: anchor '$atok' on canonical /tide:$aname row" (CanonRowHas $aname $atok)          'yes'
-        Chk "F2: README propagation ($aname=$atok, if mentioned)"       (ConsumerOk $README $aname $atok)  'yes'
-        Chk "F2: site getting-started propagation ($aname=$atok, if mentioned)" (ConsumerOk $SITE_GS $aname $atok) 'yes'
+        Chk "F32: README propagation ($aname=$atok, if mentioned)"       (ConsumerOk $README $aname $atok)  'yes'
+        Chk "F33: site getting-started propagation ($aname=$atok, if mentioned)" (ConsumerOk $SITE_GS $aname $atok) 'yes'
     }
 
     # positive control -- with zero anchors extracted the loop above passes vacuously (extraction = FAIL).
@@ -1037,852 +1783,15 @@ try {
     foreach ($p in $pairs) {
         if (-not (Test-Path (Join-Path $ROOT ('skills\' + $p.Split('=')[0] + '\SKILL.md')))) { $namesReal = 'no' }
     }
-    Chk "F3: anchor map names are all real command skills" $namesReal 'yes'
+    Chk "F34: anchor map names are all real command skills" $namesReal 'yes'
 
     # negative control -- a bogus anchor must NOT appear in the canonical catalog (same intent as B1 N+1).
-    Chk "F3: control -- canonical has no bogus anchor" (HasAnchor $CANON_CMD 'bogusanchor') 'no'
+    Chk "F35: control -- canonical has no bogus anchor" (HasAnchor $CANON_CMD 'bogusanchor') 'no'
     }
 
-    # === Part G -- cross-reference integrity (M34; generalized to a FILE SET in M35) =====
-    # (M34) Part F enforces what a document says ABOUT ITSELF; Part G enforces the REFERENCES BETWEEN
-    # documents -- the layer that had no guard at all (two citations really did point at names that do
-    # not exist as headings, and nothing caught it). Single source: conventions "cross-reference
-    # integrity".
-    # (M35) The conventions are no longer ONE file but a DOCUMENT SET (the body plus per-topic
-    #      fragments). So this part (1) DISCOVERS the set with the glob 'docs/conventions*.md' (never a
-    #      hardcoded list -- adding a fragment must not require editing this runner), (2) keys the
-    #      anchors PER FILE, and (3) picks the anchor set to compare against from the conventions file
-    #      name(s) that appear ON THE CITATION LINE. Move a section into a fragment without updating the
-    #      citation and the guard bites. A line naming two of them passes if EITHER set has the name
-    #      (safe side -- never manufacture a false positive). With no fragment present the set is just
-    #      the body, so the verdict is identical to the pre-generalization one (regression freeze).
-    # (G1) EXTRACT citations (quoted spans on lines that mention a conventions file name) from the
-    #      living docs and assert every one exists in THAT FILE's heading set (## / ###, whitespace
-    #      removed for comparison).
-    # (G2) controls: zero extracted citations or anchors -> FAIL (empty-pass guard); a bogus name must be
-    #      absent from the whole set; heading names must be unique ACROSS THE WHOLE SET after
-    #      normalization (a split must not put the same name in two files).
-    # Data-driven, so no Korean literal enters this source (ASCII-only rule preserved) -- same shape as F2.
-
-    # living docs -- docs/milestones/* and docs/reports/* are historical records and NOT targets
-    # (the docs/*.md glob does not descend into subdirectories, so they drop out naturally).
-    # NOTE: skip dot-directories AND use -Force on the file listings. Get-ChildItem hides files with
-    # the Windows Hidden/System attribute unless -Force is given, while a POSIX glob matches them; the
-    # explicit dot-name filter then removes what the glob would NOT match. Both halves keep the two
-    # shells scanning the same set.
-    # skip dot-directories explicitly: A POSIX glob ('skills/*/*.md') never matches them, but
-    # Get-ChildItem -Directory DOES list '.foo' on Windows (a leading dot is not the Hidden attribute),
-    # so without this filter the two shells would scan different file sets and could disagree.
-    function LivingDocs() {
-        $out = @()
-        foreach ($d in (Get-ChildItem (Join-Path $ROOT 'skills') -Directory -ErrorAction SilentlyContinue | Where-Object { -not $_.Name.StartsWith('.', [System.StringComparison]::Ordinal) })) {
-            $out += @(Get-ChildItem $d.FullName -Filter '*.md' -File -Force -ErrorAction SilentlyContinue |
-                    Where-Object { -not $_.Name.StartsWith('.', [System.StringComparison]::Ordinal) } | ForEach-Object { $_.FullName })
-        }
-        $out += @(Get-ChildItem (Join-Path $ROOT 'docs') -Filter '*.md' -File -Force -ErrorAction SilentlyContinue |
-                    Where-Object { -not $_.Name.StartsWith('.', [System.StringComparison]::Ordinal) } | ForEach-Object { $_.FullName })
-        $out += @($README)
-        $out += @(Get-ChildItem (Join-Path $ROOT 'site\docs') -Filter '*.md' -File -Force -ErrorAction SilentlyContinue |
-                    Where-Object { -not $_.Name.StartsWith('.', [System.StringComparison]::Ordinal) } | ForEach-Object { $_.FullName })
-        foreach ($d in (Get-ChildItem (Join-Path $ROOT 'tests') -Directory -ErrorAction SilentlyContinue | Where-Object { -not $_.Name.StartsWith('.', [System.StringComparison]::Ordinal) })) {
-            $r = Join-Path $d.FullName 'README.md'
-            if (Test-Path $r) { $out += @($r) }
-        }
-        return @($out | Where-Object { Test-Path $_ })
-    }
-
-    # conventions DOCUMENT SET -- discovered with the glob 'docs/conventions*.md' (never hardcoded).
-    # Match the POSIX glob exactly with ordinal Starts/EndsWith, and sort ORDINAL so this walks the set
-    # in the same order as run.sh ('LC_ALL=C sort').
-    function ConvFiles() {
-        # -Force: without it Get-ChildItem skips files carrying the Windows Hidden/System attribute,
-        # while the POSIX glob 'docs/conventions*.md' matches them -- the two shells would then scan
-        # different sets. A leading-dot name still cannot pass StartsWith('conventions'), so -Force does
-        # not over-match relative to the glob either.
-        $fs = @(Get-ChildItem (Join-Path $ROOT 'docs') -File -Force -ErrorAction SilentlyContinue |
-                Where-Object { $_.Name.StartsWith('conventions', [System.StringComparison]::Ordinal) -and
-                               $_.Name.EndsWith('.md', [System.StringComparison]::Ordinal) } |
-                ForEach-Object { $_.FullName })
-        $lst = New-Object 'System.Collections.Generic.List[string]'
-        foreach ($f in $fs) { [void]$lst.Add($f) }
-        $lst.Sort([System.StringComparer]::Ordinal)
-        return @($lst.ToArray())
-    }
-
-    # anchor set of ONE conventions file -- ## / ### headings only, spaces removed (so "A - B" and
-    # "A-B" compare equal). CR is already gone because the split is on \r?\n.
-    function AnchorSetOf($path) {
-        $raw = ReadUtf8 $path
-        if ($null -eq $raw) { return @() }
-        $out = @()
-        foreach ($line in ($raw -split "`r?`n")) {
-            if ($line -match '^#{2,3} ') { $out += (($line -replace '^#+ ', '') -replace ' ', '') }
-        }
-        return $out
-    }
-
-    # ordinal (case-sensitive) sets so both shells judge identically -- PowerShell's -contains and
-    # hashtable keys are case-INsensitive by default, which would diverge from grep -x.
-    # $gAnchorSets is parallel to $gConvFiles (one HashSet per file); $gAnchors is the flat list over the
-    # WHOLE set, used by the positive control and the set-wide duplicate check.
-    if (PartOn 'G') {
-    $gConvFiles  = @(ConvFiles)
-    $gConvBases  = @($gConvFiles | ForEach-Object { Split-Path $_ -Leaf })
-    $gAnchorSets = @()
-    $gAnchors    = @()
-    foreach ($p in $gConvFiles) {
-        $s = New-Object 'System.Collections.Generic.HashSet[string]'
-        foreach ($a in (AnchorSetOf $p)) { [void]$s.Add($a); $gAnchors += $a }
-        $gAnchorSets += ,$s
-    }
-
-    # citation candidate lines -- lines naming ANY file of the set; each quoted span is remembered
-    # together with the INDEXES of the files named on its line (its owners). Snippet-include directive
-    # lines ('8<--') are not citations.
-    $gLines      = @()
-    $gCites      = @()
-    $gCiteOwners = @()
-    foreach ($f in (LivingDocs)) {
-        $raw = ReadUtf8 $f
-        if ($null -eq $raw) { continue }
-        foreach ($line in ($raw -split "`r?`n")) {
-            $owners = @()
-            for ($i = 0; $i -lt $gConvBases.Count; $i++) {
-                if ($line.Contains($gConvBases[$i])) { $owners += $i }
-            }
-            if ($owners.Count -eq 0) { continue }
-            if ($line.Contains('8<--')) { continue }
-            $gLines += $line
-            foreach ($m in [regex]::Matches($line, '"([^"]*)"')) {
-                $q = $m.Groups[1].Value
-                if ($q -match '[{}]') { continue }        # skeleton placeholder, not a citation
-                $q = ($q -replace ' ', '')
-                if ($q.Length -eq 0) { continue }         # blank span -- the shell drops it as an empty line
-                $gCites      += $q
-                $gCiteOwners += ,$owners
-            }
-        }
-    }
-    # unterminated quote on a candidate line = the citation wrapped to the next line and would be
-    # silently skipped by line-wise extraction (see G3).
-    $gOdd = 0
-    foreach ($line in $gLines) { if ((([regex]::Matches($line, '"')).Count % 2) -eq 1) { $gOdd++ } }
-
-    # $aset = union over the whole set (bogus-name control); $dset = names appearing in more than one
-    # place (uniqueness is a WHOLE-SET rule: a split must not put the same name in two files).
-    # Comparison is ORDINAL here: HashSet[string]'s default comparer is ordinal, i.e. byte-exact.
-    # The .sh twin must say the same thing with `LC_ALL=C` on both `sort` and `uniq` -- without it the
-    # comparison becomes collation-based and the two shells stop meaning the same thing. That was a
-    # real divergence: GNU platforms happened to agree anyway, and the BSD (macOS) leg reported 3
-    # duplicates where every GNU environment reported 0 (M40, caught by this milestone's own new leg).
-    $aset = New-Object 'System.Collections.Generic.HashSet[string]'
-    $dset = New-Object 'System.Collections.Generic.HashSet[string]'
-    foreach ($a in $gAnchors) { if (-not $aset.Add($a)) { [void]$dset.Add($a) } }
-    }
-    # a citation is OK when it resolves in the anchor set of ANY file named on its line (safe side).
-    # (M54) THE VERDICT IS A FUNCTION so the same verdict can run against a fixture. M46's precedent
-    # asks not "does the fixture meet the condition" but "does the REAL verdict run on it", and until
-    # now G1 had no such control -- breaking the verdict reddened nothing (M50 review, 3 cycles carried).
-    function CiteMissOf($cites, $owners) {
-        $n = 0
-        for ($i = 0; $i -lt $cites.Count; $i++) {
-            $ok = $false
-            foreach ($k in $owners[$i]) { if ($gAnchorSets[$k].Contains($cites[$i])) { $ok = $true } }
-            if (-not $ok) { $n++ }
-        }
-        return $n
-    }
-    if (PartOn 'G') {
-    $gMiss = CiteMissOf $gCites $gCiteOwners
-
-    Chk "G1: every live citation resolves to a real anchor" ([string]$gMiss) '0'
-    # (M54) Fixture control -- borrow a real owner index so the anchor set is genuinely opened, and
-    # point at a name that is not in it.
-    Chk "G1: fixture control -- a broken citation is actually caught" ([string](CiteMissOf @('zzz-bogus-anchor') @(, $gCiteOwners[0]))) '1'
-    Chk "G2: citation extraction positive control (>0)" $(if ($gCites.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
-    Chk "G2: anchor extraction positive control (>0)"   $(if ($gAnchors.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
-    Chk "G2: control -- bogus anchor name (bogus-section) absent" $(if ($aset.Contains('bogus-section')) { 'yes' } else { 'no' }) 'no'
-    # On failure, NAME the duplicates. A counting assertion goes red without saying why -- that is
-    # exactly what stopped M40 from reproducing the BSD divergence locally, and the .sh twin prints
-    # them for the same reason. (A missing/empty anchor file cannot pass vacuously here: the anchor
-    # extraction positive control above fails first.)
-    if ($dset.Count -ne 0) { Write-Host ("  -> duplicate anchors: " + (($dset | Sort-Object) -join ' ')) }   # locale-exempt: diagnostic-only (display order, never a verdict -- see M41 follow-up 11)
-    Chk "G2: anchor names unique after normalization" ([string]$dset.Count) '0'
-    Chk "G3: citation lines have balanced quotes (no wrapped citation)" ([string]$gOdd) '0'
-
-    # (G4) SELF-references inside one file are enforced too (M41). M34 created cross-reference integrity
-    # and left this layer outside the guard ("the skeleton carries no filename -- human review"), and it
-    # stayed there for SIX cycles.
-    # SCOPE IS LivingDocs, the same as G1. Looking only at the conventions set leaves the layer the
-    # convention calls "closed" wide open in skills/, README.md and tests/*/README.md -- that is exactly
-    # what got M41 round 1 blocked (measured: a broken self-reference planted outside conventions stayed
-    # green).
-    # Resolution is against THAT FILE'S OWN anchors -- a self-reference points at its own file by
-    # definition, so comparing against the whole set would pass a reference aimed at another file (round
-    # 1's safe-side choice turns into over-permission once the scope widens).
-    # Four narrowing markers, all chosen from measurement (55 candidates across LivingDocs):
-    #   (1) shaped '"<name>" <jeol>'. WITHOUT this marker it cannot be closed -- drop the trailing word
-    #       and the conventions set alone goes 47 -> 165 candidates, 100+ of them ordinary quoted prose.
-    #   (2) NO backticked file path -- that is a citation to another file, not a self-reference.
-    #   (3) NO conventions filename on the line -- the markdown-link form is G1's job; without this
-    #       marker those 4 lines are misread as self-references and all become false positives (measured).
-    #   (4) NO conventions filename on the PREVIOUS line -- filename on one line, quoted span on the next
-    #       (a WRAPPED citation) produces 3 more false positives (measured). That is precisely the blind
-    #       spot G3 documents.
-    # The window for (4) is ONE line. A filename two or more lines back is NOT seen, so this part treats
-    # the span as a self-reference and resolves it against the file's OWN anchors -- a self-reference and
-    # a WRAPPED citation are indistinguishable in principle (the filename that would tell them apart sits
-    # on another line; that is exactly the blind spot G3 documents). The outcome therefore hinges on
-    # whether the name happens to exist in that file too: if it does the check passes SILENTLY (measured:
-    # site/docs/concepts.md carries anchors named like the convention's sections), if it does not it fails.
-    # WIDENING THE WINDOW DOES NOT CLOSE THIS -- 1 -> 2 -> 3 all yield 46 candidates / 0 unresolved on the
-    # live tree (measured), and with a window of N a filename N+1 lines back is still missed. The boundary
-    # only moves, so the window stays at 1 and the limit is disclosed instead.
-    # Four undetected classes: (1) no trailing-word marker, (2) a backticked path on the same line, (3)
-    # citations to non-conventions files, (4) the wrapped-citation exception above. ALL are outside the
-    # boundary, not violations, and the convention enumerates them on both sides.
-    $JEOL = Uni 0xC808
-    $srPathRe = '`[A-Za-z0-9_./-]+\.(md|sh|ps1|json|yml)`'
-    $srRe = '"([^"]*)"[ \t]*' + $JEOL
-    }
-    function HasConvBase($s) {
-        if ($null -eq $s) { return $false }
-        foreach ($b in $gConvBases) { if ($s.Contains($b)) { return $true } }
-        return $false
-    }
-    # (M54) THE SCAN IS A FUNCTION -- same reason as CiteMissOf above. The body is unchanged; only
-    # "which files does it walk" moved into a parameter. Extracted spans go to $script:srSpans so the
-    # live call can snapshot them for the positive control below.
-    function SelfMissOf($paths) {
-    $script:srSpans = @()
-    $gSelfMiss = 0
-    foreach ($p in $paths) {
-        $raw = ReadUtf8 $p
-        if ($null -eq $raw) { continue }
-        $own = New-Object 'System.Collections.Generic.HashSet[string]'
-        foreach ($a in (AnchorSetOf $p)) { [void]$own.Add($a) }
-        $prev = ''
-        foreach ($line in ($raw -split "`r?`n")) {
-            $skip = ($line -match $srPathRe) -or (HasConvBase $line) -or (HasConvBase $prev)
-            if (-not $skip) {
-                foreach ($m in [regex]::Matches($line, $srRe)) {
-                    $span = ($m.Groups[1].Value -replace ' ', '')
-                    if ($span -ne '' -and $span -notmatch '[{}]') {
-                        $script:srSpans += $span
-                        # On failure, NAME the file and the span -- a counting assertion goes red without
-                        # saying why (same reason the duplicate-anchor check prints names). The wording
-                        # names BOTH causes on purpose: an unresolved self-reference, or a citation
-                        # wrapped with its filename two or more lines back (see (4) above). A human tells
-                        # them apart by reading that line and the ones before it; either way something
-                        # needs fixing, and naming only one cause would misdiagnose the other.
-                        if (-not $own.Contains($span)) {
-                            $gSelfMiss++
-                            Write-Host ("  -> unresolved self-reference or wrapped citation: " + (RelPath $p) + " -> " + $span)
-                        }
-                    }
-                }
-            }
-            $prev = $line
-        }
-    }
-    return $gSelfMiss
-    }
-    if (PartOn 'G') {
-    $gSelfMiss = SelfMissOf (LivingDocs)
-    $gSelf = $script:srSpans
-    }
-    function SelfRefFixture {
-        $f = Join-Path $sbx 'selfref-fix.md'
-        # BUILD THE LINE FIRST. Inside an array literal, ' str ' + $char + ' str ' does NOT fold into
-        # one string -- PowerShell splits it into THREE elements (measured: the fixture came out as a
-        # 5-line file and the self-reference vanished, so this control returned 0 while the .sh twin
-        # returned 1). [string] on the char is what keeps the two copies meaning the same thing.
-        $line = 'xx "zzz-missing" ' + [string]$JEOL + ' yy'
-        [System.IO.File]::WriteAllLines($f, @('## zzz-real', '', $line),
-            (New-Object System.Text.UTF8Encoding($false)))
-        return $f
-    }
-    if (PartOn 'G') {
-    $selfSet = New-Object 'System.Collections.Generic.HashSet[string]'
-    foreach ($s in $gSelf) { [void]$selfSet.Add($s) }
-
-    Chk "G4: every self-reference resolves to its own file's anchor" ([string]$gSelfMiss) '0'
-    Chk "G4: self-reference extraction positive control (>0)" $(if ($gSelf.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
-    Chk "G4: control -- bogus name (bogus-section) is not a self-reference" $(if ($selfSet.Contains('bogus-section')) { 'yes' } else { 'no' }) 'no'
-    # (M54) Fixture control -- the SAME scan against a copy whose self-reference names an anchor its
-    # own file does not have. Same grounds and same return as G1's control above.
-    Chk "G4: fixture control -- an unresolved self-reference is actually caught" ([string](SelfMissOf @((SelfRefFixture)))) '1'
-
-    # (G5~G7 - M42) citations pointing OUTSIDE the conventions set. G1 compares only against anchors in
-    # docs/conventions*.md, so a citation naming skills/*/SKILL.md or docs/*.md was seen by NO guard --
-    # four cycles unaddressed (M35-impl follow-up 3), and three such citations were actually stale.
-    # Generalization rationale: the skeleton NAMES the file, so resolve against THAT file's own anchors;
-    # name UNIQUENESS stays scoped to the conventions set (widening it would explode on unrelated docs).
-    # The skeleton particle after the path is REQUIRED -- without it a later quoted span on the same line
-    # is not evidence about that path (measured false positive: a line naming a path and then pointing at
-    # its OWN section, which is G4's business). A target that does not exist in the repo is NOT compared:
-    # Part G asks about anchors, not about path existence.
-    $UI = Uni 0xC758
-    $extPathRe = '`([A-Za-z0-9_./-]+\.md)`'
-    }
-    function ExtCitesOf($path) {
-        $out = @()
-        $raw = ReadUtf8 $path
-        if ($null -eq $raw) { return $out }
-        foreach ($line in ($raw -split "`r?`n")) {
-            foreach ($m in [regex]::Matches($line, $extPathRe)) {
-                $p = $m.Groups[1].Value
-                if (HasConvBase $p) { continue }
-                $rest = $line.Substring($m.Index + $m.Length)
-                if (-not $rest.StartsWith($UI, [System.StringComparison]::Ordinal)) { continue }
-                $mm = [regex]::Match($rest, $srRe)
-                if (-not $mm.Success) { continue }
-                $a = ($mm.Groups[1].Value -replace ' ', '')
-                if ($a -ne '' -and $a -notmatch '[{}]') { $out += ($p + "`t" + $a) }
-            }
-        }
-        return $out
-    }
-    function ExtMissOf($records) {
-        $miss = @()
-        foreach ($rec in $records) {
-            $parts = $rec -split "`t", 2
-            if ($parts.Count -lt 2) { continue }
-            $p = $parts[0]; $a = $parts[1]
-            if ($a -eq '') { continue }
-            $tgt = Join-Path $ROOT ($p.Replace('/', [string][char]92))
-            if (-not (Test-Path $tgt)) { continue }
-            $set = New-Object 'System.Collections.Generic.HashSet[string]'
-            foreach ($x in (AnchorSetOf $tgt)) { [void]$set.Add($x) }
-            if (-not $set.Contains($a)) { $miss += ($p + ' -> ' + $a) }
-        }
-        return $miss
-    }
-    if (PartOn 'G') {
-    $gExtCites = @()
-    foreach ($p in (LivingDocs)) { $gExtCites += @(ExtCitesOf $p) }
-    $gExtMiss = @(ExtMissOf $gExtCites)
-    foreach ($m in $gExtMiss) { Write-Host ("  -> broken cross-doc citation: " + $m) }
-    Chk "G5: every cross-doc citation resolves to a real anchor" ([string]$gExtMiss.Count) '0'
-    Chk "G6: cross-doc citation extraction positive control (>0)" $(if ($gExtCites.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
-    # Injection control -- a citation naming a real file but an anchor it does not carry must be caught.
-    $extFx = Join-Path $sbx 'extfx.md'
-    [System.IO.File]::WriteAllText($extFx, ('- `skills/impl/SKILL.md`' + $UI + ' "bogus-cross-anchor" ' + $JEOL + "`n"), (New-Object System.Text.UTF8Encoding($false)))
-    Chk "G7: control -- injected broken cross-doc citation is caught" ([string](@(ExtMissOf (@(ExtCitesOf $extFx)))).Count) '1'
-
-    # (G8 -- M44) Sub-items of a section are cited BY NAME, never by ordinal. Everything else in Part G
-    # compares only as far as the SECTION ANCHOR, so a sub-index was seen by no case at all. M43 review
-    # issue 5 is that class: the ledger cited an ordinal (U+2477) inside a named enumeration while that
-    # ordinal was an item M40 had closed and removed -- produced by an edit that moved the item without
-    # fixing its downstream pointers.
-    # Single source: the cross-reference integrity section of docs/conventions.md.
-    #   Rule: on a citation line (backticked `.md` path + a quote), an ordinal AFTER the section
-    #         marker (U+C808) = violation.
-    #   Set spec: U+2460..U+2487 (40 chars). BOTH runners assert the set themselves -- this copy asserts
-    #   40 elements, run.sh asserts 40 lines / 160 bytes. Both BUILD the chars from codepoints (no literal),
-    #   so the sets agree by construction; without the self-assertion one side could silently narrow.
-    #   Why a PROHIBITION and not an extraction: live sites are 0, so an extraction-based case would trip
-    #   the "extraction 0 = FAIL" rule and redden a clean tree. The injected fixture is what keeps this
-    #   prohibition from being vacuous.
-    #   Boundaries (the convention states the same three): an ordinal BEFORE the section marker is out of scope
-    #   (1 live line is that shape and is legitimate) / whether a name-cited item really EXISTS is not
-    #   compared (5 live sites, 0 observed defects) / a citation split across lines is missed.
-    $ORD_SET = @(0x2460..0x2487 | ForEach-Object { [char]$_ })
-    }
-    function CiteLinesOf($path) {   # citation lines of one doc: backticked .md path AND a quote
-        if (-not (Test-Path -LiteralPath $path)) { return @() }
-        return @([System.IO.File]::ReadAllLines($path) |
-            Where-Object { $_ -match '`[A-Za-z0-9_./-]*\.md`' -and $_.Contains('"') })
-    }
-    function OrdinalAfterJeol($lines) {   # lines carrying an ordinal AFTER the section marker (U+C808)
-        $hits = @()
-        foreach ($l in $lines) {
-            $j = $l.IndexOf($JEOL)          # ordinal comparison (String.IndexOf(String) is ordinal)
-            if ($j -lt 0) { continue }
-            foreach ($c in $ORD_SET) {
-                $k = $l.IndexOf($c)
-                if ($k -gt $j) { $hits += $l; break }
-            }
-        }
-        return $hits
-    }
-    if (PartOn 'G') {
-    $g8Cites = @()
-    foreach ($p in (LivingDocs)) { $g8Cites += @(CiteLinesOf $p) }
-    $g8Hits = @(OrdinalAfterJeol $g8Cites)
-    foreach ($h in $g8Hits) { Write-Host ("  -> ordinal sub-index citation: " + $h) }
-    Chk "G8a: ordinal set is 40 chars (U+2460-U+2487)" ([string]$ORD_SET.Count) '40'
-    # Extraction positive control -- a PROHIBITION is still vacuous if there is nothing to scan. If the
-    # CiteLinesOf pattern or the LivingDocs range breaks, G8b passes as 0 == 0. Assert the corpus is
-    # non-empty (checklist item 1 -- same shape as the G2/G6/G4 extraction controls). Added by the M44 review.
-    Chk "G8b0: citation-line extraction positive control (>0)" $(if ($g8Cites.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
-    Chk "G8b: no ordinal sub-index citation after the section marker" ([string]$g8Hits.Count) '0'
-    # Fixture control -- inject one violation in M43 issue 5's actual shape (U+2477) and it must be caught.
-    $g8Fx = @('- `docs/conventions.md`' + $UI + ' "bogus-anchor" ' + $JEOL + ' ' + [char]0x2477)
-    Chk "G8c: control -- injected ordinal sub-index citation is caught" ([string](@(OrdinalAfterJeol $g8Fx)).Count) '1'
-    }
-
-    # === Part H -- execution-environment axis declaration consistency (M38-T06) =====
-    # The convention NAMES each axis of the execution environment (single source: the
-    # execution-environment axis section of docs/conventions.md) and records what enforces it.
-    # What this part bites is EXACTLY five things: (1) each declared axis name really occurs in a
-    # ROW of the convention's table, (2) the axis-name SET matches the one declared in
-    # tests/discover/README.md (same set-equality technique as Part C), (3) each `job:<name>` token in
-    # the table really exists as a job key in .github/workflows/tests.yml, (4) that token sits in a
-    # row carrying a DECLARED axis (an orphan token in an undeclared row FAILs), and (5) conversely,
-    # every job that really EXISTS in the workflow is either REGISTERED by some axis row's `job:`
-    # token or DECLARED EXEMPT (coverage -- registration is not opt-in).
-    # (M39) The mapping's single source moved from the `env-axis-ci-jobs:` line to the table's
-    # `job:<name>` tokens -- two declaration sites became one. That changed (4)'s meaning: it used to
-    # ask "is the mapped job also in the table row" which, now that the table IS the source, would be
-    # a TAUTOLOGY (a vacuous pass); it now asks "is the table's job token in a DECLARED axis row".
-    # It does not claim more. THREE things are not asked by any machine: (a) whether an enforcement
-    # cell that names NO CI job (the runner's own probe, "only a real push" + the `pr` finalize CI
-    # lookup) is still true; (b) whether the REST of a job-naming cell's prose ("3 OS", "matrix")
-    # matches reality; (c) PROSE in an enforcement cell claiming a job that does not exist (below).
-    # That layer is the human review's; the convention's "what the machine does not ask" notice is
-    # the single source.
-    # (M40) The former fourth item -- an UNDECLARED table row -- is closed. The `axis:` notation
-    # (H14..H16) plus DATA ROW COUNT == NOTATION COUNT (H17) lets axes be counted from the TABLE side
-    # too, so the comparison is bidirectional. Before deleting the item, three attacks were measured
-    # in both shells: an undeclared row WITH a notation (H15 fails), a pure-prose row with NO notation
-    # (H17b fails), and a declared axis whose notation is removed (H2/H15/H17b fail). Shrinking the
-    # notice on the strength of "the notation exists" alone would itself be the `vacuous-pass` class.
-    # What `job:` closed AND did not close: enforcement cells used to be prose, so a NON-EXISTENT name
-    # written as if it were a job never reached the check (no machine can tell whether an arbitrary
-    # backticked token is a job reference -- the M38 review measured this with `nowhere`). The `job:`
-    # prefix removes that ambiguity for references it MARKS, and (3) then bites their existence.
-    # PROSE claims survive untouched -- measured by the M39 review in both shells: keeping the token
-    # and appending "CI `nowhere` also enforces" stays green, and replacing a token-less axis cell with
-    # "CI `nowhere` enforces" stays green. The DEFINITION of what counts as a job reference changed;
-    # the misleading surface did not disappear. That is why (c) stays in the notice.
-    # The M38 review measured the overclaim TWICE: before (3)/(4), deleting the `posix` job outright
-    # and leaving the table untouched still scored 90/0 green; before (5), a DECLARED but unmapped
-    # axis naming a real job escaped the check. That is why (3)(4)(5) exist.
-    # Axis and job names are ASCII co-terms, so this is data-driven like Part F's role anchors --
-    # no Korean literal in the source.
-    function EnvAxes($file) {
-        $raw = ReadUtf8 $file
-        if ($null -eq $raw) { return '' }
-        $line = ($raw -split "`r?`n" | Where-Object { $_.Contains('env-axes:') } | Select-Object -First 1)
-        if ($null -eq $line) { return '' }
-        $tail = $line.Substring($line.IndexOf('env-axes:') + 9)
-        $cut = $tail.IndexOf('-->')
-        if ($cut -ge 0) { $tail = $tail.Substring(0, $cut) }
-        $names = @($tail -split '\s+' | Where-Object { $_ -match '^[a-z][a-z-]*$' })
-        # (M42-T03) `Sort-Object -CaseSensitive` is CULTURE-aware, not ordinal -- the same thing M41
-        # found in Part C. The .sh twin here is `LC_ALL=C sort` (no `-u`), so this is the
-        # duplicate-preserving ordinal helper. This output is string-compared by H3/H15, so the sort
-        # ORDER is part of the verdict.
-        return ((OrdinalSort $names) -join ' ')
-    }
-    if (PartOn 'H') {
-    $convAxes = EnvAxes $CONV
-    $readAxes = EnvAxes $DISC_README
-    $nAxes = @($convAxes -split ' ' | Where-Object { $_ -ne '' }).Count
-    }
-
-    # (H14..H16 / M40) `axis:<name>` -- the RESOLVABLE notation for axis names. Before it, every check
-    # started from the `env-axes:` declaration, so a table row NOT in the declaration escaped all of
-    # them (M38 measured it: an undeclared `ghost-axis` row naming a real job stayed green). Counting
-    # axes from the TABLE side too makes the comparison BIDIRECTIONAL -- declared-but-unwritten and
-    # written-but-undeclared both FAIL. Same shape as `job:`, so the extractor is the same shape too.
-    function TableAxisTokens($file) {
-        $raw = ReadUtf8 $file
-        if ($null -eq $raw) { return '' }
-        $rows = @(($raw -split "`r?`n") | Where-Object { $_.StartsWith('|', [System.StringComparison]::Ordinal) })
-        $tok = @()
-        foreach ($row in $rows) {
-            foreach ($m in [regex]::Matches($row, 'axis:[a-z][a-z-]*')) { $tok += $m.Value.Substring(5) }
-        }
-        return ((OrdinalSortUnique $tok) -join ' ')   # .sh twin: `LC_ALL=C sort -u` (M42-T03)
-    }
-    if (PartOn 'H') {
-    $convAxisTokens = TableAxisTokens $CONV
-    $nAxisTok = @($convAxisTokens -split ' ' | Where-Object { $_ -ne '' }).Count
-    }
-
-    # (H17) Set equality alone cannot see a row carrying NO notation -- it contributes nothing to the
-    # set and passes quietly (that is exactly the "prose inside the axis table" seat). So the DATA ROW
-    # COUNT is compared with the NOTATION COUNT. The table's range is anchored on the `env-axes:`
-    # declaration line (the first markdown table after it): anchoring on the Korean header would break
-    # this file's ASCII-only source discipline, so an ASCII declaration line is the anchor instead.
-    function AxisTableDataRows($file) {
-        $raw = ReadUtf8 $file
-        if ($null -eq $raw) { return @() }
-        $out = @(); $f = 0
-        foreach ($line in ($raw -split "`r?`n")) {
-            $isRow = $line.StartsWith('|', [System.StringComparison]::Ordinal)
-            if ($f -eq 0) { if ($line.Contains('env-axes:')) { $f = 1 }; continue }
-            if ($f -eq 1) { if ($isRow) { $f = 2 }; continue }
-            if ($f -eq 2) { if ($isRow) { $f = 3 }; continue }
-            if ($f -eq 3) { if ($isRow) { $out += $line; continue } else { break } }
-        }
-        return $out
-    }
-    if (PartOn 'H') {
-    $axisDataRows = @(AxisTableDataRows $CONV)
-    $nAxisRows = $axisDataRows.Count
-    $nAxisRowTok = @($axisDataRows | Where-Object { $_ -match 'axis:[a-z]' }).Count
-
-    # (H2) every declared axis must occur in a TABLE ROW (line starting with '|') of the convention --
-    # declaring an axis without wiring it into the table is the "claims enforcement it does not have"
-    # class this milestone exists to remove.
-    $axisRowMiss = 0
-    $convLines = @((ReadUtf8 $CONV) -split "`r?`n")
-    foreach ($a in @($convAxes -split ' ' | Where-Object { $_ -ne '' })) {
-        $needle = '`axis:' + $a + '`'
-        $hit = @($convLines | Where-Object { $_.StartsWith('|', [System.StringComparison]::Ordinal) -and $_.Contains($needle) }).Count
-        if ($hit -eq 0) { $axisRowMiss++ }
-    }
-    }
-    function HasAxis($set, $name) {
-        if ((" $set " ).Contains(" $name ")) { return 'yes' } else { return 'no' }
-    }
-
-    # (H6..H9) Rows whose enforcement cell points at a CI JOB are pinned down to the job's existence.
-    # (M39) The mapping's single source is the TABLE ROW's `job:<name>` tokens (no separate line); the
-    # job NAMES are DISCOVERED from the workflow's `jobs:` block (no hardcoded roster). H8 checks the
-    # token sits in a DECLARED axis row, closing the opposite drift (hiding a token in an undeclared row).
-    if (PartOn 'H') {
-    $axisRows = @($convLines | Where-Object { $_.StartsWith('|', [System.StringComparison]::Ordinal) })
-    }
-    function RowJobTokens($row) {
-        return @([regex]::Matches($row, 'job:[a-z][a-z0-9-]*') | ForEach-Object { $_.Value.Substring(4) })
-    }
-    function RowAxisNames($row, $axes) {
-        return @($axes | Where-Object { $row.Contains('`axis:' + $_ + '`') })
-    }
-    function EnvAxisJobs($rows, $axes) {
-        $pairs = @()
-        foreach ($row in $rows) {
-            if (-not $row.Contains('job:')) { continue }
-            foreach ($j in (RowJobTokens $row)) {
-                foreach ($a in (RowAxisNames $row $axes)) { $pairs += ($a + '=' + $j) }
-            }
-        }
-        return ((OrdinalSortUnique $pairs) -join ' ')   # .sh twin: `LC_ALL=C sort -u` (M42-T03)
-    }
-    function EnvExemptJobs($file) {
-        # jobs deliberately declared NOT to be environment axes (e.g. the repo-consistency `pairing`
-        # job). Exemption is a DECLARATION, not silence -- adding a CI job forces the axis/exempt call.
-        $raw = ReadUtf8 $file
-        if ($null -eq $raw) { return '' }
-        $line = ($raw -split "`r?`n" | Where-Object { $_.Contains('env-axis-exempt-jobs:') } | Select-Object -First 1)
-        if ($null -eq $line) { return '' }
-        $tail = $line.Substring($line.IndexOf('env-axis-exempt-jobs:') + 21)
-        $cut = $tail.IndexOf('-->')
-        if ($cut -ge 0) { $tail = $tail.Substring(0, $cut) }
-        $names = @($tail -split '\s+' | Where-Object { $_ -match '^[a-z][a-z0-9-]*$' })
-        return ((OrdinalSort $names) -join ' ')   # .sh twin: `LC_ALL=C sort` (no -u) -- M42-T03
-    }
-    function CiJobNames($file) {
-        # job keys = 2-space-indented keys INSIDE the `jobs:` block (so the keys under `on:` -- push,
-        # pull_request, workflow_dispatch -- are not mistaken for jobs).
-        $raw = ReadUtf8 $file
-        if ($null -eq $raw) { return '' }
-        $out = @(); $inJobs = $false
-        foreach ($line in ($raw -split "`r?`n")) {
-            if ($line -match '^jobs:') { $inJobs = $true; continue }
-            if ($inJobs -and $line -match '^[A-Za-z]') { $inJobs = $false }
-            if ($inJobs -and $line -match '^  ([a-z][a-z0-9-]*):[ \t]*$') { $out += $matches[1] }
-        }
-        return ((OrdinalSort $out) -join ' ')   # .sh twin: `LC_ALL=C sort` (no -u) -- M42-T03
-    }
-    if (PartOn 'H') {
-    $WF = Join-Path $ROOT '.github\workflows\tests.yml'
-    $axesList = @($convAxes -split ' ' | Where-Object { $_ -ne '' })
-    $axisJobs = EnvAxisJobs $axisRows $axesList
-    $ciJobs = CiJobNames $WF
-    $exemptJobs = EnvExemptJobs $CONV
-    $nAxisJobs = @($axisJobs -split ' ' | Where-Object { $_ -ne '' }).Count
-
-    $axisJobMiss = 0
-    foreach ($pair in @($axisJobs -split ' ' | Where-Object { $_ -ne '' })) {
-        $j = $pair.Substring($pair.IndexOf('=') + 1)
-        if ((HasAxis $ciJobs $j) -ne 'yes') { $axisJobMiss++ }
-    }
-
-    # (H8) orphan `job:` tokens -- a token written in a row that carries no DECLARED axis.
-    $jobTokenOrphan = 0
-    foreach ($row in $axisRows) {
-        if (-not $row.Contains('job:')) { continue }
-        if ((RowAxisNames $row $axesList).Count -eq 0) { $jobTokenOrphan++ }
-    }
-
-    # (H12) declared axes carrying NO `job:` token (non-CI enforcement / unenforced) -- absence of a
-    # token is the honest notation for "no CI job enforces this", so that path must stay alive.
-    $noJobAxes = 0
-    foreach ($a in $axesList) {
-        if (-not (" $axisJobs ").Contains(" $a=")) { $noJobAxes++ }
-    }
-
-    # (H13) a stale exemption (job deleted or renamed while the declaration lingers) must FAIL.
-    $exemptJobMiss = 0
-    foreach ($j in @($exemptJobs -split ' ' | Where-Object { $_ -ne '' })) {
-        if ((HasAxis $ciJobs $j) -ne 'yes') { $exemptJobMiss++ }
-    }
-
-    Chk "H1: axis-name extraction positive control (>0)" $(if ($nAxes -gt 0) { 'ok' } else { 'no' }) 'ok'
-    Chk "H2: every declared axis has a convention table row" ([string]$axisRowMiss) '0'
-    # (M42-T03) ORDINAL equality, like Part C's SetsEqual -- culture `-eq` would call two axis-name sets
-    # equal that the .sh twin's `[ "$a" = "$b" ]` calls different. The `-ne ''` guard (both-empty must
-    # be 'no') is unchanged.
-    Chk "H3: axis-name sets equal (conventions vs discover README)" $(if ($convAxes -ne '' -and [string]::Equals($convAxes, $readAxes, [System.StringComparison]::Ordinal)) { 'yes' } else { 'no' }) 'yes'
-    Chk "H4: control -- bogus axis name (bogus-axis) absent in conventions" (HasAxis $convAxes 'bogus-axis') 'no'
-    Chk "H5: control -- bogus axis name (bogus-axis) absent in README" (HasAxis $readAxes 'bogus-axis') 'no'
-    # (H10/H11) COVERAGE -- registration is not opt-in. Every job DISCOVERED in the workflow must be
-    # registered by some axis row's `job:` token, or declared exempt; otherwise simply staying out of
-    # the table buys an exemption from H7/H8 (the side door the M38 review opened by measurement:
-    # an unmapped axis naming a nonexistent job still scored 94/0). Nothing is hardcoded -- both the
-    # job names and the axis names are discovered.
-    $coverHits = 0
-    $coverMiss = 0
-    foreach ($j in @($ciJobs -split ' ' | Where-Object { $_ -ne '' })) {
-        if ((" $axisJobs ").Contains("=$j ")) { $coverHits++; continue }
-        if ((" $exemptJobs ").Contains(" $j ")) { continue }
-        $coverMiss++
-    }
-
-    Chk "H6: table job: token extraction positive control (>0)" $(if ($nAxisJobs -gt 0) { 'ok' } else { 'no' }) 'ok'
-    Chk "H7: every job named by the table exists in the workflow" ([string]$axisJobMiss) '0'
-    Chk "H8: every job: token sits in a declared axis row (orphans 0)" ([string]$jobTokenOrphan) '0'
-    Chk "H9: control -- bogus job name (bogus-job) absent in workflow" (HasAxis $ciJobs 'bogus-job') 'no'
-    Chk "H10: coverage scan positive control (>0)" $(if ($coverHits -gt 0) { 'ok' } else { 'no' }) 'ok'
-    Chk "H11: every workflow job is registered by an axis row or declared exempt" ([string]$coverMiss) '0'
-    Chk "H12: declared axes without a job: token exist, positive control (>0)" $(if ($noJobAxes -gt 0) { 'ok' } else { 'no' }) 'ok'
-    Chk "H13: every exempt-declared job exists in the workflow" ([string]$exemptJobMiss) '0'
-    # (H14..H16 / M40) `axis:` notation -- extraction positive control + BIDIRECTIONAL set equality.
-    # One direction alone is half the job: declared-but-missing-row is already H2's, but a token that
-    # exists WITHOUT a declaration (an undeclared row) is caught here for the first time.
-    Chk "H14: axis: notation extraction positive control (>0)" $(if ($nAxisTok -gt 0) { 'ok' } else { 'no' }) 'ok'
-    Chk "H15: axis: token set == env-axes declaration set" $(if ($convAxisTokens -ne '' -and [string]::Equals($convAxisTokens, $convAxes, [System.StringComparison]::Ordinal)) { 'yes' } else { 'no' }) 'yes'
-    Chk "H16: control -- bogus axis notation (bogus-axis) absent in table" (HasAxis $convAxisTokens 'bogus-axis') 'no'
-    # (H17) A data row without a notation is prose inside the table. Row count must equal notation
-    # count; the row-count positive control keeps 0==0 from passing vacuously.
-    Chk "H17a: axis table data-row extraction positive control (>0)" $(if ($nAxisRows -gt 0) { 'ok' } else { 'no' }) 'ok'
-    Chk "H17b: axis table data-row count == axis: notation count" $(if ($nAxisRows -eq $nAxisRowTok) { 'yes' } else { 'no' }) 'yes'
-    }
-
-    # === Part I -- axis state-claim consistency (M42) ==============================
-    # Bites the place where the TABLE says an axis is enforced and PROSE says the opposite. Counts are
-    # bitten by B1/F1, rosters by C-3/C-4, citations by Part G -- but "two paragraphs assert opposite
-    # facts" had no mechanism, and M41 produced THREE such defects in one cycle (two of them of the
-    # axis-name class, both missed by two reviews). Single source for the rule, markers and boundary is
-    # the axis state-claim consistency section of docs/conventions.md. In short:
-    #   POS = the axis table's `axis:` token set (axes whose enforcement cell is alive) -- Part H's set.
-    #   NEG = a live doc's BULLET BLOCK carrying both an axis name (inherited from the block head) and a
-    #         `state-neg:` marker. Two exclusions: a QUOTED marker (that is the rule being stated, not a
-    #         claim) and any line carrying a `state-past:` marker (history narration, not today's state).
-    # The markers are DECLARED BY THE CONVENTION and only read here -- a data-driven check with no Korean
-    # literal in this script, so the byte>127=0 rule holds (same shape as F2/G4/site-includes).
-    # The SHAPE of a declaration line is the discriminator: a bullet, then IMMEDIATELY the key wrapped
-    # in backticks (- `state-neg:` ...). A prose mention (- **rule**: ... `state-neg:` ...) does not put
-    # the key at the head of the line. Those two lines are exactly what the convention calls the SOLE
-    # declaration site, and both the extraction and the uniqueness check (I7..I9) read the SAME line.
-    # Blank class is [ \t] -- space and tab, nothing else. The .sh twin reaches the same width by NOT
-    # using a character class at all: its decl_lines is an awk LITERAL comparison (walk spaces/tabs, then
-    # '-', then spaces/tabs, then the key). Two earlier revisions of this comment were wrong about that
-    # twin -- first claiming a bare [[:blank:]] matched this "exactly" (it does not: under a UTF-8 locale
-    # glibc's [[:blank:]] also eats U+1680 / U+2003 / U+205F / U+3000, so the same tree split 136/0 here
-    # vs 135/1 there under C.UTF-8, the Ubuntu CI default), then claiming an LC_ALL=C pin on that grep
-    # (the grep is gone). Describe the twin as it is, or do not describe it. (\s / [[:space:]] would
-    # differ again, in both directions.)
-    # `-cmatch`, NOT `-match`: PowerShell's `-match` is CASE-INSENSITIVE by default, so a case variant
-    # of the key (`- ``State-Neg:`` ...`) counted as a declaration line here while the .sh twin's
-    # case-sensitive grep did not -- same tree, 132/0 in sh vs 131/1 here (M42 review issue 4). Every
-    # other comparison on this key is ordinal, so the case-sensitive answer is the correct one.
-    function DeclLines($path, $key) {
-        $raw = ReadUtf8 $path
-        if ($null -eq $raw) { return @() }
-        $re = '^[ \t]*-[ \t]+`' + [regex]::Escape($key) + '`'
-        return @($raw -split "`r?`n" | Where-Object { $_ -cmatch $re })
-    }
-    function DeclCount($path, $key) { return [string](@(DeclLines $path $key)).Count }
-    # The tail after the key on the declaration line -- the ONE place both the marker extraction and
-    # the separator check read, so they can never see different strings. The .sh twin does the same
-    # with awk index()+substr() (literal, no regex on either side).
-    function DeclTail($path, $key) {
-        $line = @(DeclLines $path $key) | Select-Object -First 1
-        if ($null -eq $line) { return $null }
-        $w = '`' + $key + '`'
-        $i = $line.IndexOf($w, [System.StringComparison]::Ordinal)
-        if ($i -lt 0) { return $null }
-        return $line.Substring($i + $w.Length)
-    }
-    # SEPARATOR SET -- every character EITHER shell may treat as whitespace, minus the ASCII space.
-    # .NET \s is [\f\n\r\t\v\x85\p{Z}] and \p{Z} carries NBSP / OGHAM / U+2000-200A / U+2028 / U+2029 /
-    # U+202F / U+205F / U+3000. The .sh twin spells the same set as UTF-8 bytes (octal escapes).
-    $SEP_RE = '[\t\v\f\r\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]'
-    function BadSeps($path, $key) {
-        $tail = DeclTail $path $key
-        if ($null -eq $tail) { return '0' }
-        if ([regex]::IsMatch($tail, $SEP_RE)) { return '1' } else { return '0' }
-    }
-    # FIRST match is pinned by DeclTail above on both sides (sed's greedy leading `.*` used to take the
-    # LAST occurrence while IndexOf takes the FIRST -- M42 review blocker 2).
-    # SPLIT WIDTH is pinned too: a single ASCII space, exactly like the .sh twin's `tr ' ' '\n'`.
-    # This used to be `-split '\s+'`, which made the two shells disagree on TAB and NBSP: one trailing
-    # tab on the declaration line killed the last marker in sh ONLY, and sh then stayed GREEN over a
-    # real contradiction that this runner caught (M42 review blocker 1). Matching the width is not
-    # enough on its own -- a character outside BOTH widths kills the marker in BOTH shells -- so
-    # I10..I13 below forbid every such character outright.
-    function MarkersOf($key) {
-        $tail = DeclTail $CONV $key
-        if ($null -eq $tail) { return @() }
-        return @(($tail -replace '[`*]', '') -split ' ' | Where-Object { $_ -ne '' })
-    }
-    if (PartOn 'I') {
-    $negMarks = @(MarkersOf 'state-neg:')
-    $pastMarks = @(MarkersOf 'state-past:')
-    }
-    # POS set = ONLY axes whose enforcement cell is alive. Using every `axis:` token would turn the
-    # convention's own MANDATED honest notation (an axis with no enforcement is written with a
-    # state-neg marker) into a contradiction, so that axis's own table row would FAIL (measured in
-    # review). Keep the runner exactly as wide as the convention describes.
-    function LiveAxes() {
-        $out = @()
-        $raw = ReadUtf8 $CONV
-        if ($null -eq $raw) { return $out }
-        foreach ($line in ($raw -split "`r?`n")) {
-            if (-not $line.StartsWith('|', [System.StringComparison]::Ordinal)) { continue }
-            $cols = $line -split '\|'
-            if ($cols.Count -lt 5) { continue }
-            $m = [regex]::Match($cols[1], 'axis:([a-z][a-z-]*)')
-            if (-not $m.Success) { continue }
-            $cell = $cols[3] -replace '[ \t\r]', ''
-            if ($cell -eq '') { continue }
-            $dead = $false
-            foreach ($n in $negMarks) { if ($n -ne '' -and $cell.Contains($n)) { $dead = $true; break } }
-            if (-not $dead) { $out += $m.Groups[1].Value }
-        }
-        return @(OrdinalSortUnique $out)   # sh twin is `LC_ALL=C sort -u`; culture sort would split them
-    }
-    if (PartOn 'I') {
-    $axNames = @(LiveAxes)
-    }
-    function ContraOf($path) {
-        $out = @()
-        $raw = ReadUtf8 $path
-        if ($null -eq $raw) { return $out }
-        $cur = New-Object 'System.Collections.Generic.HashSet[string]'
-        $n = 0
-        foreach ($line in ($raw -split "`r?`n")) {
-            $n++
-            $flat = $line -replace '[ \t\r]', ''
-            if ($line.StartsWith('- ', [System.StringComparison]::Ordinal) -or
-                $line.StartsWith('#', [System.StringComparison]::Ordinal) -or
-                $line.StartsWith('|', [System.StringComparison]::Ordinal)) { $cur.Clear() }
-            foreach ($a in $axNames) { if ($a -ne '' -and $flat.Contains($a)) { [void]$cur.Add($a) } }
-            if ($flat.Contains('state-neg:') -or $flat.Contains('state-past:')) { continue }
-            $hit = ''
-            foreach ($m in $negMarks) { if ($m -ne '' -and $flat.Contains($m)) { $hit = $m; break } }
-            if ($hit -eq '') { continue }
-            if ($flat.Contains('"' + $hit + '"')) { continue }
-            $past = $false
-            foreach ($m in $pastMarks) { if ($m -ne '' -and $flat.Contains($m)) { $past = $true; break } }
-            if ($past) { continue }
-            foreach ($a in $cur) { $out += ($a + ':' + $n) }
-        }
-        return $out
-    }
-    # (I1) if the markers cannot be read every assertion below passes 0==0 VACUOUSLY -- bite extraction first.
-    if (PartOn 'I') {
-    Chk "I1: state-neg marker extraction positive control (>0)" $(if ($negMarks.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
-    # (I1b) the POS set needs its own positive control: if the table layout shifts and the enforcement
-    # cell stops being extracted, POS goes empty and I2 passes VACUOUSLY (0==0). H14 bites the `axis:`
-    # token set, not this derived subset.
-    Chk "I1b: live-enforcement axis extraction positive control (>0)" $(if ($axNames.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
-    # (I2) the real check. On failure NAME the axis, file and line -- a count alone does not say where.
-    $contra = @()
-    foreach ($p in (LivingDocs)) {
-        foreach ($h in (ContraOf $p)) { $contra += $h; Write-Host ("  -> axis-state contradiction: " + $h + " (" + (Split-Path $p -Leaf) + ")") }
-    }
-    Chk "I2: no axis state-claim contradiction in live docs" ([string]$contra.Count) '0'
-    # (I3~I6) controls -- an injected contradiction is caught; the three deliberately excluded shapes are not.
-    $iAx = if ($axNames.Count -gt 0) { $axNames[0] } else { '' }
-    $iNeg = if ($negMarks.Count -gt 0) { $negMarks[0] } else { '' }
-    $iPast = if ($pastMarks.Count -gt 0) { $pastMarks[0] } else { '' }
-    $noBom = New-Object System.Text.UTF8Encoding($false)
-    $fxIn = Join-Path $sbx 'contra-inject.md'
-    $fxQt = Join-Path $sbx 'contra-quoted.md'
-    $fxPa = Join-Path $sbx 'contra-past.md'
-    $fxNt = Join-Path $sbx 'contra-notarget.md'
-    [System.IO.File]::WriteAllText($fxIn, ('- **`' + $iAx + '` axis**: ' + $iNeg + "`n"), $noBom)
-    [System.IO.File]::WriteAllText($fxQt, ('- **`' + $iAx + '` axis**: "' + $iNeg + '"' + "`n"), $noBom)
-    [System.IO.File]::WriteAllText($fxPa, ('- **`' + $iAx + '` axis**: ' + $iNeg + $iPast + "`n"), $noBom)
-    [System.IO.File]::WriteAllText($fxNt, ('- no axis name here: ' + $iNeg + "`n"), $noBom)
-    Chk "I3: control -- injected axis state contradiction is caught" ([string](@(ContraOf $fxIn)).Count) '1'
-    Chk "I4: control -- a QUOTED marker (the rule itself) is not a claim" ([string](@(ContraOf $fxQt)).Count) '0'
-    Chk "I5: control -- history narration (past marker) is not a claim" ([string](@(ContraOf $fxPa)).Count) '0'
-    Chk "I6: control -- a marker with no target axis is not a claim" ([string](@(ContraOf $fxNt)).Count) '0'
-
-    # (I7~I9) DECLARATION-SITE UNIQUENESS -- the convention says "the two lines below are the sole
-    # declaration site of the markers", but until now both runners simply took the FIRST line where the
-    # key appeared, so nothing bit that sentence (M42 review minor 8). Zero lines means the declaration
-    # is gone (extraction goes empty); two or more means the site has SPLIT and which line wins depends
-    # on the runner implementation -- both FAIL. These bite WHICH LINE is read; I10..I13 below bite HOW
-    # THAT LINE IS SPLIT. An earlier revision claimed here that "which edit is loud and which is silent
-    # stops being luck" -- that was FALSE (a trailing tab and an NBSP were still silent, M42 review
-    # blocker 1). What holds now: any character in the separator set below makes BOTH shells red. The
-    # marker alphabet itself (which characters may form a marker) is still NOT bitten.
-    # control -- a prose mention is not a declaration site. The fixture is ASCII-only and the .sh twin
-    # writes the very same three lines, so it is immediately visible whether both shells count the same.
-    $fxDc = Join-Path $sbx 'contra-decl.md'
-    [System.IO.File]::WriteAllText($fxDc, (
-        '- `state-neg:` alpha beta' + "`n" +
-        '- **rule**: the `state-neg:` marker is declared above and only mentioned here' + "`n" +
-        'a prose line mentioning `state-neg:` in the middle' + "`n"), $noBom)
-    Chk "I9: control -- a prose mention is not a declaration site" (DeclCount $fxDc 'state-neg:') '1'
-
-    # (I10~I13) THE SEPARATOR ON A DECLARATION LINE IS A SINGLE ASCII SPACE (M42 review blocker 1).
-    # Matching the two split widths is not enough: a character outside BOTH widths kills a marker in
-    # BOTH shells and I2 goes back to passing 0==0. So the width is matched (MarkersOf) AND every other
-    # separator is forbidden here. I12/I13 prove the ban is not vacuous. The fixtures are written from
-    # ASCII SOURCE ([char] escapes) and the .sh twin writes the very same bytes via printf octal.
-    $fxTab = Join-Path $sbx 'contra-sep-tab.md'
-    $fxNbsp = Join-Path $sbx 'contra-sep-nbsp.md'
-    [System.IO.File]::WriteAllText($fxTab, ('- `state-neg:` alpha' + [char]0x0009 + 'beta' + "`n"), $noBom)
-    [System.IO.File]::WriteAllText($fxNbsp, ('- `state-neg:` alpha' + [char]0x00A0 + 'beta' + "`n"), $noBom)
-    Chk "I12: control -- a TAB separator is caught" (BadSeps $fxTab 'state-neg:') '1'
-    Chk "I13: control -- an NBSP separator is caught" (BadSeps $fxNbsp 'state-neg:') '1'
-    }
-
-    # (I14~I15) READ THE SEPARATOR SET FROM THE CONVENTION AND CHECK THIS IMPLEMENTATION AGAINST IT
-    # (M42 rework 3). The set lives in three media -- Korean names in the convention, octal bytes in the
-    # .sh twin, \uXXXX here -- so no string comparison closes it, and "we read it and they matched" was
-    # WRONG THREE ROUNDS RUNNING. Now the convention's `sep-cps:` line is the single source and each
-    # runner builds its own fixture per code point. Crucially this runs the WHOLE extraction pipeline,
-    # not just the pattern: M42 review blocker 1 was a character that sat in the set but was stripped
-    # upstream, so a pattern-only comparison could not see it.
-    function SepHits($cps) {
-        $h = 0
-        $f = Join-Path $sbx 'contra-sep-cp.md'
-        foreach ($x in $cps) {
-            $ch = [char]::ConvertFromUtf32([Convert]::ToInt32($x, 16))
-            [System.IO.File]::WriteAllText($f, ('- `state-neg:` alpha' + $ch + 'beta' + "`n"), $noBom)
-            $h += [int](BadSeps $f 'state-neg:')
-        }
-        return $h
-    }
-    if (PartOn 'I') {
-    $sepCps = @(MarkersOf 'sep-cps:')
-    $sepOkCps = @(MarkersOf 'sep-ok-cps:')
-    # (I16~I19) THE SAME GUARDS THE OTHER DECLARATION KEYS ALREADY CARRY (M42 review blocker 1).
-    # I14/I15 READ the declaration to check this implementation -- so if the declaration disappears the
-    # set is empty and I14 passes 0 == 0. Measured: deleting the `sep-cps:` line left all four
-    # environments green at 140/0. I1/I1b/G6/F4 all guard against exactly this, and I7/I8 additionally
-    # pin declaration-line uniqueness for the other two keys. Extraction (>0) and uniqueness (exactly 1).
-    Chk "I16: sep-cps extraction positive control (>0)" $(if ($sepCps.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
-    Chk "I17: sep-ok-cps extraction positive control (>0)" $(if ($sepOkCps.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
-    Chk "I14: every separator the convention declares is caught" ([string](SepHits $sepCps)) ([string]$sepCps.Count)
-    Chk "I15: control -- an allowed character is not caught" ([string](SepHits $sepOkCps)) '0'
-    }
-
-    # --- Part F (continued) -- document self-description + runner-source discipline ----
-    # From here the cases are F again (F1b, F4-F20). They sit physically after Part I, but THE CASE
-    # LABEL IS THE PART, and that is also the unit the part-selection argument bites -- both copies
-    # split at the same place under the same label (M64-T03).
+    # --- (M43+) document self-description + runner-source discipline ----
+    # These are F cases too (F1b, F4-F20). They used to sit after Part I; M93 moved them into the Part F block. THE CASE
+    # LABEL IS THE PART, and that is also the unit the part-selection argument bites (M64-T03).
     function DeclaredCases() {
         # FIRST match, deliberately -- the sh side now pins the same end (M38 review minor 4: sed's
         # greedy leading `.*` took the LAST `cases:` on a line while .NET takes the FIRST).
@@ -1907,7 +1816,7 @@ try {
         return [string]$s
     }
     if (PartOn 'F') {
-    Chk "F1b: per-part breakdown sums to declared total" (PartSum) (DeclaredCases)
+    Chk "F36: per-part breakdown sums to declared total" (PartSum) (DeclaredCases)
     }
 
     # (F4~F5) MACHINE-BITE THE byte>127 = 0 RULE FOR THIS FILE AND ITS SIBLINGS (M42 rework 3, self-raised).
@@ -2254,6 +2163,871 @@ try {
     Chk "F23: fixture control -- raising one heading count in a copy moves the check by one" ([string]([int](PartHeadBad (PartHeadFixture)) - [int](PartHeadBad))) '1'
     }
 
+
+    if (PartOn 'F') {
+    Chk "F29: cover row extraction and case-ID extraction from both runner sources positive-control (>0)" $(if (@(DeclReg | Where-Object { ($_ -split '\|', 6)[2] -ceq 'cover' }).Count -gt 0 -and @(SrcCaseIds $RUN_SH).Count -gt 0 -and @(SrcCaseIds $RUN_PS1).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "F30: main check -- every cover row carries case IDs and each ID exists in both runner sources" (CoverIdBad) '0'
+    $cvb = [int](CoverIdBad)
+    Chk "F31: control -- a row naming a missing ID, an ID present in one runner only and an empty ID field each add one" (([string]([int](CoverIdBad (CoverFixture 'noid')) - $cvb)) + '|' + ([string]([int](CoverIdBad (CoverFixture 'oneside') '' (CoverFixture 'oneside-src')) - $cvb)) + '|' + ([string]([int](CoverIdBad (CoverFixture 'empty')) - $cvb))) '1|1|1'
+    Chk "F24: declaration-line discovery positive-control (>0) and registry key extraction (>0)" $(if (@(DeclDisc '' 'k').Count -gt 0 -and @(DeclRegKeys).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "F25: main check -- no key with two or more declaration lines in the conventions document set" (DeclDiscDup) '0'
+    Chk "F26: main check -- no forbidden separator in any declaration tail of the conventions document set" (DeclDiscSeps) '0'
+    Chk "F27: main check -- the discovered declaration key set and the registry key set have an empty symmetric difference" (DeclDiscUnreg) '0'
+    $dfb27 = [int](DeclDiscUnreg); $dfb25 = [int](DeclDiscDup); $dfb26 = [int](DeclDiscSeps)
+    Chk "F28: control -- in copies, an unregistered declaration added / a registered one dropped / a new fragment / a duplicated line / a TAB in a tail each add exactly one" ([string]([int](DeclDiscUnreg (DeclFixture 'add')) - $dfb27) + '|' + [string]([int](DeclDiscUnreg (DeclFixture 'drop')) - $dfb27) + '|' + [string]([int](DeclDiscUnreg (DeclFixture 'frag')) - $dfb27) + '|' + [string]([int](DeclDiscDup (DeclFixture 'dup')) - $dfb25) + '|' + [string]([int](DeclDiscSeps (DeclFixture 'sep')) - $dfb26)) '1|1|1|1|1'
+    }
+    # === Part G -- cross-reference integrity (M34; generalized to a FILE SET in M35) =====
+    # (M34) Part F enforces what a document says ABOUT ITSELF; Part G enforces the REFERENCES BETWEEN
+    # documents -- the layer that had no guard at all (two citations really did point at names that do
+    # not exist as headings, and nothing caught it). Single source: conventions "cross-reference
+    # integrity".
+    # (M35) The conventions are no longer ONE file but a DOCUMENT SET (the body plus per-topic
+    #      fragments). So this part (1) DISCOVERS the set with the glob 'docs/conventions*.md' (never a
+    #      hardcoded list -- adding a fragment must not require editing this runner), (2) keys the
+    #      anchors PER FILE, and (3) picks the anchor set to compare against from the conventions file
+    #      name(s) that appear ON THE CITATION LINE. Move a section into a fragment without updating the
+    #      citation and the guard bites. A line naming two of them passes if EITHER set has the name
+    #      (safe side -- never manufacture a false positive). With no fragment present the set is just
+    #      the body, so the verdict is identical to the pre-generalization one (regression freeze).
+    # (G1) EXTRACT citations (quoted spans on lines that mention a conventions file name) from the
+    #      living docs and assert every one exists in THAT FILE's heading set (## / ###, whitespace
+    #      removed for comparison).
+    # (G2) controls: zero extracted citations or anchors -> FAIL (empty-pass guard); a bogus name must be
+    #      absent from the whole set; heading names must be unique ACROSS THE WHOLE SET after
+    #      normalization (a split must not put the same name in two files).
+    # Data-driven, so no Korean literal enters this source (ASCII-only rule preserved) -- same shape as F2.
+
+    # living docs -- docs/milestones/* and docs/reports/* are historical records and NOT targets
+    # (the docs/*.md glob does not descend into subdirectories, so they drop out naturally).
+    # NOTE: skip dot-directories AND use -Force on the file listings. Get-ChildItem hides files with
+    # the Windows Hidden/System attribute unless -Force is given, while a POSIX glob matches them; the
+    # explicit dot-name filter then removes what the glob would NOT match. Both halves keep the two
+    # shells scanning the same set.
+    # skip dot-directories explicitly: A POSIX glob ('skills/*/*.md') never matches them, but
+    # Get-ChildItem -Directory DOES list '.foo' on Windows (a leading dot is not the Hidden attribute),
+    # so without this filter the two shells would scan different file sets and could disagree.
+    function LivingDocs() {
+        $out = @()
+        foreach ($d in (Get-ChildItem (Join-Path $ROOT 'skills') -Directory -ErrorAction SilentlyContinue | Where-Object { -not $_.Name.StartsWith('.', [System.StringComparison]::Ordinal) })) {
+            $out += @(Get-ChildItem $d.FullName -Filter '*.md' -File -Force -ErrorAction SilentlyContinue |
+                    Where-Object { -not $_.Name.StartsWith('.', [System.StringComparison]::Ordinal) } | ForEach-Object { $_.FullName })
+        }
+        $out += @(Get-ChildItem (Join-Path $ROOT 'docs') -Filter '*.md' -File -Force -ErrorAction SilentlyContinue |
+                    Where-Object { -not $_.Name.StartsWith('.', [System.StringComparison]::Ordinal) } | ForEach-Object { $_.FullName })
+        $out += @($README)
+        $out += @(Get-ChildItem (Join-Path $ROOT 'site\docs') -Filter '*.md' -File -Force -ErrorAction SilentlyContinue |
+                    Where-Object { -not $_.Name.StartsWith('.', [System.StringComparison]::Ordinal) } | ForEach-Object { $_.FullName })
+        foreach ($d in (Get-ChildItem (Join-Path $ROOT 'tests') -Directory -ErrorAction SilentlyContinue | Where-Object { -not $_.Name.StartsWith('.', [System.StringComparison]::Ordinal) })) {
+            $r = Join-Path $d.FullName 'README.md'
+            if (Test-Path $r) { $out += @($r) }
+        }
+        return @($out | Where-Object { Test-Path $_ })
+    }
+
+    # conventions DOCUMENT SET -- discovered with the glob 'docs/conventions*.md' (never hardcoded).
+    # Match the POSIX glob exactly with ordinal Starts/EndsWith, and sort ORDINAL so this walks the set
+    # in the same order as run.sh ('LC_ALL=C sort').
+    function ConvFiles() {
+        # -Force: without it Get-ChildItem skips files carrying the Windows Hidden/System attribute,
+        # while the POSIX glob 'docs/conventions*.md' matches them -- the two shells would then scan
+        # different sets. A leading-dot name still cannot pass StartsWith('conventions'), so -Force does
+        # not over-match relative to the glob either.
+        $fs = @(Get-ChildItem (Join-Path $ROOT 'docs') -File -Force -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name.StartsWith('conventions', [System.StringComparison]::Ordinal) -and
+                               $_.Name.EndsWith('.md', [System.StringComparison]::Ordinal) } |
+                ForEach-Object { $_.FullName })
+        $lst = New-Object 'System.Collections.Generic.List[string]'
+        foreach ($f in $fs) { [void]$lst.Add($f) }
+        $lst.Sort([System.StringComparer]::Ordinal)
+        return @($lst.ToArray())
+    }
+
+    # anchor set of ONE conventions file -- ## / ### headings only, spaces removed (so "A - B" and
+    # "A-B" compare equal). CR is already gone because the split is on \r?\n.
+    function AnchorSetOf($path) {
+        $raw = ReadUtf8 $path
+        if ($null -eq $raw) { return @() }
+        $out = @()
+        foreach ($line in ($raw -split "`r?`n")) {
+            if ($line -match '^#{2,3} ') { $out += (($line -replace '^#+ ', '') -replace ' ', '') }
+        }
+        return $out
+    }
+
+    # ordinal (case-sensitive) sets so both shells judge identically -- PowerShell's -contains and
+    # hashtable keys are case-INsensitive by default, which would diverge from grep -x.
+    # $gAnchorSets is parallel to $gConvFiles (one HashSet per file); $gAnchors is the flat list over the
+    # WHOLE set, used by the positive control and the set-wide duplicate check.
+    if (PartOn 'G') {
+    $gConvFiles  = @(ConvFiles)
+    $gConvBases  = @($gConvFiles | ForEach-Object { Split-Path $_ -Leaf })
+    $gAnchorSets = @()
+    $gAnchors    = @()
+    foreach ($p in $gConvFiles) {
+        $s = New-Object 'System.Collections.Generic.HashSet[string]'
+        foreach ($a in (AnchorSetOf $p)) { [void]$s.Add($a); $gAnchors += $a }
+        $gAnchorSets += ,$s
+    }
+
+    # citation candidate lines -- lines naming ANY file of the set; each quoted span is remembered
+    # together with the INDEXES of the files named on its line (its owners). Snippet-include directive
+    # lines ('8<--') are not citations.
+    $gLines      = @()
+    $gCites      = @()
+    $gCiteOwners = @()
+    foreach ($f in (LivingDocs)) {
+        $raw = ReadUtf8 $f
+        if ($null -eq $raw) { continue }
+        foreach ($line in ($raw -split "`r?`n")) {
+            $owners = @()
+            for ($i = 0; $i -lt $gConvBases.Count; $i++) {
+                if ($line.Contains($gConvBases[$i])) { $owners += $i }
+            }
+            if ($owners.Count -eq 0) { continue }
+            if ($line.Contains('8<--')) { continue }
+            $gLines += $line
+            foreach ($m in [regex]::Matches($line, '"([^"]*)"')) {
+                $q = $m.Groups[1].Value
+                if ($q -match '[{}]') { continue }        # skeleton placeholder, not a citation
+                $q = ($q -replace ' ', '')
+                if ($q.Length -eq 0) { continue }         # blank span -- the shell drops it as an empty line
+                $gCites      += $q
+                $gCiteOwners += ,$owners
+            }
+        }
+    }
+    # unterminated quote on a candidate line = the citation wrapped to the next line and would be
+    # silently skipped by line-wise extraction (see G3).
+    $gOdd = 0
+    foreach ($line in $gLines) { if ((([regex]::Matches($line, '"')).Count % 2) -eq 1) { $gOdd++ } }
+
+    # $aset = union over the whole set (bogus-name control); $dset = names appearing in more than one
+    # place (uniqueness is a WHOLE-SET rule: a split must not put the same name in two files).
+    # Comparison is ORDINAL here: HashSet[string]'s default comparer is ordinal, i.e. byte-exact.
+    # The .sh twin must say the same thing with `LC_ALL=C` on both `sort` and `uniq` -- without it the
+    # comparison becomes collation-based and the two shells stop meaning the same thing. That was a
+    # real divergence: GNU platforms happened to agree anyway, and the BSD (macOS) leg reported 3
+    # duplicates where every GNU environment reported 0 (M40, caught by this milestone's own new leg).
+    $aset = New-Object 'System.Collections.Generic.HashSet[string]'
+    $dset = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($a in $gAnchors) { if (-not $aset.Add($a)) { [void]$dset.Add($a) } }
+    }
+    # a citation is OK when it resolves in the anchor set of ANY file named on its line (safe side).
+    # (M54) THE VERDICT IS A FUNCTION so the same verdict can run against a fixture. M46's precedent
+    # asks not "does the fixture meet the condition" but "does the REAL verdict run on it", and until
+    # now G1 had no such control -- breaking the verdict reddened nothing (M50 review, 3 cycles carried).
+    function CiteMissOf($cites, $owners) {
+        $n = 0
+        for ($i = 0; $i -lt $cites.Count; $i++) {
+            $ok = $false
+            foreach ($k in $owners[$i]) { if ($gAnchorSets[$k].Contains($cites[$i])) { $ok = $true } }
+            if (-not $ok) { $n++ }
+        }
+        return $n
+    }
+    if (PartOn 'G') {
+    $gMiss = CiteMissOf $gCites $gCiteOwners
+
+    Chk "G1: every live citation resolves to a real anchor" ([string]$gMiss) '0'
+    # (M54) Fixture control -- borrow a real owner index so the anchor set is genuinely opened, and
+    # point at a name that is not in it.
+    Chk "G28: fixture control -- a broken citation is actually caught" ([string](CiteMissOf @('zzz-bogus-anchor') @(, $gCiteOwners[0]))) '1'
+    Chk "G2: citation extraction positive control (>0)" $(if ($gCites.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "G29: anchor extraction positive control (>0)"   $(if ($gAnchors.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "G30: control -- bogus anchor name (bogus-section) absent" $(if ($aset.Contains('bogus-section')) { 'yes' } else { 'no' }) 'no'
+    # On failure, NAME the duplicates. A counting assertion goes red without saying why -- that is
+    # exactly what stopped M40 from reproducing the BSD divergence locally, and the .sh twin prints
+    # them for the same reason. (A missing/empty anchor file cannot pass vacuously here: the anchor
+    # extraction positive control above fails first.)
+    if ($dset.Count -ne 0) { Write-Host ("  -> duplicate anchors: " + (($dset | Sort-Object) -join ' ')) }   # locale-exempt: diagnostic-only (display order, never a verdict -- see M41 follow-up 11)
+    Chk "G31: anchor names unique after normalization" ([string]$dset.Count) '0'
+    Chk "G3: citation lines have balanced quotes (no wrapped citation)" ([string]$gOdd) '0'
+
+    # (G4) SELF-references inside one file are enforced too (M41). M34 created cross-reference integrity
+    # and left this layer outside the guard ("the skeleton carries no filename -- human review"), and it
+    # stayed there for SIX cycles.
+    # SCOPE IS LivingDocs, the same as G1. Looking only at the conventions set leaves the layer the
+    # convention calls "closed" wide open in skills/, README.md and tests/*/README.md -- that is exactly
+    # what got M41 round 1 blocked (measured: a broken self-reference planted outside conventions stayed
+    # green).
+    # Resolution is against THAT FILE'S OWN anchors -- a self-reference points at its own file by
+    # definition, so comparing against the whole set would pass a reference aimed at another file (round
+    # 1's safe-side choice turns into over-permission once the scope widens).
+    # Four narrowing markers, all chosen from measurement (55 candidates across LivingDocs):
+    #   (1) shaped '"<name>" <jeol>'. WITHOUT this marker it cannot be closed -- drop the trailing word
+    #       and the conventions set alone goes 47 -> 165 candidates, 100+ of them ordinary quoted prose.
+    #   (2) NO backticked file path -- that is a citation to another file, not a self-reference.
+    #   (3) NO conventions filename on the line -- the markdown-link form is G1's job; without this
+    #       marker those 4 lines are misread as self-references and all become false positives (measured).
+    #   (4) NO conventions filename on the PREVIOUS line -- filename on one line, quoted span on the next
+    #       (a WRAPPED citation) produces 3 more false positives (measured). That is precisely the blind
+    #       spot G3 documents.
+    # The window for (4) is ONE line. A filename two or more lines back is NOT seen, so this part treats
+    # the span as a self-reference and resolves it against the file's OWN anchors -- a self-reference and
+    # a WRAPPED citation are indistinguishable in principle (the filename that would tell them apart sits
+    # on another line; that is exactly the blind spot G3 documents). The outcome therefore hinges on
+    # whether the name happens to exist in that file too: if it does the check passes SILENTLY (measured:
+    # site/docs/concepts.md carries anchors named like the convention's sections), if it does not it fails.
+    # WIDENING THE WINDOW DOES NOT CLOSE THIS -- 1 -> 2 -> 3 all yield 46 candidates / 0 unresolved on the
+    # live tree (measured), and with a window of N a filename N+1 lines back is still missed. The boundary
+    # only moves, so the window stays at 1 and the limit is disclosed instead.
+    # Four undetected classes: (1) no trailing-word marker, (2) a backticked path on the same line, (3)
+    # citations to non-conventions files, (4) the wrapped-citation exception above. ALL are outside the
+    # boundary, not violations, and the convention enumerates them on both sides.
+    $JEOL = Uni 0xC808
+    $srPathRe = '`[A-Za-z0-9_./-]+\.(md|sh|ps1|json|yml)`'
+    $srRe = '"([^"]*)"[ \t]*' + $JEOL
+    }
+    function HasConvBase($s) {
+        if ($null -eq $s) { return $false }
+        foreach ($b in $gConvBases) { if ($s.Contains($b)) { return $true } }
+        return $false
+    }
+    # (M54) THE SCAN IS A FUNCTION -- same reason as CiteMissOf above. The body is unchanged; only
+    # "which files does it walk" moved into a parameter. Extracted spans go to $script:srSpans so the
+    # live call can snapshot them for the positive control below.
+    function SelfMissOf($paths) {
+    $script:srSpans = @()
+    $gSelfMiss = 0
+    foreach ($p in $paths) {
+        $raw = ReadUtf8 $p
+        if ($null -eq $raw) { continue }
+        $own = New-Object 'System.Collections.Generic.HashSet[string]'
+        foreach ($a in (AnchorSetOf $p)) { [void]$own.Add($a) }
+        $prev = ''
+        foreach ($line in ($raw -split "`r?`n")) {
+            $skip = ($line -match $srPathRe) -or (HasConvBase $line) -or (HasConvBase $prev)
+            if (-not $skip) {
+                foreach ($m in [regex]::Matches($line, $srRe)) {
+                    $span = ($m.Groups[1].Value -replace ' ', '')
+                    if ($span -ne '' -and $span -notmatch '[{}]') {
+                        $script:srSpans += $span
+                        # On failure, NAME the file and the span -- a counting assertion goes red without
+                        # saying why (same reason the duplicate-anchor check prints names). The wording
+                        # names BOTH causes on purpose: an unresolved self-reference, or a citation
+                        # wrapped with its filename two or more lines back (see (4) above). A human tells
+                        # them apart by reading that line and the ones before it; either way something
+                        # needs fixing, and naming only one cause would misdiagnose the other.
+                        if (-not $own.Contains($span)) {
+                            $gSelfMiss++
+                            Write-Host ("  -> unresolved self-reference or wrapped citation: " + (RelPath $p) + " -> " + $span)
+                        }
+                    }
+                }
+            }
+            $prev = $line
+        }
+    }
+    return $gSelfMiss
+    }
+    if (PartOn 'G') {
+    $gSelfMiss = SelfMissOf (LivingDocs)
+    $gSelf = $script:srSpans
+    }
+    function SelfRefFixture {
+        $f = Join-Path $sbx 'selfref-fix.md'
+        # BUILD THE LINE FIRST. Inside an array literal, ' str ' + $char + ' str ' does NOT fold into
+        # one string -- PowerShell splits it into THREE elements (measured: the fixture came out as a
+        # 5-line file and the self-reference vanished, so this control returned 0 while the .sh twin
+        # returned 1). [string] on the char is what keeps the two copies meaning the same thing.
+        $line = 'xx "zzz-missing" ' + [string]$JEOL + ' yy'
+        [System.IO.File]::WriteAllLines($f, @('## zzz-real', '', $line),
+            (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    if (PartOn 'G') {
+    $selfSet = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($s in $gSelf) { [void]$selfSet.Add($s) }
+
+    Chk "G4: every self-reference resolves to its own file's anchor" ([string]$gSelfMiss) '0'
+    Chk "G32: self-reference extraction positive control (>0)" $(if ($gSelf.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "G33: control -- bogus name (bogus-section) is not a self-reference" $(if ($selfSet.Contains('bogus-section')) { 'yes' } else { 'no' }) 'no'
+    # (M54) Fixture control -- the SAME scan against a copy whose self-reference names an anchor its
+    # own file does not have. Same grounds and same return as G1's control above.
+    Chk "G34: fixture control -- an unresolved self-reference is actually caught" ([string](SelfMissOf @((SelfRefFixture)))) '1'
+
+    # (G5~G7 - M42) citations pointing OUTSIDE the conventions set. G1 compares only against anchors in
+    # docs/conventions*.md, so a citation naming skills/*/SKILL.md or docs/*.md was seen by NO guard --
+    # four cycles unaddressed (M35-impl follow-up 3), and three such citations were actually stale.
+    # Generalization rationale: the skeleton NAMES the file, so resolve against THAT file's own anchors;
+    # name UNIQUENESS stays scoped to the conventions set (widening it would explode on unrelated docs).
+    # The skeleton particle after the path is REQUIRED -- without it a later quoted span on the same line
+    # is not evidence about that path (measured false positive: a line naming a path and then pointing at
+    # its OWN section, which is G4's business). A target that does not exist in the repo is NOT compared:
+    # Part G asks about anchors, not about path existence.
+    $UI = Uni 0xC758
+    $extPathRe = '`([A-Za-z0-9_./-]+\.md)`'
+    }
+    function ExtCitesOf($path) {
+        $out = @()
+        $raw = ReadUtf8 $path
+        if ($null -eq $raw) { return $out }
+        foreach ($line in ($raw -split "`r?`n")) {
+            foreach ($m in [regex]::Matches($line, $extPathRe)) {
+                $p = $m.Groups[1].Value
+                if (HasConvBase $p) { continue }
+                $rest = $line.Substring($m.Index + $m.Length)
+                if (-not $rest.StartsWith($UI, [System.StringComparison]::Ordinal)) { continue }
+                $mm = [regex]::Match($rest, $srRe)
+                if (-not $mm.Success) { continue }
+                $a = ($mm.Groups[1].Value -replace ' ', '')
+                if ($a -ne '' -and $a -notmatch '[{}]') { $out += ($p + "`t" + $a) }
+            }
+        }
+        return $out
+    }
+    function ExtMissOf($records) {
+        $miss = @()
+        foreach ($rec in $records) {
+            $parts = $rec -split "`t", 2
+            if ($parts.Count -lt 2) { continue }
+            $p = $parts[0]; $a = $parts[1]
+            if ($a -eq '') { continue }
+            $tgt = Join-Path $ROOT ($p.Replace('/', [string][char]92))
+            if (-not (Test-Path $tgt)) { continue }
+            $set = New-Object 'System.Collections.Generic.HashSet[string]'
+            foreach ($x in (AnchorSetOf $tgt)) { [void]$set.Add($x) }
+            if (-not $set.Contains($a)) { $miss += ($p + ' -> ' + $a) }
+        }
+        return $miss
+    }
+    if (PartOn 'G') {
+    $gExtCites = @()
+    foreach ($p in (LivingDocs)) { $gExtCites += @(ExtCitesOf $p) }
+    $gExtMiss = @(ExtMissOf $gExtCites)
+    foreach ($m in $gExtMiss) { Write-Host ("  -> broken cross-doc citation: " + $m) }
+    Chk "G5: every cross-doc citation resolves to a real anchor" ([string]$gExtMiss.Count) '0'
+    Chk "G6: cross-doc citation extraction positive control (>0)" $(if ($gExtCites.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # Injection control -- a citation naming a real file but an anchor it does not carry must be caught.
+    $extFx = Join-Path $sbx 'extfx.md'
+    [System.IO.File]::WriteAllText($extFx, ('- `skills/impl/SKILL.md`' + $UI + ' "bogus-cross-anchor" ' + $JEOL + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+    Chk "G7: control -- injected broken cross-doc citation is caught" ([string](@(ExtMissOf (@(ExtCitesOf $extFx)))).Count) '1'
+
+    # (G8 -- M44) Sub-items of a section are cited BY NAME, never by ordinal. Everything else in Part G
+    # compares only as far as the SECTION ANCHOR, so a sub-index was seen by no case at all. M43 review
+    # issue 5 is that class: the ledger cited an ordinal (U+2477) inside a named enumeration while that
+    # ordinal was an item M40 had closed and removed -- produced by an edit that moved the item without
+    # fixing its downstream pointers.
+    # Single source: the cross-reference integrity section of docs/conventions.md.
+    #   Rule: on a citation line (backticked `.md` path + a quote), an ordinal AFTER the section
+    #         marker (U+C808) = violation.
+    #   Set spec: U+2460..U+2487 (40 chars). BOTH runners assert the set themselves -- this copy asserts
+    #   40 elements, run.sh asserts 40 lines / 160 bytes. Both BUILD the chars from codepoints (no literal),
+    #   so the sets agree by construction; without the self-assertion one side could silently narrow.
+    #   Why a PROHIBITION and not an extraction: live sites are 0, so an extraction-based case would trip
+    #   the "extraction 0 = FAIL" rule and redden a clean tree. The injected fixture is what keeps this
+    #   prohibition from being vacuous.
+    #   Boundaries (the convention states the same three): an ordinal BEFORE the section marker is out of scope
+    #   (1 live line is that shape and is legitimate) / whether a name-cited item really EXISTS is not
+    #   compared (5 live sites, 0 observed defects) / a citation split across lines is missed.
+    $ORD_SET = @(0x2460..0x2487 | ForEach-Object { [char]$_ })
+    }
+    function CiteLinesOf($path) {   # citation lines of one doc: backticked .md path AND a quote
+        if (-not (Test-Path -LiteralPath $path)) { return @() }
+        return @([System.IO.File]::ReadAllLines($path) |
+            Where-Object { $_ -match '`[A-Za-z0-9_./-]*\.md`' -and $_.Contains('"') })
+    }
+    function OrdinalAfterJeol($lines) {   # lines carrying an ordinal AFTER the section marker (U+C808)
+        $hits = @()
+        foreach ($l in $lines) {
+            $j = $l.IndexOf($JEOL)          # ordinal comparison (String.IndexOf(String) is ordinal)
+            if ($j -lt 0) { continue }
+            foreach ($c in $ORD_SET) {
+                $k = $l.IndexOf($c)
+                if ($k -gt $j) { $hits += $l; break }
+            }
+        }
+        return $hits
+    }
+    if (PartOn 'G') {
+    $g8Cites = @()
+    foreach ($p in (LivingDocs)) { $g8Cites += @(CiteLinesOf $p) }
+    $g8Hits = @(OrdinalAfterJeol $g8Cites)
+    foreach ($h in $g8Hits) { Write-Host ("  -> ordinal sub-index citation: " + $h) }
+    Chk "G8a: ordinal set is 40 chars (U+2460-U+2487)" ([string]$ORD_SET.Count) '40'
+    # Extraction positive control -- a PROHIBITION is still vacuous if there is nothing to scan. If the
+    # CiteLinesOf pattern or the LivingDocs range breaks, G8b passes as 0 == 0. Assert the corpus is
+    # non-empty (checklist item 1 -- same shape as the G2/G6/G4 extraction controls). Added by the M44 review.
+    Chk "G35: citation-line extraction positive control (>0)" $(if ($g8Cites.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "G36: no ordinal sub-index citation after the section marker" ([string]$g8Hits.Count) '0'
+    # Fixture control -- inject one violation in M43 issue 5's actual shape (U+2477) and it must be caught.
+    $g8Fx = @('- `docs/conventions.md`' + $UI + ' "bogus-anchor" ' + $JEOL + ' ' + [char]0x2477)
+    Chk "G37: control -- injected ordinal sub-index citation is caught" ([string](@(OrdinalAfterJeol $g8Fx)).Count) '1'
+    }
+
+    # (G9-G27, M91 rf-116) CROSS-REFERENCE INTEGRITY JUDGMENT NAMES AND THEIR CASES -- the "enforcement" item of the conventions section on
+    # cross-reference integrity is no longer prose but xr-asks: / xr-ask-cases: / xr-ask-from:. Declaration hygiene (G9-G16) comes from
+    # registry rows, the mapping (G18-G21) calls the Ak* bodies with Part G. Part G is the axis of that one section, so there is no skip
+    # declaration. This block used to sit after Part P because it had to follow the Ak* definitions; M93 hoisted Ak* into the shared-helper block at the top and moved it into the Part G block.
+    # The controls (G22-G27) ask, as a DELTA, whether a verdict moves by one on a conventions copy / synthetic runner (control-reads-delta).
+    $XRA_KEY = 'xr-asks:'
+    $XRC_KEY = 'xr-ask-cases:'
+    $XRF_KEY = 'xr-ask-from:'
+    # addname / droppair / nocase / unknown as in CcFixture.
+    function XrFixture([string]$mode) {
+        $f = Join-Path $sbx ('conv-xr-' + $mode + '.md')
+        $bt = [string][char]0x60
+        $ka = '- ' + $bt + $XRA_KEY + $bt; $kc = '- ' + $bt + $XRC_KEY + $bt
+        $ps = @(AkPairs $XRC_KEY); $cnt = @{}
+        foreach ($x in $ps) { $k = FlPairMark $x; if ($cnt.ContainsKey($k)) { $cnt[$k]++ } else { $cnt[$k] = 1 } }
+        $ids = OrdSet @(AkCaseIds 'G' $RUN_SH)
+        $p1 = ' ' + (@($ps | Where-Object { $cnt[(FlPairMark $_)] -eq 1 -and $ids.Contains((FlPairMark $_)) }) | Select-Object -First 1); $n1 = @(DnNames $XRA_KEY) | Select-Object -First 1
+        $ws = [char[]]@([char]0x20, [char]0x09)
+        $out = foreach ($l in [System.IO.File]::ReadAllLines($CONV)) {
+            $t = $l.TrimStart($ws)
+            if ($mode -eq 'addname' -and $t.StartsWith($ka, [System.StringComparison]::Ordinal)) { $l = $l + ' xr-zz-add' }
+            if ($t.StartsWith($kc, [System.StringComparison]::Ordinal)) {
+                if ($mode -eq 'droppair') { $s = $l + ' '; $i = $s.IndexOf($p1 + ' ', [System.StringComparison]::Ordinal); if ($i -ge 0) { $s = $s.Substring(0, $i) + $s.Substring($i + $p1.Length) }; $l = $s.Substring(0, $s.Length - 1) }
+                if ($mode -eq 'nocase') { $l = $l + ' ' + $n1 + '=G999' }
+                if ($mode -eq 'unknown') { $l = $l + ' xr-zz-unknown=G3' }
+            }
+            $l
+        }
+        [System.IO.File]::WriteAllLines($f, [string[]]@($out), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    # in-sh / in-ps1: one in-range unmapped suffixed case / tail: a digit-tail ID, a comment line, another part's case and a plain ID.
+    function XrRunnerFixture([string]$mode) {
+        $f = Join-Path $sbx ('runner-xr-' + $mode + '.txt')
+        $q = [string][char]0x22
+        $ln = switch ($mode) {
+            'in-sh' { @('chk ' + $q + 'G7b: suffixed' + $q) }
+            'in-ps1' { @('    Chk ' + $q + 'G7b: suffixed' + $q) }
+            'tail' { @(('chk ' + $q + 'G8b0: tail' + $q), ('# chk ' + $q + 'G97b1: comment' + $q), ('chk ' + $q + 'P8b0: other' + $q), ('    Chk ' + $q + 'G96: plain' + $q)) }
+        }
+        [System.IO.File]::WriteAllLines($f, [string[]]@($ln), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    if (PartOn 'G') {
+    Chk "G17: cross-reference judgment name / mapping / start-case extraction positive control" $(if (@(DnNames $XRA_KEY).Count -ge 1 -and @(AkPairs $XRC_KEY).Count -ge 1 -and (AkFrom $XRF_KEY 'G') -ne '') { 'ok' } else { 'no' }) 'ok'
+    Chk "G18: main check - every cross-reference judgment name has a mapped case" (AkAskNoCase $XRA_KEY $XRC_KEY) '0'
+    Chk "G19: main check - every name in the mapping is in xr-asks" (AkAskUnknown $XRA_KEY $XRC_KEY) '0'
+    Chk "G20: main check - every mapped case exists as a case in both runners" (AkCaseMissing $XRC_KEY 'G') '0'
+    Chk "G21: main check - every case of this axis (xr-ask-from and above) is in the mapping" (AkCaseUnmapped $XRC_KEY $XRF_KEY 'G') '0'
+    Chk "G22: control - a conventions copy with one more judgment name adds one name without a case" ([string]([int](AkAskNoCase $XRA_KEY $XRC_KEY (XrFixture 'addname')) - [int](AkAskNoCase $XRA_KEY $XRC_KEY))) '1'
+    Chk "G23: control - a conventions copy with the first pair whose case appears once dropped adds one unmapped case" ([string]([int](AkCaseUnmapped $XRC_KEY $XRF_KEY 'G' (XrFixture 'droppair')) - [int](AkCaseUnmapped $XRC_KEY $XRF_KEY 'G'))) '1'
+    Chk "G24: control - a conventions copy with a pair naming a missing case adds one missing case" ([string]([int](AkCaseMissing $XRC_KEY 'G' (XrFixture 'nocase')) - [int](AkCaseMissing $XRC_KEY 'G'))) '1'
+    Chk "G25: control - a conventions copy with a pair naming an undeclared judgment adds one unknown name" ([string]([int](AkAskUnknown $XRA_KEY $XRC_KEY (XrFixture 'unknown')) - [int](AkAskUnknown $XRA_KEY $XRC_KEY))) '1'
+    Chk "G26: control - two synthetic runners holding one in-range unmapped suffixed case give one unmapped" (AkCaseUnmapped $XRC_KEY $XRF_KEY 'G' '' (XrRunnerFixture 'in-sh') (XrRunnerFixture 'in-ps1')) '1'
+    Chk "G27: control - the case-line reader takes a digit-tail ID (G8b0 form) and skips comment lines and other parts' cases" ((@(AkCaseIds 'G' (XrRunnerFixture 'tail')) | ForEach-Object { $_ + ',' }) -join '') 'G8b0,G96,'
+    }
+
+    # === Part H -- execution-environment axis declaration consistency (M38-T06) =====
+    # The convention NAMES each axis of the execution environment (single source: the
+    # execution-environment axis section of docs/conventions.md) and records what enforces it.
+    # What this part bites is EXACTLY five things: (1) each declared axis name really occurs in a
+    # ROW of the convention's table, (2) the axis-name SET matches the one declared in
+    # tests/discover/README.md (same set-equality technique as Part C), (3) each `job:<name>` token in
+    # the table really exists as a job key in .github/workflows/tests.yml, (4) that token sits in a
+    # row carrying a DECLARED axis (an orphan token in an undeclared row FAILs), and (5) conversely,
+    # every job that really EXISTS in the workflow is either REGISTERED by some axis row's `job:`
+    # token or DECLARED EXEMPT (coverage -- registration is not opt-in).
+    # (M39) The mapping's single source moved from the `env-axis-ci-jobs:` line to the table's
+    # `job:<name>` tokens -- two declaration sites became one. That changed (4)'s meaning: it used to
+    # ask "is the mapped job also in the table row" which, now that the table IS the source, would be
+    # a TAUTOLOGY (a vacuous pass); it now asks "is the table's job token in a DECLARED axis row".
+    # It does not claim more. THREE things are not asked by any machine: (a) whether an enforcement
+    # cell that names NO CI job (the runner's own probe, "only a real push" + the `pr` finalize CI
+    # lookup) is still true; (b) whether the REST of a job-naming cell's prose ("3 OS", "matrix")
+    # matches reality; (c) PROSE in an enforcement cell claiming a job that does not exist (below).
+    # That layer is the human review's; the convention's "what the machine does not ask" notice is
+    # the single source.
+    # (M40) The former fourth item -- an UNDECLARED table row -- is closed. The `axis:` notation
+    # (H14..H16) plus DATA ROW COUNT == NOTATION COUNT (H17) lets axes be counted from the TABLE side
+    # too, so the comparison is bidirectional. Before deleting the item, three attacks were measured
+    # in both shells: an undeclared row WITH a notation (H15 fails), a pure-prose row with NO notation
+    # (H17b fails), and a declared axis whose notation is removed (H2/H15/H17b fail). Shrinking the
+    # notice on the strength of "the notation exists" alone would itself be the `vacuous-pass` class.
+    # What `job:` closed AND did not close: enforcement cells used to be prose, so a NON-EXISTENT name
+    # written as if it were a job never reached the check (no machine can tell whether an arbitrary
+    # backticked token is a job reference -- the M38 review measured this with `nowhere`). The `job:`
+    # prefix removes that ambiguity for references it MARKS, and (3) then bites their existence.
+    # PROSE claims survive untouched -- measured by the M39 review in both shells: keeping the token
+    # and appending "CI `nowhere` also enforces" stays green, and replacing a token-less axis cell with
+    # "CI `nowhere` enforces" stays green. The DEFINITION of what counts as a job reference changed;
+    # the misleading surface did not disappear. That is why (c) stays in the notice.
+    # The M38 review measured the overclaim TWICE: before (3)/(4), deleting the `posix` job outright
+    # and leaving the table untouched still scored 90/0 green; before (5), a DECLARED but unmapped
+    # axis naming a real job escaped the check. That is why (3)(4)(5) exist.
+    # Axis and job names are ASCII co-terms, so this is data-driven like Part F's role anchors --
+    # no Korean literal in the source.
+    function EnvAxes($file) {
+        $raw = ReadUtf8 $file
+        if ($null -eq $raw) { return '' }
+        $line = ($raw -split "`r?`n" | Where-Object { $_.Contains('env-axes:') } | Select-Object -First 1)
+        if ($null -eq $line) { return '' }
+        $tail = $line.Substring($line.IndexOf('env-axes:') + 9)
+        $cut = $tail.IndexOf('-->')
+        if ($cut -ge 0) { $tail = $tail.Substring(0, $cut) }
+        $names = @($tail -split '\s+' | Where-Object { $_ -match '^[a-z][a-z-]*$' })
+        # (M42-T03) `Sort-Object -CaseSensitive` is CULTURE-aware, not ordinal -- the same thing M41
+        # found in Part C. The .sh twin here is `LC_ALL=C sort` (no `-u`), so this is the
+        # duplicate-preserving ordinal helper. This output is string-compared by H3/H15, so the sort
+        # ORDER is part of the verdict.
+        return ((OrdinalSort $names) -join ' ')
+    }
+    if (PartOn 'H') {
+    $convAxes = EnvAxes $CONV
+    $readAxes = EnvAxes $DISC_README
+    $nAxes = @($convAxes -split ' ' | Where-Object { $_ -ne '' }).Count
+    }
+
+    # (H14..H16 / M40) `axis:<name>` -- the RESOLVABLE notation for axis names. Before it, every check
+    # started from the `env-axes:` declaration, so a table row NOT in the declaration escaped all of
+    # them (M38 measured it: an undeclared `ghost-axis` row naming a real job stayed green). Counting
+    # axes from the TABLE side too makes the comparison BIDIRECTIONAL -- declared-but-unwritten and
+    # written-but-undeclared both FAIL. Same shape as `job:`, so the extractor is the same shape too.
+    function TableAxisTokens($file) {
+        $raw = ReadUtf8 $file
+        if ($null -eq $raw) { return '' }
+        $rows = @(($raw -split "`r?`n") | Where-Object { $_.StartsWith('|', [System.StringComparison]::Ordinal) })
+        $tok = @()
+        foreach ($row in $rows) {
+            foreach ($m in [regex]::Matches($row, 'axis:[a-z][a-z-]*')) { $tok += $m.Value.Substring(5) }
+        }
+        return ((OrdinalSortUnique $tok) -join ' ')   # .sh twin: `LC_ALL=C sort -u` (M42-T03)
+    }
+    if (PartOn 'H') {
+    $convAxisTokens = TableAxisTokens $CONV
+    $nAxisTok = @($convAxisTokens -split ' ' | Where-Object { $_ -ne '' }).Count
+    }
+
+    # (H17) Set equality alone cannot see a row carrying NO notation -- it contributes nothing to the
+    # set and passes quietly (that is exactly the "prose inside the axis table" seat). So the DATA ROW
+    # COUNT is compared with the NOTATION COUNT. The table's range is anchored on the `env-axes:`
+    # declaration line (the first markdown table after it): anchoring on the Korean header would break
+    # this file's ASCII-only source discipline, so an ASCII declaration line is the anchor instead.
+    function AxisTableDataRows($file) {
+        $raw = ReadUtf8 $file
+        if ($null -eq $raw) { return @() }
+        $out = @(); $f = 0
+        foreach ($line in ($raw -split "`r?`n")) {
+            $isRow = $line.StartsWith('|', [System.StringComparison]::Ordinal)
+            if ($f -eq 0) { if ($line.Contains('env-axes:')) { $f = 1 }; continue }
+            if ($f -eq 1) { if ($isRow) { $f = 2 }; continue }
+            if ($f -eq 2) { if ($isRow) { $f = 3 }; continue }
+            if ($f -eq 3) { if ($isRow) { $out += $line; continue } else { break } }
+        }
+        return $out
+    }
+    if (PartOn 'H') {
+    $axisDataRows = @(AxisTableDataRows $CONV)
+    $nAxisRows = $axisDataRows.Count
+    $nAxisRowTok = @($axisDataRows | Where-Object { $_ -match 'axis:[a-z]' }).Count
+
+    # (H2) every declared axis must occur in a TABLE ROW (line starting with '|') of the convention --
+    # declaring an axis without wiring it into the table is the "claims enforcement it does not have"
+    # class this milestone exists to remove.
+    $axisRowMiss = 0
+    $convLines = @((ReadUtf8 $CONV) -split "`r?`n")
+    foreach ($a in @($convAxes -split ' ' | Where-Object { $_ -ne '' })) {
+        $needle = '`axis:' + $a + '`'
+        $hit = @($convLines | Where-Object { $_.StartsWith('|', [System.StringComparison]::Ordinal) -and $_.Contains($needle) }).Count
+        if ($hit -eq 0) { $axisRowMiss++ }
+    }
+    }
+    function HasAxis($set, $name) {
+        if ((" $set " ).Contains(" $name ")) { return 'yes' } else { return 'no' }
+    }
+
+    # (H6..H9) Rows whose enforcement cell points at a CI JOB are pinned down to the job's existence.
+    # (M39) The mapping's single source is the TABLE ROW's `job:<name>` tokens (no separate line); the
+    # job NAMES are DISCOVERED from the workflow's `jobs:` block (no hardcoded roster). H8 checks the
+    # token sits in a DECLARED axis row, closing the opposite drift (hiding a token in an undeclared row).
+    if (PartOn 'H') {
+    $axisRows = @($convLines | Where-Object { $_.StartsWith('|', [System.StringComparison]::Ordinal) })
+    }
+    function RowJobTokens($row) {
+        return @([regex]::Matches($row, 'job:[a-z][a-z0-9-]*') | ForEach-Object { $_.Value.Substring(4) })
+    }
+    function RowAxisNames($row, $axes) {
+        return @($axes | Where-Object { $row.Contains('`axis:' + $_ + '`') })
+    }
+    function EnvAxisJobs($rows, $axes) {
+        $pairs = @()
+        foreach ($row in $rows) {
+            if (-not $row.Contains('job:')) { continue }
+            foreach ($j in (RowJobTokens $row)) {
+                foreach ($a in (RowAxisNames $row $axes)) { $pairs += ($a + '=' + $j) }
+            }
+        }
+        return ((OrdinalSortUnique $pairs) -join ' ')   # .sh twin: `LC_ALL=C sort -u` (M42-T03)
+    }
+    function EnvExemptJobs($file) {
+        # jobs deliberately declared NOT to be environment axes (e.g. the repo-consistency `pairing`
+        # job). Exemption is a DECLARATION, not silence -- adding a CI job forces the axis/exempt call.
+        $raw = ReadUtf8 $file
+        if ($null -eq $raw) { return '' }
+        $line = ($raw -split "`r?`n" | Where-Object { $_.Contains('env-axis-exempt-jobs:') } | Select-Object -First 1)
+        if ($null -eq $line) { return '' }
+        $tail = $line.Substring($line.IndexOf('env-axis-exempt-jobs:') + 21)
+        $cut = $tail.IndexOf('-->')
+        if ($cut -ge 0) { $tail = $tail.Substring(0, $cut) }
+        $names = @($tail -split '\s+' | Where-Object { $_ -match '^[a-z][a-z0-9-]*$' })
+        return ((OrdinalSort $names) -join ' ')   # .sh twin: `LC_ALL=C sort` (no -u) -- M42-T03
+    }
+    function CiJobNames($file) {
+        # job keys = 2-space-indented keys INSIDE the `jobs:` block (so the keys under `on:` -- push,
+        # pull_request, workflow_dispatch -- are not mistaken for jobs).
+        $raw = ReadUtf8 $file
+        if ($null -eq $raw) { return '' }
+        $out = @(); $inJobs = $false
+        foreach ($line in ($raw -split "`r?`n")) {
+            if ($line -match '^jobs:') { $inJobs = $true; continue }
+            if ($inJobs -and $line -match '^[A-Za-z]') { $inJobs = $false }
+            if ($inJobs -and $line -match '^  ([a-z][a-z0-9-]*):[ \t]*$') { $out += $matches[1] }
+        }
+        return ((OrdinalSort $out) -join ' ')   # .sh twin: `LC_ALL=C sort` (no -u) -- M42-T03
+    }
+    if (PartOn 'H') {
+    $WF = Join-Path $ROOT '.github\workflows\tests.yml'
+    $axesList = @($convAxes -split ' ' | Where-Object { $_ -ne '' })
+    $axisJobs = EnvAxisJobs $axisRows $axesList
+    $ciJobs = CiJobNames $WF
+    $exemptJobs = EnvExemptJobs $CONV
+    $nAxisJobs = @($axisJobs -split ' ' | Where-Object { $_ -ne '' }).Count
+
+    $axisJobMiss = 0
+    foreach ($pair in @($axisJobs -split ' ' | Where-Object { $_ -ne '' })) {
+        $j = $pair.Substring($pair.IndexOf('=') + 1)
+        if ((HasAxis $ciJobs $j) -ne 'yes') { $axisJobMiss++ }
+    }
+
+    # (H8) orphan `job:` tokens -- a token written in a row that carries no DECLARED axis.
+    $jobTokenOrphan = 0
+    foreach ($row in $axisRows) {
+        if (-not $row.Contains('job:')) { continue }
+        if ((RowAxisNames $row $axesList).Count -eq 0) { $jobTokenOrphan++ }
+    }
+
+    # (H12) declared axes carrying NO `job:` token (non-CI enforcement / unenforced) -- absence of a
+    # token is the honest notation for "no CI job enforces this", so that path must stay alive.
+    $noJobAxes = 0
+    foreach ($a in $axesList) {
+        if (-not (" $axisJobs ").Contains(" $a=")) { $noJobAxes++ }
+    }
+
+    # (H13) a stale exemption (job deleted or renamed while the declaration lingers) must FAIL.
+    $exemptJobMiss = 0
+    foreach ($j in @($exemptJobs -split ' ' | Where-Object { $_ -ne '' })) {
+        if ((HasAxis $ciJobs $j) -ne 'yes') { $exemptJobMiss++ }
+    }
+
+    Chk "H1: axis-name extraction positive control (>0)" $(if ($nAxes -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "H2: every declared axis has a convention table row" ([string]$axisRowMiss) '0'
+    # (M42-T03) ORDINAL equality, like Part C's SetsEqual -- culture `-eq` would call two axis-name sets
+    # equal that the .sh twin's `[ "$a" = "$b" ]` calls different. The `-ne ''` guard (both-empty must
+    # be 'no') is unchanged.
+    Chk "H3: axis-name sets equal (conventions vs discover README)" $(if ($convAxes -ne '' -and [string]::Equals($convAxes, $readAxes, [System.StringComparison]::Ordinal)) { 'yes' } else { 'no' }) 'yes'
+    Chk "H4: control -- bogus axis name (bogus-axis) absent in conventions" (HasAxis $convAxes 'bogus-axis') 'no'
+    Chk "H5: control -- bogus axis name (bogus-axis) absent in README" (HasAxis $readAxes 'bogus-axis') 'no'
+    # (H10/H11) COVERAGE -- registration is not opt-in. Every job DISCOVERED in the workflow must be
+    # registered by some axis row's `job:` token, or declared exempt; otherwise simply staying out of
+    # the table buys an exemption from H7/H8 (the side door the M38 review opened by measurement:
+    # an unmapped axis naming a nonexistent job still scored 94/0). Nothing is hardcoded -- both the
+    # job names and the axis names are discovered.
+    $coverHits = 0
+    $coverMiss = 0
+    foreach ($j in @($ciJobs -split ' ' | Where-Object { $_ -ne '' })) {
+        if ((" $axisJobs ").Contains("=$j ")) { $coverHits++; continue }
+        if ((" $exemptJobs ").Contains(" $j ")) { continue }
+        $coverMiss++
+    }
+
+    Chk "H6: table job: token extraction positive control (>0)" $(if ($nAxisJobs -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "H7: every job named by the table exists in the workflow" ([string]$axisJobMiss) '0'
+    Chk "H8: every job: token sits in a declared axis row (orphans 0)" ([string]$jobTokenOrphan) '0'
+    Chk "H9: control -- bogus job name (bogus-job) absent in workflow" (HasAxis $ciJobs 'bogus-job') 'no'
+    Chk "H10: coverage scan positive control (>0)" $(if ($coverHits -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "H11: every workflow job is registered by an axis row or declared exempt" ([string]$coverMiss) '0'
+    Chk "H12: declared axes without a job: token exist, positive control (>0)" $(if ($noJobAxes -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "H13: every exempt-declared job exists in the workflow" ([string]$exemptJobMiss) '0'
+    # (H14..H16 / M40) `axis:` notation -- extraction positive control + BIDIRECTIONAL set equality.
+    # One direction alone is half the job: declared-but-missing-row is already H2's, but a token that
+    # exists WITHOUT a declaration (an undeclared row) is caught here for the first time.
+    Chk "H14: axis: notation extraction positive control (>0)" $(if ($nAxisTok -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "H15: axis: token set == env-axes declaration set" $(if ($convAxisTokens -ne '' -and [string]::Equals($convAxisTokens, $convAxes, [System.StringComparison]::Ordinal)) { 'yes' } else { 'no' }) 'yes'
+    Chk "H16: control -- bogus axis notation (bogus-axis) absent in table" (HasAxis $convAxisTokens 'bogus-axis') 'no'
+    # (H17) A data row without a notation is prose inside the table. Row count must equal notation
+    # count; the row-count positive control keeps 0==0 from passing vacuously.
+    Chk "H17a: axis table data-row extraction positive control (>0)" $(if ($nAxisRows -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "H18: axis table data-row count == axis: notation count" $(if ($nAxisRows -eq $nAxisRowTok) { 'yes' } else { 'no' }) 'yes'
+    }
+
+    # === Part I -- axis state-claim consistency (M42) ==============================
+    # Bites the place where the TABLE says an axis is enforced and PROSE says the opposite. Counts are
+    # bitten by B1/F1, rosters by C-3/C-4, citations by Part G -- but "two paragraphs assert opposite
+    # facts" had no mechanism, and M41 produced THREE such defects in one cycle (two of them of the
+    # axis-name class, both missed by two reviews). Single source for the rule, markers and boundary is
+    # the axis state-claim consistency section of docs/conventions.md. In short:
+    #   POS = the axis table's `axis:` token set (axes whose enforcement cell is alive) -- Part H's set.
+    #   NEG = a live doc's BULLET BLOCK carrying both an axis name (inherited from the block head) and a
+    #         `state-neg:` marker. Two exclusions: a QUOTED marker (that is the rule being stated, not a
+    #         claim) and any line carrying a `state-past:` marker (history narration, not today's state).
+    # The markers are DECLARED BY THE CONVENTION and only read here -- a data-driven check with no Korean
+    # literal in this script, so the byte>127=0 rule holds (same shape as F2/G4/site-includes).
+    # The SHAPE of a declaration line is the discriminator: a bullet, then IMMEDIATELY the key wrapped
+    # in backticks (- `state-neg:` ...). A prose mention (- **rule**: ... `state-neg:` ...) does not put
+    # the key at the head of the line. Those two lines are exactly what the convention calls the SOLE
+    # declaration site, and both the extraction and the uniqueness check (I7..I9) read the SAME line.
+    # Blank class is [ \t] -- space and tab, nothing else. The .sh twin reaches the same width by NOT
+    # using a character class at all: its decl_lines is an awk LITERAL comparison (walk spaces/tabs, then
+    # '-', then spaces/tabs, then the key). Two earlier revisions of this comment were wrong about that
+    # twin -- first claiming a bare [[:blank:]] matched this "exactly" (it does not: under a UTF-8 locale
+    # glibc's [[:blank:]] also eats U+1680 / U+2003 / U+205F / U+3000, so the same tree split 136/0 here
+    # vs 135/1 there under C.UTF-8, the Ubuntu CI default), then claiming an LC_ALL=C pin on that grep
+    # (the grep is gone). Describe the twin as it is, or do not describe it. (\s / [[:space:]] would
+    # differ again, in both directions.)
+    # `-cmatch`, NOT `-match`: PowerShell's `-match` is CASE-INSENSITIVE by default, so a case variant
+    # of the key (`- ``State-Neg:`` ...`) counted as a declaration line here while the .sh twin's
+    # case-sensitive grep did not -- same tree, 132/0 in sh vs 131/1 here (M42 review issue 4). Every
+    # other comparison on this key is ordinal, so the case-sensitive answer is the correct one.
+    if (PartOn 'I') {
+    $negMarks = @(MarkersOf 'state-neg:')
+    $pastMarks = @(MarkersOf 'state-past:')
+    }
+    # POS set = ONLY axes whose enforcement cell is alive. Using every `axis:` token would turn the
+    # convention's own MANDATED honest notation (an axis with no enforcement is written with a
+    # state-neg marker) into a contradiction, so that axis's own table row would FAIL (measured in
+    # review). Keep the runner exactly as wide as the convention describes.
+    function LiveAxes() {
+        $out = @()
+        $raw = ReadUtf8 $CONV
+        if ($null -eq $raw) { return $out }
+        foreach ($line in ($raw -split "`r?`n")) {
+            if (-not $line.StartsWith('|', [System.StringComparison]::Ordinal)) { continue }
+            $cols = $line -split '\|'
+            if ($cols.Count -lt 5) { continue }
+            $m = [regex]::Match($cols[1], 'axis:([a-z][a-z-]*)')
+            if (-not $m.Success) { continue }
+            $cell = $cols[3] -replace '[ \t\r]', ''
+            if ($cell -eq '') { continue }
+            $dead = $false
+            foreach ($n in $negMarks) { if ($n -ne '' -and $cell.Contains($n)) { $dead = $true; break } }
+            if (-not $dead) { $out += $m.Groups[1].Value }
+        }
+        return @(OrdinalSortUnique $out)   # sh twin is `LC_ALL=C sort -u`; culture sort would split them
+    }
+    if (PartOn 'I') {
+    $axNames = @(LiveAxes)
+    }
+    function ContraOf($path) {
+        $out = @()
+        $raw = ReadUtf8 $path
+        if ($null -eq $raw) { return $out }
+        $cur = New-Object 'System.Collections.Generic.HashSet[string]'
+        $n = 0
+        foreach ($line in ($raw -split "`r?`n")) {
+            $n++
+            $flat = $line -replace '[ \t\r]', ''
+            if ($line.StartsWith('- ', [System.StringComparison]::Ordinal) -or
+                $line.StartsWith('#', [System.StringComparison]::Ordinal) -or
+                $line.StartsWith('|', [System.StringComparison]::Ordinal)) { $cur.Clear() }
+            foreach ($a in $axNames) { if ($a -ne '' -and $flat.Contains($a)) { [void]$cur.Add($a) } }
+            if ($flat.Contains('state-neg:') -or $flat.Contains('state-past:')) { continue }
+            $hit = ''
+            foreach ($m in $negMarks) { if ($m -ne '' -and $flat.Contains($m)) { $hit = $m; break } }
+            if ($hit -eq '') { continue }
+            if ($flat.Contains('"' + $hit + '"')) { continue }
+            $past = $false
+            foreach ($m in $pastMarks) { if ($m -ne '' -and $flat.Contains($m)) { $past = $true; break } }
+            if ($past) { continue }
+            foreach ($a in $cur) { $out += ($a + ':' + $n) }
+        }
+        return $out
+    }
+    # (I1) if the markers cannot be read every assertion below passes 0==0 VACUOUSLY -- bite extraction first.
+    if (PartOn 'I') {
+    Chk "I1: state-neg marker extraction positive control (>0)" $(if ($negMarks.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # (I1b) the POS set needs its own positive control: if the table layout shifts and the enforcement
+    # cell stops being extracted, POS goes empty and I2 passes VACUOUSLY (0==0). H14 bites the `axis:`
+    # token set, not this derived subset.
+    Chk "I20: live-enforcement axis extraction positive control (>0)" $(if ($axNames.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    # (I2) the real check. On failure NAME the axis, file and line -- a count alone does not say where.
+    $contra = @()
+    foreach ($p in (LivingDocs)) {
+        foreach ($h in (ContraOf $p)) { $contra += $h; Write-Host ("  -> axis-state contradiction: " + $h + " (" + (Split-Path $p -Leaf) + ")") }
+    }
+    Chk "I2: no axis state-claim contradiction in live docs" ([string]$contra.Count) '0'
+    # (I3~I6) controls -- an injected contradiction is caught; the three deliberately excluded shapes are not.
+    $iAx = if ($axNames.Count -gt 0) { $axNames[0] } else { '' }
+    $iNeg = if ($negMarks.Count -gt 0) { $negMarks[0] } else { '' }
+    $iPast = if ($pastMarks.Count -gt 0) { $pastMarks[0] } else { '' }
+    $noBom = New-Object System.Text.UTF8Encoding($false)
+    $fxIn = Join-Path $sbx 'contra-inject.md'
+    $fxQt = Join-Path $sbx 'contra-quoted.md'
+    $fxPa = Join-Path $sbx 'contra-past.md'
+    $fxNt = Join-Path $sbx 'contra-notarget.md'
+    [System.IO.File]::WriteAllText($fxIn, ('- **`' + $iAx + '` axis**: ' + $iNeg + "`n"), $noBom)
+    [System.IO.File]::WriteAllText($fxQt, ('- **`' + $iAx + '` axis**: "' + $iNeg + '"' + "`n"), $noBom)
+    [System.IO.File]::WriteAllText($fxPa, ('- **`' + $iAx + '` axis**: ' + $iNeg + $iPast + "`n"), $noBom)
+    [System.IO.File]::WriteAllText($fxNt, ('- no axis name here: ' + $iNeg + "`n"), $noBom)
+    Chk "I3: control -- injected axis state contradiction is caught" ([string](@(ContraOf $fxIn)).Count) '1'
+    Chk "I4: control -- a QUOTED marker (the rule itself) is not a claim" ([string](@(ContraOf $fxQt)).Count) '0'
+    Chk "I5: control -- history narration (past marker) is not a claim" ([string](@(ContraOf $fxPa)).Count) '0'
+    Chk "I6: control -- a marker with no target axis is not a claim" ([string](@(ContraOf $fxNt)).Count) '0'
+
+    # (I7~I9) DECLARATION-SITE UNIQUENESS -- the convention says "the two lines below are the sole
+    # declaration site of the markers", but until now both runners simply took the FIRST line where the
+    # key appeared, so nothing bit that sentence (M42 review minor 8). Zero lines means the declaration
+    # is gone (extraction goes empty); two or more means the site has SPLIT and which line wins depends
+    # on the runner implementation -- both FAIL. These bite WHICH LINE is read; I10..I13 below bite HOW
+    # THAT LINE IS SPLIT. An earlier revision claimed here that "which edit is loud and which is silent
+    # stops being luck" -- that was FALSE (a trailing tab and an NBSP were still silent, M42 review
+    # blocker 1). What holds now: any character in the separator set below makes BOTH shells red. The
+    # marker alphabet itself (which characters may form a marker) is still NOT bitten.
+    # control -- a prose mention is not a declaration site. The fixture is ASCII-only and the .sh twin
+    # writes the very same three lines, so it is immediately visible whether both shells count the same.
+    $fxDc = Join-Path $sbx 'contra-decl.md'
+    [System.IO.File]::WriteAllText($fxDc, (
+        '- `state-neg:` alpha beta' + "`n" +
+        '- **rule**: the `state-neg:` marker is declared above and only mentioned here' + "`n" +
+        'a prose line mentioning `state-neg:` in the middle' + "`n"), $noBom)
+    Chk "I9: control -- a prose mention is not a declaration site" (DeclCount $fxDc 'state-neg:') '1'
+
+    # (I10~I13) THE SEPARATOR ON A DECLARATION LINE IS A SINGLE ASCII SPACE (M42 review blocker 1).
+    # Matching the two split widths is not enough: a character outside BOTH widths kills a marker in
+    # BOTH shells and I2 goes back to passing 0==0. So the width is matched (MarkersOf) AND every other
+    # separator is forbidden here. I12/I13 prove the ban is not vacuous. The fixtures are written from
+    # ASCII SOURCE ([char] escapes) and the .sh twin writes the very same bytes via printf octal.
+    $fxTab = Join-Path $sbx 'contra-sep-tab.md'
+    $fxNbsp = Join-Path $sbx 'contra-sep-nbsp.md'
+    [System.IO.File]::WriteAllText($fxTab, ('- `state-neg:` alpha' + [char]0x0009 + 'beta' + "`n"), $noBom)
+    [System.IO.File]::WriteAllText($fxNbsp, ('- `state-neg:` alpha' + [char]0x00A0 + 'beta' + "`n"), $noBom)
+    Chk "I12: control -- a TAB separator is caught" (BadSeps $fxTab 'state-neg:') '1'
+    Chk "I13: control -- an NBSP separator is caught" (BadSeps $fxNbsp 'state-neg:') '1'
+    }
+
+    # (I14~I15) READ THE SEPARATOR SET FROM THE CONVENTION AND CHECK THIS IMPLEMENTATION AGAINST IT
+    # (M42 rework 3). The set lives in three media -- Korean names in the convention, octal bytes in the
+    # .sh twin, \uXXXX here -- so no string comparison closes it, and "we read it and they matched" was
+    # WRONG THREE ROUNDS RUNNING. Now the convention's `sep-cps:` line is the single source and each
+    # runner builds its own fixture per code point. Crucially this runs the WHOLE extraction pipeline,
+    # not just the pattern: M42 review blocker 1 was a character that sat in the set but was stripped
+    # upstream, so a pattern-only comparison could not see it.
+    function SepHits($cps) {
+        $h = 0
+        $f = Join-Path $sbx 'contra-sep-cp.md'
+        foreach ($x in $cps) {
+            $ch = [char]::ConvertFromUtf32([Convert]::ToInt32($x, 16))
+            [System.IO.File]::WriteAllText($f, ('- `state-neg:` alpha' + $ch + 'beta' + "`n"), $noBom)
+            $h += [int](BadSeps $f 'state-neg:')
+        }
+        return $h
+    }
+    if (PartOn 'I') {
+    $sepCps = @(MarkersOf 'sep-cps:')
+    $sepOkCps = @(MarkersOf 'sep-ok-cps:')
+    # (I16~I19) THE SAME GUARDS THE OTHER DECLARATION KEYS ALREADY CARRY (M42 review blocker 1).
+    # I14/I15 READ the declaration to check this implementation -- so if the declaration disappears the
+    # set is empty and I14 passes 0 == 0. Measured: deleting the `sep-cps:` line left all four
+    # environments green at 140/0. I1/I1b/G6/F4 all guard against exactly this, and I7/I8 additionally
+    # pin declaration-line uniqueness for the other two keys. Extraction (>0) and uniqueness (exactly 1).
+    Chk "I16: sep-cps extraction positive control (>0)" $(if ($sepCps.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "I17: sep-ok-cps extraction positive control (>0)" $(if ($sepOkCps.Count -gt 0) { 'ok' } else { 'no' }) 'ok'
+    Chk "I14: every separator the convention declares is caught" ([string](SepHits $sepCps)) ([string]$sepCps.Count)
+    Chk "I15: control -- an allowed character is not caught" ([string](SepHits $sepOkCps)) '0'
+    }
 
     # === Part J (M48) -- variable-name boundary in runner sources =========
     # When a multi-byte character follows `$name` directly, SHELLS DISAGREE ON WHERE THE NAME ENDS.
@@ -2629,6 +3403,64 @@ try {
     Chk "K6: every exempted name is a real harness (orphans 0)" ([string](@(HcOrphanExempt $harnessList)).Count) '0'
     }
 
+    # (K7-K25, M88 rf-112) COMMON-CONTROL JUDGMENT NAMES AND THEIR CASES -- the "enforcement" item of the conventions section on the
+    # common controls a new harness must carry is no longer a prose list but hc-asks: / hc-ask-cases: / hc-ask-from:. Declaration hygiene
+    # (K7-K9, K11-K15) comes from registry rows, the mapping (K16-K19) calls the Ak* bodies above with Part K, and the controls
+    # (K20-K25) ask, as a DELTA, whether a verdict moves by one on a conventions copy / synthetic runner (control-reads-delta). The block
+    # used to sit apart from the other Part K cases because it had to follow the Ak* definitions; M93 hoisted Ak* into the shared-helper block and moved it into the Part K block.
+    $HCA_KEY = 'hc-asks:'
+    $HCC_KEY = 'hc-ask-cases:'
+    $HCF_KEY = 'hc-ask-from:'
+    # addname: one more judgment name / droppair: the first pair removed from the mapping / nocase: a pair naming a missing case /
+    # unknown: a pair naming an undeclared judgment. (droppair: see the selection note below.)
+    function HcFixture([string]$mode) {
+        $f = Join-Path $sbx ('conv-hc-' + $mode + '.md')
+        $bt = [string][char]0x60
+        $ka = '- ' + $bt + $HCA_KEY + $bt; $kc = '- ' + $bt + $HCC_KEY + $bt
+        # droppair removes the FIRST PAIR WHOSE CASE APPEARS ONCE in the mapping -- removing the front pair does not move the control when
+        # that case is also on another pair (M88 reversal measurement).
+        $ps = @(AkPairs $HCC_KEY); $cnt = @{}
+        foreach ($x in $ps) { $k = FlPairMark $x; if ($cnt.ContainsKey($k)) { $cnt[$k]++ } else { $cnt[$k] = 1 } }
+        # ...and that case must exist in the sh runner -- dropping a pair naming a missing case does not move the unmapped count.
+        $ids = OrdSet @(AkCaseIds 'K' $RUN_SH)
+        $p1 = ' ' + (@($ps | Where-Object { $cnt[(FlPairMark $_)] -eq 1 -and $ids.Contains((FlPairMark $_)) }) | Select-Object -First 1); $n1 = @(DnNames $HCA_KEY) | Select-Object -First 1
+        $ws = [char[]]@([char]0x20, [char]0x09)
+        $out = foreach ($l in [System.IO.File]::ReadAllLines($CONV)) {
+            $t = $l.TrimStart($ws)
+            if ($mode -eq 'addname' -and $t.StartsWith($ka, [System.StringComparison]::Ordinal)) { $l = $l + ' hc-zz-add' }
+            if ($t.StartsWith($kc, [System.StringComparison]::Ordinal)) {
+                if ($mode -eq 'droppair') { $s = $l + ' '; $i = $s.IndexOf($p1 + ' ', [System.StringComparison]::Ordinal); if ($i -ge 0) { $s = $s.Substring(0, $i) + $s.Substring($i + $p1.Length) }; $l = $s.Substring(0, $s.Length - 1) }
+                if ($mode -eq 'nocase') { $l = $l + ' ' + $n1 + '=K999' }
+                if ($mode -eq 'unknown') { $l = $l + ' hc-zz-unknown=K1' }
+            }
+            $l
+        }
+        [System.IO.File]::WriteAllLines($f, [string[]]@($out), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    # ids: one commented, one indented, one other-part and one suffixed case / suffix-sh, suffix-ps1: one unmapped suffixed case only.
+    function HcRunnerFixture([string]$mode) {
+        $f = Join-Path $sbx ('runner-hc-' + $mode + '.txt')
+        $q = [string][char]0x22
+        if ($mode -eq 'ids') { $lines = @(('# chk ' + $q + 'K30: commented' + $q), ('    chk ' + $q + 'K99: indented' + $q), ('chk ' + $q + 'N1: other part' + $q), ('    # Chk ' + $q + 'K31: commented' + $q), ('chk ' + $q + 'K98b: suffixed' + $q), 'K|K97|count|CONV|zz:|registry row', 'N|N96|count|CONV|zz:|other-part registry row') }
+        elseif ($mode -eq 'suffix-ps1') { $lines = @('    Chk ' + $q + 'K98b: suffixed' + $q) }
+        else { $lines = @('chk ' + $q + 'K98b: suffixed' + $q) }
+        [System.IO.File]::WriteAllLines($f, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    if (PartOn 'K') {
+    Chk "K10: common-control judgment name / mapping / start-case extraction positive control" $(if (@(DnNames $HCA_KEY).Count -ge 1 -and @(AkPairs $HCC_KEY).Count -ge 1 -and (AkFrom $HCF_KEY 'K') -ne '') { 'ok' } else { 'no' }) 'ok'
+    Chk "K16: main check - every common-control judgment name has a mapped case" (AkAskNoCase $HCA_KEY $HCC_KEY) '0'
+    Chk "K17: main check - every name in the mapping is in hc-asks" (AkAskUnknown $HCA_KEY $HCC_KEY) '0'
+    Chk "K18: main check - every mapped case exists as a case line in both runners" (AkCaseMissing $HCC_KEY 'K') '0'
+    Chk "K19: main check - every case of this axis (hc-ask-from and above) is in the mapping" (AkCaseUnmapped $HCC_KEY $HCF_KEY 'K') '0'
+    Chk "K20: control - a conventions copy with one more judgment name adds one name without a case" ([string]([int](AkAskNoCase $HCA_KEY $HCC_KEY (HcFixture 'addname')) - [int](AkAskNoCase $HCA_KEY $HCC_KEY))) '1'
+    Chk "K21: control - a conventions copy with the first pair whose case appears once dropped adds one unmapped case" ([string]([int](AkCaseUnmapped $HCC_KEY $HCF_KEY 'K' (HcFixture 'droppair')) - [int](AkCaseUnmapped $HCC_KEY $HCF_KEY 'K'))) '1'
+    Chk "K22: control - a conventions copy with a pair naming a missing case adds one missing case" ([string]([int](AkCaseMissing $HCC_KEY 'K' (HcFixture 'nocase')) - [int](AkCaseMissing $HCC_KEY 'K'))) '1'
+    Chk "K23: control - two synthetic runners holding one unmapped suffixed case give one unmapped" (AkCaseUnmapped $HCC_KEY $HCF_KEY 'K' '' (HcRunnerFixture 'suffix-sh') (HcRunnerFixture 'suffix-ps1')) '1'
+    Chk "K24: control - a conventions copy with a pair naming an undeclared judgment adds one unknown name" ([string]([int](AkAskUnknown $HCA_KEY $HCC_KEY (HcFixture 'unknown')) - [int](AkAskUnknown $HCA_KEY $HCC_KEY))) '1'
+    Chk "K25: control - the case-line verdict skips comment lines and cases outside Part K (registry rows included) and reads suffixed IDs and Part K registry rows" ((@(AkCaseIds 'K' (HcRunnerFixture 'ids')) | ForEach-Object { $_ + ',' }) -join '') 'K99,K98b,K97,'
+    }
     # === Part L (M49) -- declared count vs enumerated item count ===========
     # A document that STATES A COUNT and then ENUMERATES must not disagree with its own enumeration.
     # The trigger was M48 round 0's blocker 1, which was NOT a logic defect but an EDITING ACCIDENT: one
@@ -3098,6 +3930,65 @@ try {
         ((@($(if ($epicSince -ne '') { 'ok' } else { 'no' }), (EpicSinceOf $esFxSep), (EpicSinceOf $esFxEnd))) -join '|') ('ok|' + $epicSince + '|' + $epicSince)
     }
 
+    # --- (M90) trunk emergence: test / novelty check / no fit / epic promotion =================
+    # The conventions sub-section on trunk emergence (inside the epic layer section) declares `epic-flow:` (names) and `epic-flow-sites:`
+    # (one restatement site per name). Declaration hygiene (M16-M22) comes from registry rows; here: extraction, site co-presence, stray
+    # names and their controls (M23-M28). Whether a trunk answer is right, whether the check was really done, whether a promotion is sound,
+    # whether the user really approved -- not asked (the same sub-section's "not asked" item). This block used to sit apart from the other
+    # Part M cases because it had to follow the Dn* definitions; M93 hoisted Dn* into the shared-helper block and moved it into the Part M block.
+    $EFL_KEY = 'epic-flow:'
+    $EFS_KEY = 'epic-flow-sites:'
+    function EfFixture([string]$mode) {
+        $fx = Join-Path $sbx ('conv-ef-' + $mode + '.md')
+        $bt = [string][char]0x60
+        $names = @(DnNames $EFL_KEY)
+        $nl = $names -join ' '
+        $pl = @(DnPairs $EFS_KEY | ForEach-Object { $bt + $_ + $bt })
+        $ex = ''
+        switch ($mode) {
+            'dup' { $nl = $nl + ' ' + $names[0] }
+            'nosite' { $pl = @($pl | Select-Object -Skip 1) }
+            'stray' { $ex = '  - see ' + $bt + 'ef-gone' + $bt }
+        }
+        $defs = @($names)
+        if ($mode -eq 'nodef') { $defs = @($names | Select-Object -Skip 1) }
+        if ($mode -eq 'swap' -and $names.Count -ge 2) { $defs = @($names[1], $names[0]) + @($names | Select-Object -Skip 2) }
+        $lines = @('## fixture', '', ('  - ' + $bt + $EFL_KEY + $bt + ' ' + $nl), ('  - ' + $bt + $EFS_KEY + $bt + ' ' + ($pl -join ' ')), '')
+        foreach ($d in $defs) { $lines += ('  - **' + $bt + $d + $bt + '** - x') }
+        if ($ex -ne '') { $lines += $ex }
+        [System.IO.File]::WriteAllLines($fx, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
+        return $fx
+    }
+    function EfSkillsFixture([string]$mode) {
+        # -> the root of a copy of the retro / milestone skills and templates (drop: the first declared name's backtick token is removed from its site's template).
+        $r = Join-Path $sbx ('efsk-' + $mode)
+        foreach ($s in @('retro', 'milestone')) {
+            $d = Join-Path $r ('skills/' + $s)
+            [void](New-Item -ItemType Directory -Force -Path $d)
+            foreach ($x in @('SKILL.md', 'template.md')) { Copy-Item -LiteralPath (Join-Path $ROOT ('skills/' + $s + '/' + $x)) -Destination (Join-Path $d $x) -Force }
+        }
+        if ($mode -eq 'drop') {
+            $bt = [string][char]0x60
+            $n = @(DnNames $EFL_KEY)[0]
+            $site = ''
+            foreach ($pp in @(DnPairs $EFS_KEY)) { if ((FlPairName $pp) -ceq $n) { $site = FlPairMark $pp; break } }
+            # no declaration (no name / no site) -> nothing to drop; the copy equals clean and the second slot of M25 turns red with 0 (same value in both runners)
+            if (-not ($site -ceq 'retro' -or $site -ceq 'milestone')) { return $r }
+            $p = Join-Path $r ('skills/' + $site + '/template.md')
+            $txt = [System.IO.File]::ReadAllText((Join-Path $ROOT ('skills/' + $site + '/template.md')))
+            [System.IO.File]::WriteAllText($p, $txt.Replace($bt + $n + $bt, 'zz-gone'), (New-Object System.Text.UTF8Encoding($false)))
+        }
+        return $r
+    }
+    if (PartOn 'M') {
+    Chk "M23: extraction positive-control - at least one epic-flow name and at least one epic-flow-sites pair are read" `
+        ((@($(if (@(DnNames $EFL_KEY).Count -gt 0) { 'ok' } else { 'no' }), $(if (@(DnPairs $EFS_KEY).Count -gt 0) { 'ok' } else { 'no' }))) -join '|') 'ok|ok'
+    Chk "M24: main check - every declared name has exactly one site pair and that site's skill and template carry the backticked name" (FlowSiteBad $EFL_KEY $EFS_KEY) '0'
+    Chk "M25: transform control - a synthetic conventions file without one site pair and a copy whose site template lost the name each add one" (([string]([int](FlowSiteBad $EFL_KEY $EFS_KEY (EfFixture 'nosite')) - [int](FlowSiteBad $EFL_KEY $EFS_KEY (EfFixture 'base')))) + '|' + ([string]([int](FlowSiteBad $EFL_KEY $EFS_KEY '' (EfSkillsFixture 'drop')) - [int](FlowSiteBad $EFL_KEY $EFS_KEY '' (EfSkillsFixture 'clean'))))) '1|1'
+    Chk "M26: main check - every backtick ef- token in the conventions set and the retro / milestone skills and templates is a declared name" (FlowStray $EFL_KEY 'ef-') '0'
+    Chk "M27: transform control - one undeclared ef- token is counted" ([string]([int](FlowStray $EFL_KEY 'ef-' (EfFixture 'stray')) - [int](FlowStray $EFL_KEY 'ef-' (EfFixture 'base')))) '1'
+    Chk "M28: transform control - in a synthetic conventions file a duplicated name, a removed definition and the first two definitions swapped each add one" (([string]([int](DnDup $EFL_KEY (EfFixture 'dup')) - [int](DnDup $EFL_KEY (EfFixture 'base')))) + '|' + ([string]([int](DnDefBad $EFL_KEY (EfFixture 'nodef')) - [int](DnDefBad $EFL_KEY (EfFixture 'base')))) + '|' + ([string]([int](DnDefOrder $EFL_KEY (EfFixture 'swap')) - [int](DnDefOrder $EFL_KEY (EfFixture 'base'))))) '1|1|1'
+    }
     # === Part N (M52) -- status-item declaration consistency ==================
     # The convention declares the check-item list ONCE and /tide:status + /tide:fleet only READ it.
     # The defect this closes: the declaration and a copy drifted -- fleet had six pinned while status
@@ -3359,424 +4250,6 @@ try {
         [System.IO.File]::WriteAllLines((Join-Path $f 'rel/SKILL.md'), $ln.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
         return $f
     }
-    # (M78) THE SAFETY FLOOR LIST IS A NAME DECLARATION -- `floor-items:` holds the floor names; `floor-mark-map:`, `floor-unmarked:`
-    # and `floor-excluded:` hold each name's slot (covered by a mark / no mark / deliberately excluded). The runner only READS the
-    # names and never spells them in source. What is asked is whether declaration, definition items, slots and the mark set agree;
-    # the meaning of a definition sentence and whether the map matches the real skill window are not asked (the conventions item).
-    # Helpers live OUTSIDE the part guard (rf-60). Parameters are NOT named `$conv` (case-insensitive shadowing of `$CONV`).
-    # (M79) The name-declaration helpers (Dn*) take a key and a conventions file -- floor names (`floor-items:`) and notice names
-    # (`floor-asks:`) are read by the same functions.
-    $FLI_KEY = 'floor-items:'
-    $FLM_KEY = 'floor-mark-map:'
-    $FLU_KEY = 'floor-unmarked:'
-    $FLX_KEY = 'floor-excluded:'
-    $FAS_KEY = 'floor-asks:'
-    $FAC_KEY = 'floor-ask-cases:'
-    $FAF_KEY = 'floor-ask-from:'
-    # (M86) $key may hold several keys joined by single spaces -- names are concatenated in declaration order, so the two
-    # start-point predicate declarations (one shared definition list) are read by the SAME functions (the old Sp* helpers are
-    # absorbed). A single key behaves as before.
-    function DnNames([string]$key, [string]$flConv = '') {
-        if ($flConv -eq '') { $flConv = $CONV }
-        $ws = [char[]]@([char]0x20, [char]0x09, [char]0x0D, [char]0x0B, [char]0x0C)
-        $out = New-Object System.Collections.Generic.List[string]
-        foreach ($k in ($key -split ' ' | Where-Object { $_ -ne '' })) {
-            $tail = DeclTail $flConv $k
-            if ($null -eq $tail) { continue }
-            foreach ($t in ($tail -split ' ')) { if ($t.Trim($ws) -ne '') { $out.Add($t) } }
-        }
-        return @($out)
-    }
-    # Backtick spans of a declaration, one "name=value" each (split at the FIRST `=`; spans without one are dropped).
-    function DnPairs([string]$key, [string]$flConv = '') {
-        if ($flConv -eq '') { $flConv = $CONV }
-        $t = DeclTail $flConv $key
-        $out = New-Object System.Collections.Generic.List[string]
-        if ($null -eq $t) { return @() }
-        $parts = $t.Split([char]0x60)
-        for ($i = 1; $i -lt $parts.Count; $i += 2) {
-            $j = $parts[$i].IndexOf('=', [System.StringComparison]::Ordinal)
-            if ($j -gt 0 -and $j -lt ($parts[$i].Length - 1)) { [void]$out.Add($parts[$i]) }
-        }
-        return @($out)
-    }
-    function FlPairName([string]$p) { return $p.Substring(0, $p.IndexOf('=', [System.StringComparison]::Ordinal)) }
-    function FlPairMark([string]$p) { return $p.Substring($p.IndexOf('=', [System.StringComparison]::Ordinal) + 1) }
-    # Definition ITEM names in order -- from the declaration line up to (not including) the first non-blank line indented LESS
-    # than it (or a heading), the lines at the SAME depth as the declaration line whose space/tab-stripped text starts with
-    # "- **`name`**" (M79 -- deeper lines are not items, so notice definitions nested inside the floor range do not mix in).
-    # Indentation counts spaces only (same as the .sh twin).
-    function DnDefs([string]$key, [string]$flConv = '') {
-        if ($flConv -eq '') { $flConv = $CONV }
-        # (M86) several keys -> the window runs from the line after the FIRST key's declaration line up to the next heading ('#')
-        # at ANY depth -- the window of the absorbed SpDefs, as the convention's start-point section states. One key keeps the M79 window.
-        $dnKeys = @($key -split ' ' | Where-Object { $_ -ne '' })
-        $any = ($dnKeys.Count -gt 1)
-        $k = '- `' + ($dnKeys | Select-Object -First 1) + '`'
-        $ws = [char[]]@([char]0x20, [char]0x09)
-        $on = $false; $d = 0
-        $out = New-Object System.Collections.Generic.List[string]
-        foreach ($ln in [System.IO.File]::ReadAllLines($flConv)) {
-            $t = $ln.TrimStart($ws)
-            $ind = $ln.Length - $ln.TrimStart([char]0x20).Length
-            if (-not $on) { if ($t.StartsWith($k, [System.StringComparison]::Ordinal)) { $on = $true; $d = $ind }; continue }
-            if ($ln.StartsWith('#', [System.StringComparison]::Ordinal)) { break }
-            if ($any) {
-                if ($t.StartsWith('- **`', [System.StringComparison]::Ordinal)) {
-                    $r = $t.Substring(5); $j = $r.IndexOf('`**', [System.StringComparison]::Ordinal)
-                    if ($j -gt 0) { $out.Add($r.Substring(0, $j)) }
-                }
-                continue
-            }
-            if ($t -eq '') { continue }
-            if ($ind -lt $d) { break }
-            if ($ind -eq $d -and $t.StartsWith('- **`', [System.StringComparison]::Ordinal)) {
-                $r = $t.Substring(5); $j = $r.IndexOf('`**', [System.StringComparison]::Ordinal)
-                if ($j -gt 0) { $out.Add($r.Substring(0, $j)) }
-            }
-        }
-        return $out
-    }
-    function OrdSet($items) {
-        $s = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
-        foreach ($x in @($items)) { if ($null -ne $x) { [void]$s.Add([string]$x) } }
-        return ,$s
-    }
-    function DnDup([string]$key, [string]$flConv = '') {
-        $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
-        $dup = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
-        foreach ($nm in @(DnNames $key $flConv)) { if (-not $seen.Add($nm)) { [void]$dup.Add($nm) } }
-        return [string]$dup.Count
-    }
-    function DnDefBad([string]$key, [string]$flConv = '') {
-        $defs = @(DnDefs $key $flConv)
-        $bad = 0
-        foreach ($nm in @(DnNames $key $flConv)) {
-            $c = @($defs | Where-Object { [string]::Equals($_, $nm, [System.StringComparison]::Ordinal) }).Count
-            if ($c -ne 1) { $bad++ }
-        }
-        return [string]$bad
-    }
-    function DnDefOrphan([string]$key, [string]$flConv = '') {
-        $names = OrdSet @(DnNames $key $flConv)
-        return [string]@(@(DnDefs $key $flConv) | Where-Object { -not $names.Contains($_) }).Count
-    }
-    # Definition order equals declaration name order -- count how often the declaration position steps back (normal 0).
-    # Undeclared definitions are skipped (that is the orphan check's place).
-    function DnDefOrder([string]$key, [string]$flConv = '') {
-        $idx = New-Object 'System.Collections.Generic.Dictionary[string,int]'([System.StringComparer]::Ordinal)
-        $i = 0
-        foreach ($nm in @(DnNames $key $flConv)) { $i++; if (-not $idx.ContainsKey($nm)) { $idx[$nm] = $i } }
-        $p = 0; $c = 0
-        foreach ($d in @(DnDefs $key $flConv)) {
-            if ($idx.ContainsKey($d)) { $v = $idx[$d]; if ($p -gt 0 -and $v -lt $p) { $c++ }; $p = $v }
-        }
-        return [string]$c
-    }
-    # Per `floor-items:` name, "name=<number of slots it sits in>" (normal 1 -- in the map at least once / unmarked / excluded).
-    function FlClass([string]$flConv = '') {
-        $m = OrdSet @(@(DnPairs $FLM_KEY $flConv) | ForEach-Object { FlPairName $_ })
-        $u = OrdSet @(DnNames $FLU_KEY $flConv)
-        $x = OrdSet @(DnNames $FLX_KEY $flConv)
-        $out = New-Object System.Collections.Generic.List[string]
-        foreach ($nm in @(DnNames $FLI_KEY $flConv)) {
-            $k = 0
-            if ($m.Contains($nm)) { $k++ }
-            if ($u.Contains($nm)) { $k++ }
-            if ($x.Contains($nm)) { $k++ }
-            $out.Add($nm + '=' + $k)
-        }
-        return $out
-    }
-    function FlClassBad([string]$flConv = '') {
-        return [string]@(@(FlClass $flConv) | Where-Object { -not $_.EndsWith('=1', [System.StringComparison]::Ordinal) }).Count
-    }
-    function FlStray([string]$flConv = '') {
-        $names = OrdSet @(DnNames $FLI_KEY $flConv)
-        $all = OrdSet (@(@(DnPairs $FLM_KEY $flConv) | ForEach-Object { FlPairName $_ }) + @(DnNames $FLU_KEY $flConv) + @(DnNames $FLX_KEY $flConv))
-        return [string]@($all | Where-Object { -not $names.Contains($_) }).Count
-    }
-    function FlMarkMissing([string]$flConv = '') {
-        $mapped = OrdSet @(@(DnPairs $FLM_KEY $flConv) | ForEach-Object { FlPairMark $_ })
-        return [string]@((OrdSet @(FloorMarks $flConv)) | Where-Object { -not $mapped.Contains($_) }).Count
-    }
-    function FlMarkExtra([string]$flConv = '') {
-        $marks = OrdSet @(FloorMarks $flConv)
-        return [string]@((OrdSet @(@(DnPairs $FLM_KEY $flConv) | ForEach-Object { FlPairMark $_ })) | Where-Object { -not $marks.Contains($_) }).Count
-    }
-    # (M79) NOTICE JUDGMENTS AND THEIR CASES -- `floor-asks:` holds the judgment names, `floor-ask-cases:` the "name=case" tokens and
-    # `floor-ask-from:` the first case of this axis. Case lines are read from BOTH runners' source -- a line whose space/tab-stripped
-    # text starts with a case call (`chk "` / `Chk "`); comment lines start with `#` and are not counted. The mapping asks only
-    # "this judgment has this case", not how wide the case bites.
-    $RUN_SH = Join-Path $ROOT 'tests/discover/run.sh'
-    $RUN_PS1 = Join-Path $ROOT 'tests/discover/run.ps1'
-    # (M88) The verdicts below are NOT tied to one axis -- the Ak* bodies take the ask / case / from keys and the part letter as
-    # arguments; Fa* are thin wrappers fixing the safety-floor axis (floor-asks: / Part N). The common-control axis (hc-asks: / Part K)
-    # uses the same bodies. That Part N gives identical output before and after is recorded in the impl report ("same window").
-    function AkPairs([string]$key, [string]$akConv = '') {
-        return @(@(DnNames $key $akConv) | Where-Object { $j = $_.IndexOf('=', [System.StringComparison]::Ordinal); $j -gt 0 -and $j -lt ($_.Length - 1) })
-    }
-    function AkFrom([string]$key, [string]$part, [string]$akConv = '') {
-        $t = @(DnNames $key $akConv) | Select-Object -First 1
-        if ($null -ne $t -and $t.Length -gt 1 -and $t.StartsWith($part, [System.StringComparison]::Ordinal) -and [regex]::IsMatch($t.Substring(1), '^[0-9]+$')) { return [string][int]$t.Substring(1) }
-        return ''
-    }
-    function AkCaseIds([string]$part, [string]$path) {
-        $q = [string][char]0x22
-        $ws = [char[]]@([char]0x20, [char]0x09)
-        $out = New-Object System.Collections.Generic.List[string]
-        foreach ($ln in [System.IO.File]::ReadAllLines($path)) {
-            $t = $ln.TrimStart($ws)
-            if ($t.StartsWith('chk ' + $q, [System.StringComparison]::Ordinal) -or $t.StartsWith('Chk ' + $q, [System.StringComparison]::Ordinal)) {
-                $r = $t.Substring(5); $j = $r.IndexOf(':', [System.StringComparison]::Ordinal)
-                # An ID is <part> + digits with an optional lowercase suffix (this harness uses F1b / G8a forms -- M79 review blocker 1) (M91) A digit tail after the suffix is taken too -- G8b0.
-                if ($j -gt 0) { $id = $r.Substring(0, $j); if ($id.Length -gt 1 -and $id.StartsWith($part, [System.StringComparison]::Ordinal) -and [regex]::IsMatch($id.Substring(1), '^[0-9]+[a-z]*[0-9]*$')) { $out.Add($id) } }
-                continue
-            }
-            # (M88) A declaration-registry case row (<part>|<ID>|<check>|...) is a case too -- same shape as SrcCaseIds (F29). The common-control
-            # axis gets its declaration hygiene from registry rows. Part N has no registry case rows, so the safety-floor axis is unchanged.
-            if ($t.StartsWith($part + '|', [System.StringComparison]::Ordinal) -and [regex]::IsMatch($t, '^[A-Z]\|[A-Z][0-9]+[a-z]*\|[a-z-]+\|')) { $id = ($t -split '\|')[1]; if ($id.StartsWith($part, [System.StringComparison]::Ordinal)) { $out.Add($id) } }
-        }
-        return $out
-    }
-    function AkAskNoCase([string]$asks, [string]$cases, [string]$akConv = '') {
-        $mapped = OrdSet @(@(AkPairs $cases $akConv) | ForEach-Object { FlPairName $_ })
-        return [string]@(@(DnNames $asks $akConv) | Where-Object { -not $mapped.Contains($_) }).Count
-    }
-    function AkAskUnknown([string]$asks, [string]$cases, [string]$akConv = '') {
-        $names = OrdSet @(DnNames $asks $akConv)
-        return [string]@((OrdSet @(@(AkPairs $cases $akConv) | ForEach-Object { FlPairName $_ })) | Where-Object { -not $names.Contains($_) }).Count
-    }
-    function AkCaseMissing([string]$cases, [string]$part, [string]$akConv = '', [string]$shRun = '', [string]$psRun = '') {
-        if ($shRun -eq '') { $shRun = $RUN_SH }
-        if ($psRun -eq '') { $psRun = $RUN_PS1 }
-        $s = OrdSet @(AkCaseIds $part $shRun); $p = OrdSet @(AkCaseIds $part $psRun)
-        return [string]@((OrdSet @(@(AkPairs $cases $akConv) | ForEach-Object { FlPairMark $_ })) | Where-Object { -not ($s.Contains($_) -and $p.Contains($_)) }).Count
-    }
-    # (M89 rf-114) <skip> names a declaration of cases that sit in the same part but belong to ANOTHER section's verdict
-    # (cc-ask-skip: on the completion-criteria axis). An empty skip key means no skip -- AkCaseUnmapped is that shape, and Part N / K
-    # give the same values as before the widening (the impl report's "same window" comparison).
-    function AkCaseUnmappedX([string]$cases, [string]$from, [string]$skip, [string]$part, [string]$akConv = '', [string]$shRun = '', [string]$psRun = '') {
-        if ($shRun -eq '') { $shRun = $RUN_SH }
-        if ($psRun -eq '') { $psRun = $RUN_PS1 }
-        $f = AkFrom $from $part $akConv
-        if ($f -eq '') { $f = '0' }
-        $mapped = OrdSet @(@(AkPairs $cases $akConv) | ForEach-Object { FlPairMark $_ })
-        $skipped = OrdSet @(if ($skip -ne '') { DnNames $skip $akConv })
-        $all = OrdSet (@(AkCaseIds $part $shRun) + @(AkCaseIds $part $psRun))
-        return [string]@($all | Where-Object { [int]([regex]::Match($_.Substring(1), '^([0-9]+)').Groups[1].Value) -ge [int]$f -and -not $mapped.Contains($_) -and -not $skipped.Contains($_) }).Count
-    }
-    function AkCaseUnmapped([string]$cases, [string]$from, [string]$part, [string]$akConv = '', [string]$shRun = '', [string]$psRun = '') {
-        return (AkCaseUnmappedX $cases $from '' $part $akConv $shRun $psRun)
-    }
-    # -> the number of cases in the skip declaration missing as a case from either runner (counted as distinct cases).
-    function AkSkipMissing([string]$skip, [string]$part, [string]$akConv = '', [string]$shRun = '', [string]$psRun = '') {
-        if ($shRun -eq '') { $shRun = $RUN_SH }
-        if ($psRun -eq '') { $psRun = $RUN_PS1 }
-        $s = OrdSet @(AkCaseIds $part $shRun); $p = OrdSet @(AkCaseIds $part $psRun)
-        return [string]@((OrdSet @(DnNames $skip $akConv)) | Where-Object { -not ($s.Contains($_) -and $p.Contains($_)) }).Count
-    }
-    function FaPairs([string]$flConv = '') { return @(AkPairs $FAC_KEY $flConv) }
-    function FaFrom([string]$flConv = '') { return (AkFrom $FAF_KEY 'N' $flConv) }
-    function CaseIds([string]$path) { return (AkCaseIds 'N' $path) }
-    function FaAskNoCase([string]$flConv = '') { return (AkAskNoCase $FAS_KEY $FAC_KEY $flConv) }
-    function FaAskUnknown([string]$flConv = '') { return (AkAskUnknown $FAS_KEY $FAC_KEY $flConv) }
-    function FaCaseMissing([string]$flConv = '', [string]$shRun = '', [string]$psRun = '') { return (AkCaseMissing $FAC_KEY 'N' $flConv $shRun $psRun) }
-    function FaCaseUnmapped([string]$flConv = '', [string]$shRun = '', [string]$psRun = '') { return (AkCaseUnmapped $FAC_KEY $FAF_KEY 'N' $flConv $shRun $psRun) }
-    # Case-line control -- a synthetic runner with one commented case, one indented case, one case outside Part N and one suffixed ID.
-    function FaRunnerFixture {
-        $f = Join-Path $sbx 'runner-fa.txt'
-        $q = [string][char]0x22
-        $lines = @(('# chk ' + $q + 'N30: commented' + $q), ('    chk ' + $q + 'N99: indented' + $q), ('chk ' + $q + 'O1: other part' + $q), ('    # Chk ' + $q + 'N31: commented' + $q), ('chk ' + $q + 'N98b: suffixed' + $q))
-        [System.IO.File]::WriteAllLines($f, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
-        return $f
-    }
-    # Boundary-filter control fixture -- a synthetic runner holding ONE suffixed case only (N63 / M82 rf-87).
-    function FaSuffixFixture([string]$mode) {
-        $f = Join-Path $sbx ('runner-fas-' + $mode + '.txt')
-        $q = [string][char]0x22
-        if ($mode -eq 'ps1') { $ln = '    Chk ' + $q + 'N98b: suffixed' + $q } else { $ln = 'chk ' + $q + 'N98b: suffixed' + $q }
-        [System.IO.File]::WriteAllLines($f, [string[]]@($ln), (New-Object System.Text.UTF8Encoding($false)))
-        return $f
-    }
-    # (M90) NAME DECLARATION + SITE PAIRS: CO-PRESENCE AND STRAY CHECKS -- `retro-flow:` / `retro-flow-sites:` (Part O, O90 / O92) and
-    # `epic-flow:` / `epic-flow-sites:` (Part M, M24 / M26) share one body. It takes the keys and the token prefix as arguments; Part O's
-    # RtSiteBad / RtStray are thin wrappers pinning their keys. Part O output of both runners was byte-identical before and after the move
-    # (M90 impl report). The site names `retro` / `milestone` and their two files (SKILL.md / template.md) are the same map for both
-    # declarations (conventions section on consuming retro follow-ups).
-    function FlowSiteBad([string]$nameKey, [string]$siteKey, [string]$f = '', [string]$skRoot = '') {
-        # -> names without exactly one site pair + pair names not declared + unknown sites + site files (of the two) not carrying the backticked name.
-        if ($f -eq '') { $f = $CONV }
-        if ($skRoot -eq '') { $skRoot = $ROOT }
-        $names = @(DnNames $nameKey $f)
-        $pairs = @(DnPairs $siteKey $f)
-        $bad = 0
-        $bt = [string][char]0x60
-        foreach ($n in $names) {
-            $hit = @($pairs | Where-Object { (FlPairName $_) -ceq $n })
-            if ($hit.Count -ne 1) { $bad++; continue }
-            $site = FlPairMark $hit[0]
-            if (-not ($site -ceq 'retro' -or $site -ceq 'milestone')) { $bad++; continue }
-            foreach ($x in @('SKILL.md', 'template.md')) {
-                $p = Join-Path $skRoot ('skills/' + $site + '/' + $x)
-                if (-not (Test-Path -LiteralPath $p) -or -not ([System.IO.File]::ReadAllText($p).Contains($bt + $n + $bt))) { $bad++ }
-            }
-        }
-        $nset = OrdSet $names
-        foreach ($p in $pairs) { if (-not $nset.Contains((FlPairName $p))) { $bad++ } }
-        return [string]$bad
-    }
-    function FlowStray([string]$nameKey, [string]$prefix, [string]$f = '', [string]$skRoot = '') {
-        # -> backtick tokens starting with the prefix (the part before `=` for site pairs) in the conventions (the whole conventions set
-        #    when no file argument) and the retro / milestone skills and templates that are not declared names (distinct tokens).
-        $conv = if ($f -eq '') { $CONV } else { $f }
-        if ($skRoot -eq '') { $skRoot = $ROOT }
-        $names = OrdSet @(DnNames $nameKey $conv)
-        $files = New-Object System.Collections.Generic.List[string]
-        if ($f -ne '') { [void]$files.Add($f) } else {
-            $cf = @(Get-ChildItem (Join-Path $ROOT 'docs') -File -Force -ErrorAction SilentlyContinue |
-                Where-Object { $_.Name.StartsWith('conventions', [System.StringComparison]::Ordinal) -and $_.Name.EndsWith('.md', [System.StringComparison]::Ordinal) } |
-                ForEach-Object { $_.FullName })
-            foreach ($c in $cf) { [void]$files.Add($c) }
-        }
-        foreach ($s in @('retro', 'milestone')) { foreach ($x in @('SKILL.md', 'template.md')) { [void]$files.Add((Join-Path $skRoot ('skills/' + $s + '/' + $x))) } }
-        $bt = [string][char]0x60
-        $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
-        foreach ($p in $files) {
-            if (-not (Test-Path -LiteralPath $p)) { continue }
-            foreach ($ln in [System.IO.File]::ReadAllLines($p)) {
-                $s = $ln
-                while (($i = $s.IndexOf($bt + $prefix, [System.StringComparison]::Ordinal)) -ge 0) {
-                    $s = $s.Substring($i + 1)
-                    $j = $s.IndexOf($bt, [System.StringComparison]::Ordinal)
-                    if ($j -lt 0) { break }
-                    $t = $s.Substring(0, $j)
-                    $e = $t.IndexOf('=', [System.StringComparison]::Ordinal)
-                    if ($e -ge 0) { $t = $t.Substring(0, $e) }
-                    [void]$seen.Add($t)
-                    $s = $s.Substring($j + 1)
-                }
-            }
-        }
-        return [string]@($seen | Where-Object { $_ -ne '' -and -not $names.Contains($_) }).Count
-    }
-    # === Part M (M90) -- trunk emergence: test / novelty check / no fit / epic promotion =================
-    # The conventions sub-section on trunk emergence (inside the epic layer section) declares `epic-flow:` (names) and `epic-flow-sites:`
-    # (one restatement site per name). Declaration hygiene (M16-M22) comes from registry rows; here: extraction, site co-presence, stray
-    # names and their controls (M23-M28). Whether a trunk answer is right, whether the check was really done, whether a promotion is sound,
-    # whether the user really approved -- not asked (the same sub-section's "not asked" item). This block must follow the Dn* definitions,
-    # so it sits apart from the other Part M cases.
-    $EFL_KEY = 'epic-flow:'
-    $EFS_KEY = 'epic-flow-sites:'
-    function EfFixture([string]$mode) {
-        $fx = Join-Path $sbx ('conv-ef-' + $mode + '.md')
-        $bt = [string][char]0x60
-        $names = @(DnNames $EFL_KEY)
-        $nl = $names -join ' '
-        $pl = @(DnPairs $EFS_KEY | ForEach-Object { $bt + $_ + $bt })
-        $ex = ''
-        switch ($mode) {
-            'dup' { $nl = $nl + ' ' + $names[0] }
-            'nosite' { $pl = @($pl | Select-Object -Skip 1) }
-            'stray' { $ex = '  - see ' + $bt + 'ef-gone' + $bt }
-        }
-        $defs = @($names)
-        if ($mode -eq 'nodef') { $defs = @($names | Select-Object -Skip 1) }
-        if ($mode -eq 'swap' -and $names.Count -ge 2) { $defs = @($names[1], $names[0]) + @($names | Select-Object -Skip 2) }
-        $lines = @('## fixture', '', ('  - ' + $bt + $EFL_KEY + $bt + ' ' + $nl), ('  - ' + $bt + $EFS_KEY + $bt + ' ' + ($pl -join ' ')), '')
-        foreach ($d in $defs) { $lines += ('  - **' + $bt + $d + $bt + '** - x') }
-        if ($ex -ne '') { $lines += $ex }
-        [System.IO.File]::WriteAllLines($fx, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
-        return $fx
-    }
-    function EfSkillsFixture([string]$mode) {
-        # -> the root of a copy of the retro / milestone skills and templates (drop: the first declared name's backtick token is removed from its site's template).
-        $r = Join-Path $sbx ('efsk-' + $mode)
-        foreach ($s in @('retro', 'milestone')) {
-            $d = Join-Path $r ('skills/' + $s)
-            [void](New-Item -ItemType Directory -Force -Path $d)
-            foreach ($x in @('SKILL.md', 'template.md')) { Copy-Item -LiteralPath (Join-Path $ROOT ('skills/' + $s + '/' + $x)) -Destination (Join-Path $d $x) -Force }
-        }
-        if ($mode -eq 'drop') {
-            $bt = [string][char]0x60
-            $n = @(DnNames $EFL_KEY)[0]
-            $site = ''
-            foreach ($pp in @(DnPairs $EFS_KEY)) { if ((FlPairName $pp) -ceq $n) { $site = FlPairMark $pp; break } }
-            # no declaration (no name / no site) -> nothing to drop; the copy equals clean and the second slot of M25 turns red with 0 (same value in both runners)
-            if (-not ($site -ceq 'retro' -or $site -ceq 'milestone')) { return $r }
-            $p = Join-Path $r ('skills/' + $site + '/template.md')
-            $txt = [System.IO.File]::ReadAllText((Join-Path $ROOT ('skills/' + $site + '/template.md')))
-            [System.IO.File]::WriteAllText($p, $txt.Replace($bt + $n + $bt, 'zz-gone'), (New-Object System.Text.UTF8Encoding($false)))
-        }
-        return $r
-    }
-    if (PartOn 'M') {
-    Chk "M23: extraction positive-control - at least one epic-flow name and at least one epic-flow-sites pair are read" `
-        ((@($(if (@(DnNames $EFL_KEY).Count -gt 0) { 'ok' } else { 'no' }), $(if (@(DnPairs $EFS_KEY).Count -gt 0) { 'ok' } else { 'no' }))) -join '|') 'ok|ok'
-    Chk "M24: main check - every declared name has exactly one site pair and that site's skill and template carry the backticked name" (FlowSiteBad $EFL_KEY $EFS_KEY) '0'
-    Chk "M25: transform control - a synthetic conventions file without one site pair and a copy whose site template lost the name each add one" (([string]([int](FlowSiteBad $EFL_KEY $EFS_KEY (EfFixture 'nosite')) - [int](FlowSiteBad $EFL_KEY $EFS_KEY (EfFixture 'base')))) + '|' + ([string]([int](FlowSiteBad $EFL_KEY $EFS_KEY '' (EfSkillsFixture 'drop')) - [int](FlowSiteBad $EFL_KEY $EFS_KEY '' (EfSkillsFixture 'clean'))))) '1|1'
-    Chk "M26: main check - every backtick ef- token in the conventions set and the retro / milestone skills and templates is a declared name" (FlowStray $EFL_KEY 'ef-') '0'
-    Chk "M27: transform control - one undeclared ef- token is counted" ([string]([int](FlowStray $EFL_KEY 'ef-' (EfFixture 'stray')) - [int](FlowStray $EFL_KEY 'ef-' (EfFixture 'base')))) '1'
-    Chk "M28: transform control - in a synthetic conventions file a duplicated name, a removed definition and the first two definitions swapped each add one" (([string]([int](DnDup $EFL_KEY (EfFixture 'dup')) - [int](DnDup $EFL_KEY (EfFixture 'base')))) + '|' + ([string]([int](DnDefBad $EFL_KEY (EfFixture 'nodef')) - [int](DnDefBad $EFL_KEY (EfFixture 'base')))) + '|' + ([string]([int](DnDefOrder $EFL_KEY (EfFixture 'swap')) - [int](DnDefOrder $EFL_KEY (EfFixture 'base'))))) '1|1|1'
-    }
-    # (K7-K25, M88 rf-112) COMMON-CONTROL JUDGMENT NAMES AND THEIR CASES -- the "enforcement" item of the conventions section on the
-    # common controls a new harness must carry is no longer a prose list but hc-asks: / hc-ask-cases: / hc-ask-from:. Declaration hygiene
-    # (K7-K9, K11-K15) comes from registry rows, the mapping (K16-K19) calls the Ak* bodies above with Part K, and the controls
-    # (K20-K25) ask, as a DELTA, whether a verdict moves by one on a conventions copy / synthetic runner (control-reads-delta). The block
-    # has to sit after the Ak* definitions, so it is apart from the other Part K cases.
-    $HCA_KEY = 'hc-asks:'
-    $HCC_KEY = 'hc-ask-cases:'
-    $HCF_KEY = 'hc-ask-from:'
-    # addname: one more judgment name / droppair: the first pair removed from the mapping / nocase: a pair naming a missing case /
-    # unknown: a pair naming an undeclared judgment. (droppair: see the selection note below.)
-    function HcFixture([string]$mode) {
-        $f = Join-Path $sbx ('conv-hc-' + $mode + '.md')
-        $bt = [string][char]0x60
-        $ka = '- ' + $bt + $HCA_KEY + $bt; $kc = '- ' + $bt + $HCC_KEY + $bt
-        # droppair removes the FIRST PAIR WHOSE CASE APPEARS ONCE in the mapping -- removing the front pair does not move the control when
-        # that case is also on another pair (M88 reversal measurement).
-        $ps = @(AkPairs $HCC_KEY); $cnt = @{}
-        foreach ($x in $ps) { $k = FlPairMark $x; if ($cnt.ContainsKey($k)) { $cnt[$k]++ } else { $cnt[$k] = 1 } }
-        # ...and that case must exist in the sh runner -- dropping a pair naming a missing case does not move the unmapped count.
-        $ids = OrdSet @(AkCaseIds 'K' $RUN_SH)
-        $p1 = ' ' + (@($ps | Where-Object { $cnt[(FlPairMark $_)] -eq 1 -and $ids.Contains((FlPairMark $_)) }) | Select-Object -First 1); $n1 = @(DnNames $HCA_KEY) | Select-Object -First 1
-        $ws = [char[]]@([char]0x20, [char]0x09)
-        $out = foreach ($l in [System.IO.File]::ReadAllLines($CONV)) {
-            $t = $l.TrimStart($ws)
-            if ($mode -eq 'addname' -and $t.StartsWith($ka, [System.StringComparison]::Ordinal)) { $l = $l + ' hc-zz-add' }
-            if ($t.StartsWith($kc, [System.StringComparison]::Ordinal)) {
-                if ($mode -eq 'droppair') { $s = $l + ' '; $i = $s.IndexOf($p1 + ' ', [System.StringComparison]::Ordinal); if ($i -ge 0) { $s = $s.Substring(0, $i) + $s.Substring($i + $p1.Length) }; $l = $s.Substring(0, $s.Length - 1) }
-                if ($mode -eq 'nocase') { $l = $l + ' ' + $n1 + '=K999' }
-                if ($mode -eq 'unknown') { $l = $l + ' hc-zz-unknown=K1' }
-            }
-            $l
-        }
-        [System.IO.File]::WriteAllLines($f, [string[]]@($out), (New-Object System.Text.UTF8Encoding($false)))
-        return $f
-    }
-    # ids: one commented, one indented, one other-part and one suffixed case / suffix-sh, suffix-ps1: one unmapped suffixed case only.
-    function HcRunnerFixture([string]$mode) {
-        $f = Join-Path $sbx ('runner-hc-' + $mode + '.txt')
-        $q = [string][char]0x22
-        if ($mode -eq 'ids') { $lines = @(('# chk ' + $q + 'K30: commented' + $q), ('    chk ' + $q + 'K99: indented' + $q), ('chk ' + $q + 'N1: other part' + $q), ('    # Chk ' + $q + 'K31: commented' + $q), ('chk ' + $q + 'K98b: suffixed' + $q), 'K|K97|count|CONV|zz:|registry row', 'N|N96|count|CONV|zz:|other-part registry row') }
-        elseif ($mode -eq 'suffix-ps1') { $lines = @('    Chk ' + $q + 'K98b: suffixed' + $q) }
-        else { $lines = @('chk ' + $q + 'K98b: suffixed' + $q) }
-        [System.IO.File]::WriteAllLines($f, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
-        return $f
-    }
-    if (PartOn 'K') {
-    Chk "K10: common-control judgment name / mapping / start-case extraction positive control" $(if (@(DnNames $HCA_KEY).Count -ge 1 -and @(AkPairs $HCC_KEY).Count -ge 1 -and (AkFrom $HCF_KEY 'K') -ne '') { 'ok' } else { 'no' }) 'ok'
-    Chk "K16: main check - every common-control judgment name has a mapped case" (AkAskNoCase $HCA_KEY $HCC_KEY) '0'
-    Chk "K17: main check - every name in the mapping is in hc-asks" (AkAskUnknown $HCA_KEY $HCC_KEY) '0'
-    Chk "K18: main check - every mapped case exists as a case line in both runners" (AkCaseMissing $HCC_KEY 'K') '0'
-    Chk "K19: main check - every case of this axis (hc-ask-from and above) is in the mapping" (AkCaseUnmapped $HCC_KEY $HCF_KEY 'K') '0'
-    Chk "K20: control - a conventions copy with one more judgment name adds one name without a case" ([string]([int](AkAskNoCase $HCA_KEY $HCC_KEY (HcFixture 'addname')) - [int](AkAskNoCase $HCA_KEY $HCC_KEY))) '1'
-    Chk "K21: control - a conventions copy with the first pair whose case appears once dropped adds one unmapped case" ([string]([int](AkCaseUnmapped $HCC_KEY $HCF_KEY 'K' (HcFixture 'droppair')) - [int](AkCaseUnmapped $HCC_KEY $HCF_KEY 'K'))) '1'
-    Chk "K22: control - a conventions copy with a pair naming a missing case adds one missing case" ([string]([int](AkCaseMissing $HCC_KEY 'K' (HcFixture 'nocase')) - [int](AkCaseMissing $HCC_KEY 'K'))) '1'
-    Chk "K23: control - two synthetic runners holding one unmapped suffixed case give one unmapped" (AkCaseUnmapped $HCC_KEY $HCF_KEY 'K' '' (HcRunnerFixture 'suffix-sh') (HcRunnerFixture 'suffix-ps1')) '1'
-    Chk "K24: control - a conventions copy with a pair naming an undeclared judgment adds one unknown name" ([string]([int](AkAskUnknown $HCA_KEY $HCC_KEY (HcFixture 'unknown')) - [int](AkAskUnknown $HCA_KEY $HCC_KEY))) '1'
-    Chk "K25: control - the case-line verdict skips comment lines and cases outside Part K (registry rows included) and reads suffixed IDs and Part K registry rows" ((@(AkCaseIds 'K' (HcRunnerFixture 'ids')) | ForEach-Object { $_ + ',' }) -join '') 'K99,K98b,K97,'
-    }
     # Order control fixture -- SYNTHETIC (same reason as DnOrderFixture); 'swap' reverses only the first two definitions.
     function FlOrderFixture([string]$mode) {
         $f = Join-Path $sbx ('conv-flo-' + $mode + '.md')
@@ -3951,7 +4424,7 @@ try {
     Chk "N63: control -- two synthetic runners holding one unmapped suffixed case give 1 unmapped" (FaCaseUnmapped '' (FaSuffixFixture 'sh') (FaSuffixFixture 'ps1')) '1'
     }
 
-    # --- Part O: consuming the retro follow-up ledger (M54) ----------------
+    # === Part O -- consuming the retro follow-up ledger (M54) ===============
     # Asks whether what the retro wrote reaches the next cycle. What is bitten is the declaration's
     # uniqueness, the status values' set membership and the consumer's wiring -- whether a disposition
     # is *sound* is the review's layer (the convention writes the same boundary).
@@ -5333,7 +5806,7 @@ try {
     Chk "O127: section-count control -- a one-section copy has nothing to check for O124, vanishes 0 for O125 and still holds the O126 control; a two-section copy whose previous table has no open key reddens O124" ((RtPrevVerdict (RtSecFixture 'one')) + '|' + (RtOpenLost (RtSecFixture 'one')) + '|' + (RtLostCtl (RtSecFixture 'one')) + '|' + (RtPrevVerdict (RtSecFixture 'noopen')) + '|' + [string](RtSecCount (RtSecFixture 'noopen'))) 'ok|0|1|0|0|no|2'
     }
 
-    # --- Part P: completion-criteria cross-check (M55) ----------------------
+    # === Part P -- completion-criteria cross-check (M55) ====================
     # Did impl walk its own milestone's criteria BY NUMBER? What is bitten is omissions and ghosts;
     # whether a "met" is TRUE is the review's layer (the convention writes the same boundary).
     # The two Korean headings are assembled from code points -- this copy stays byte>127 = 0.
@@ -5783,64 +6256,7 @@ try {
     Chk "P47: control - a conventions copy with only one case removed from the skip declaration adds exactly one unmapped case" ([string]([int](AkCaseUnmappedX $CCC_KEY $CCF_KEY $CCS_KEY 'P' (CcFixture 'dropskip')) - [int](AkCaseUnmappedX $CCC_KEY $CCF_KEY $CCS_KEY 'P'))) '1'
     }
 
-    # (G9-G27, M91 rf-116) CROSS-REFERENCE INTEGRITY JUDGMENT NAMES AND THEIR CASES -- the "enforcement" item of the conventions section on
-    # cross-reference integrity is no longer prose but xr-asks: / xr-ask-cases: / xr-ask-from:. Declaration hygiene (G9-G16) comes from
-    # registry rows, the mapping (G18-G21) calls the Ak* bodies with Part G. Part G is the axis of that one section, so there is no skip
-    # declaration. This block has to follow the Ak* definitions, so it sits here, apart from the other Part G cases (G1-G8c).
-    # The controls (G22-G27) ask, as a DELTA, whether a verdict moves by one on a conventions copy / synthetic runner (control-reads-delta).
-    $XRA_KEY = 'xr-asks:'
-    $XRC_KEY = 'xr-ask-cases:'
-    $XRF_KEY = 'xr-ask-from:'
-    # addname / droppair / nocase / unknown as in CcFixture.
-    function XrFixture([string]$mode) {
-        $f = Join-Path $sbx ('conv-xr-' + $mode + '.md')
-        $bt = [string][char]0x60
-        $ka = '- ' + $bt + $XRA_KEY + $bt; $kc = '- ' + $bt + $XRC_KEY + $bt
-        $ps = @(AkPairs $XRC_KEY); $cnt = @{}
-        foreach ($x in $ps) { $k = FlPairMark $x; if ($cnt.ContainsKey($k)) { $cnt[$k]++ } else { $cnt[$k] = 1 } }
-        $ids = OrdSet @(AkCaseIds 'G' $RUN_SH)
-        $p1 = ' ' + (@($ps | Where-Object { $cnt[(FlPairMark $_)] -eq 1 -and $ids.Contains((FlPairMark $_)) }) | Select-Object -First 1); $n1 = @(DnNames $XRA_KEY) | Select-Object -First 1
-        $ws = [char[]]@([char]0x20, [char]0x09)
-        $out = foreach ($l in [System.IO.File]::ReadAllLines($CONV)) {
-            $t = $l.TrimStart($ws)
-            if ($mode -eq 'addname' -and $t.StartsWith($ka, [System.StringComparison]::Ordinal)) { $l = $l + ' xr-zz-add' }
-            if ($t.StartsWith($kc, [System.StringComparison]::Ordinal)) {
-                if ($mode -eq 'droppair') { $s = $l + ' '; $i = $s.IndexOf($p1 + ' ', [System.StringComparison]::Ordinal); if ($i -ge 0) { $s = $s.Substring(0, $i) + $s.Substring($i + $p1.Length) }; $l = $s.Substring(0, $s.Length - 1) }
-                if ($mode -eq 'nocase') { $l = $l + ' ' + $n1 + '=G999' }
-                if ($mode -eq 'unknown') { $l = $l + ' xr-zz-unknown=G3' }
-            }
-            $l
-        }
-        [System.IO.File]::WriteAllLines($f, [string[]]@($out), (New-Object System.Text.UTF8Encoding($false)))
-        return $f
-    }
-    # in-sh / in-ps1: one in-range unmapped suffixed case / tail: a digit-tail ID, a comment line, another part's case and a plain ID.
-    function XrRunnerFixture([string]$mode) {
-        $f = Join-Path $sbx ('runner-xr-' + $mode + '.txt')
-        $q = [string][char]0x22
-        $ln = switch ($mode) {
-            'in-sh' { @('chk ' + $q + 'G7b: suffixed' + $q) }
-            'in-ps1' { @('    Chk ' + $q + 'G7b: suffixed' + $q) }
-            'tail' { @(('chk ' + $q + 'G8b0: tail' + $q), ('# chk ' + $q + 'G97b1: comment' + $q), ('chk ' + $q + 'P8b0: other' + $q), ('    Chk ' + $q + 'G96: plain' + $q)) }
-        }
-        [System.IO.File]::WriteAllLines($f, [string[]]@($ln), (New-Object System.Text.UTF8Encoding($false)))
-        return $f
-    }
-    if (PartOn 'G') {
-    Chk "G17: cross-reference judgment name / mapping / start-case extraction positive control" $(if (@(DnNames $XRA_KEY).Count -ge 1 -and @(AkPairs $XRC_KEY).Count -ge 1 -and (AkFrom $XRF_KEY 'G') -ne '') { 'ok' } else { 'no' }) 'ok'
-    Chk "G18: main check - every cross-reference judgment name has a mapped case" (AkAskNoCase $XRA_KEY $XRC_KEY) '0'
-    Chk "G19: main check - every name in the mapping is in xr-asks" (AkAskUnknown $XRA_KEY $XRC_KEY) '0'
-    Chk "G20: main check - every mapped case exists as a case in both runners" (AkCaseMissing $XRC_KEY 'G') '0'
-    Chk "G21: main check - every case of this axis (xr-ask-from and above) is in the mapping" (AkCaseUnmapped $XRC_KEY $XRF_KEY 'G') '0'
-    Chk "G22: control - a conventions copy with one more judgment name adds one name without a case" ([string]([int](AkAskNoCase $XRA_KEY $XRC_KEY (XrFixture 'addname')) - [int](AkAskNoCase $XRA_KEY $XRC_KEY))) '1'
-    Chk "G23: control - a conventions copy with the first pair whose case appears once dropped adds one unmapped case" ([string]([int](AkCaseUnmapped $XRC_KEY $XRF_KEY 'G' (XrFixture 'droppair')) - [int](AkCaseUnmapped $XRC_KEY $XRF_KEY 'G'))) '1'
-    Chk "G24: control - a conventions copy with a pair naming a missing case adds one missing case" ([string]([int](AkCaseMissing $XRC_KEY 'G' (XrFixture 'nocase')) - [int](AkCaseMissing $XRC_KEY 'G'))) '1'
-    Chk "G25: control - a conventions copy with a pair naming an undeclared judgment adds one unknown name" ([string]([int](AkAskUnknown $XRA_KEY $XRC_KEY (XrFixture 'unknown')) - [int](AkAskUnknown $XRA_KEY $XRC_KEY))) '1'
-    Chk "G26: control - two synthetic runners holding one in-range unmapped suffixed case give one unmapped" (AkCaseUnmapped $XRC_KEY $XRF_KEY 'G' '' (XrRunnerFixture 'in-sh') (XrRunnerFixture 'in-ps1')) '1'
-    Chk "G27: control - the case-line reader takes a digit-tail ID (G8b0 form) and skips comment lines and other parts' cases" ((@(AkCaseIds 'G' (XrRunnerFixture 'tail')) | ForEach-Object { $_ + ',' }) -join '') 'G8b0,G96,'
-    }
-
-    # --- Part Q: the verdict comparison is pinned to Ordinal (M57) ------------
+    # === Part Q -- the verdict comparison is pinned to Ordinal (M57) ========
     # M42-T03 pinned the verdict comparison saying "every assertion in this file flows through
     # here". That prescription reached FIVE of the seven runners; tests/mutation stayed on `-eq`
     # -- and nothing reddened. "Enforced by sharing it out" hid "enforced in only some places",
@@ -5918,7 +6334,7 @@ try {
     Chk "Q5: false-positive direction -- unpinned but declared passes" ([string](VqScan (VqFixture 'redecl'))) '0'
     }
 
-    # --- Part R: release-coverage bookkeeping declaration (M58) ---------------
+    # === Part R -- release-coverage bookkeeping declaration (M58) ===========
     # The set the coverage check subtracts lived in TWO places (conventions and the release
     # skill) with no machine tying them -- fix one and the other goes stale, the very class this
     # repo already closed for command counts, status-value sets and the phase roster. The single
@@ -5958,7 +6374,7 @@ try {
     Chk "R5: wiring -- the release skill points at the declaration name" (HasToken $REL_SKILL $BK_KEY) 'yes'
     }
 
-    # --- Part S: publish-availability axis / unpublishable terminal state (M59) -
+    # === Part S -- publish-availability axis / unpublishable terminal state (M59) ====
     # The release procedure assumed a reachable remote, so a correct tree (add/commit/tag done)
     # was reported as a failure whenever push could not run. M59 closed that by NAMING two things
     # -- `push-availability` (the push axis, split from the gh publish axis) and
@@ -6560,7 +6976,7 @@ try {
     Chk "S73: transform control -- a copy with a second anchored heading grows the anchor verdict by one" ([string]([int](DcAnchorBad (DcnFixture 'ancdup')) - [int](DcAnchorBad))) '1'
     }
 
-    # --- Part T: runner source EOL contract (M59 review blocker 1 -> M60) -------
+    # === Part T -- runner source EOL contract (M59 review blocker 1 -> M60) ====
     # `.gitattributes` pins `*.sh` to `eol=lf` and even writes the reason in a comment
     # ("CRLF breaks sh execution"), yet ZERO machines checked it. In M59 `run.sh` turned CRLF and
     # **only dash died** (`set: Illegal option -`, 0 seconds) while bash, Windows PowerShell 5.1
@@ -6638,7 +7054,7 @@ try {
     Chk "T7: wiring -- a different .gitattributes changes the extraction" (@(EolGlobs (EolGaFixture)) -join ',') '*.zzz'
     }
 
-    # --- Part U: measurement-order rule + exposing the silent skip (M60) --------
+    # === Part U -- measurement-order rule + exposing the silent skip (M60) ====
     # The harness READS the impl report (Part P), yet `crit_targets` silently skips milestones
     # that have no report. So a run taken BEFORE the report is written is "green while never
     # looking at this cycle at all" -- M59 ran in exactly that order and two blockers survived
@@ -6674,7 +7090,7 @@ try {
     Chk "U7: control -- a new skip raises the count by one" ([string]((SkippedN '9999') - (SkippedN ''))) '1'
     }
 
-    # --- Part V: the machine READS the reversal table (M61) ------------------
+    # === Part V -- the machine READS the reversal table (M61) ===============
     # The checklist's REVERSAL MEASUREMENT demands "neuter each case one by one and confirm THAT
     # case reddens" -- and nobody ever asked whether that held. M60's `T7` is the instance: the
     # doc said it checked wiring, the implementation only looked for a token, so it was strictly
@@ -7190,6 +7606,43 @@ try {
         }
         return ,$s
     }
+    # -> case lines with no ledger key (part letter + number) plus lines sharing a ledger key with another case line (M93). The case-line
+    # rule equals RtIds (comment lines out, registry case rows in); a label starting with '$' (the call that emits registry rows) is not a
+    # case line. The ledger (V61) asks for gaps per part, so an unnumbered label or a (part, number) used by several lines (suffix-only
+    # differences included) can be deleted without leaving a gap.
+    function RtKeyBad([string]$src) {
+        $q = [string][char]0x22
+        $O = [System.StringComparison]::Ordinal
+        $c = @{}
+        $u = 0
+        foreach ($ln in [System.IO.File]::ReadAllLines($src)) {
+            $t = $ln.TrimStart([char[]]@([char]0x20, [char]0x09))
+            $id = $null
+            if ($t.StartsWith('chk ' + $q, $O) -or $t.StartsWith('Chk ' + $q, $O)) {
+                $r = $t.Substring(5); $j = $r.IndexOf(':', $O)
+                if ($j -lt 1) { continue }
+                $id = $r.Substring(0, $j)
+                if ($id.StartsWith('$', $O)) { continue }
+            } elseif ([regex]::IsMatch($t, '^[A-Z]\|[A-Z][0-9]+[a-z]*[0-9]*\|[a-z-]+\|')) {
+                $id = ($t -split '\|')[1]
+            } else { continue }
+            if (-not [regex]::IsMatch($id, '^[A-Z][0-9]+[a-z]*[0-9]*$')) { $u++; continue }
+            $m = [regex]::Match($id, '^([A-Z])([0-9]+)')
+            $k = $m.Groups[1].Value + '|' + [string]([int]$m.Groups[2].Value)
+            if ($c.ContainsKey($k)) { $c[$k]++ } else { $c[$k] = 1 }
+        }
+        foreach ($v in $c.Values) { if ($v -gt 1) { $u += $v } }
+        return [string]$u
+    }
+    function RtKeyBadFixture {
+        $f = Join-Path $sbx 'runner-keybad.txt'
+        $q = [string][char]0x22
+        $lines = @(('chk ' + $q + 'A: unnumbered' + $q + ' x x'), ('    Chk ' + $q + 'Q2: shared' + $q + ' x x'), ('chk ' + $q + 'Q2: shared again' + $q + ' x x'),
+            ('chk ' + $q + 'Q3a: suffix' + $q + ' x x'), ('    Chk ' + $q + 'Q3b: suffix' + $q + ' x x'), ('# chk ' + $q + 'Q4: commented' + $q + ' x x'),
+            ('chk ' + $q + '$_x: dynamic' + $q + ' x x'), 'Q|Q5|count|CONV|zz:|row', ('chk ' + $q + 'Q6: unique' + $q + ' x x'))
+        [System.IO.File]::WriteAllLines($f, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
     # -> one entry per data row inside the marker window: @(row name, reddened IDs...). Column positions come from
     # `reversal-columns:`, the reddened cell is split on `reversal-sep:`.
     function RtRows([string]$path, [string]$marker) {
@@ -7370,10 +7823,14 @@ try {
     Chk "V69: control -- a malformed number-gap line is caught" (RtFx 'gapform' 'fx' @($rtGood, $rtGap, '- number-gap: X8')) '0 0 0 0 0 0 0 0 0 1 0 1'
     Chk "V70: control -- an undeclared empty number is caught (a case deleted and no line added)" (RtFx 'undecl' 'fx' @($rtGood)) '0 0 0 0 0 0 0 0 0 0 1 1'
     # (V71) a subsumed line whose evidence rows never redden the retired ID -- "on every red row" held vacuously (M92 review round 1 rec 2).
+    # (V72 / V73, M93) ONE LEDGER KEY PER CASE LINE -- an unnumbered label or a (part, number) used by several lines can be deleted without
+    # V61 reddening (M92 boundaries 3 and 4). M93 numbered every such line in both runners; this asks about new ones.
+    Chk "V72: main check -- every case line of both runners has a ledger key (part + number) that no other line in that runner uses" ([string]([int](RtKeyBad $RUN_SH) + [int](RtKeyBad $RUN_PS1))) '0'
+    Chk "V73: control -- an unnumbered label, a repeated ID and a suffix-only repeat are caught; a comment, a dollar label and a unique ID are not" (RtKeyBad (RtKeyBadFixture)) '5'
     Chk "V71: control -- a subsumed line with no evidence row reddening the retired ID is caught" (RtFx 'inclv' 'fx' @('- retired: X5=retire-subsumed@r/imp.md>X1', $rtGap)) '0 0 0 0 0 0 0 1 0 0 0 1'
     }
 
-    # --- Part W: inspection-scope declaration (M62) ---------------------------
+    # === Part W -- inspection-scope declaration (M62) =======================
     # "I checked X" leaves the SCOPE to the inspector and nobody looks at it. In the first full cycle
     # an external repo ran, this class RECURRED FOUR TIMES ALONG DIFFERENT AXES (grep pattern -> file
     # set -> compared items -> SEARCH ROOT), and the fourth was found only AFTER it had shipped in a
@@ -7383,70 +7840,6 @@ try {
     # section. What is bitten: declaration uniqueness, the co-term living in all three seats, and the
     # boundary markers being really used. Whether the DECLARED scope equals the search actually run is
     # not statically decidable, and the convention writes that boundary in the same section.
-    # (M75) Start-point predicate NAMES are read from the declarations -- the block and form verdicts get one name per value from
-    # `start-point-block-predicates:` / `start-point-form-predicates:` and the runner emits `name=value` (names are NOT spelled
-    # in this source -- that would make a second declaration site). Name order = value position. W156/W157 go red when the
-    # declared count differs from the number of values a verdict emits. Helpers live OUTSIDE the part guard (rf-60).
-    $SPB_KEY = 'start-point-block-predicates:'
-    $SPF_KEY = 'start-point-form-predicates:'
-    # (M87, rest of retro rf-104) The old Sp* wrappers (three) and fixtures (two) moved to shared name-declaration helper names (Dn*)
-    # -- they take the KEY as an argument, so any other name declaration labels its values with the same function. Bodies are the old
-    # ones; only the names and the "B|F letter -> key" argument changed (same input, same output -- M87 impl report T06 copy check).
-    # Parameter is NOT named `$conv` -- PowerShell variables are case-insensitive, so it would shadow the global `$CONV`.
-    function DnCount([string]$key, [string]$dcConv = '') { return [string](@(DnNames $key $dcConv).Count) }
-    function DnLabel([string]$key, [string]$vals, [string]$spConv = '') {
-        $n = @(DnNames $key $spConv)
-        $v = @(($vals.Trim(' ')) -split ' +' | Where-Object { $_ -ne '' })
-        $k = [Math]::Max($n.Count, $v.Count)
-        $parts = New-Object System.Collections.Generic.List[string]
-        for ($i = 0; $i -lt $k; $i++) {
-            $nm = if ($i -lt $n.Count) { $n[$i] } else { '?' }
-            $vv = if ($i -lt $v.Count) { $v[$i] } else { '?' }
-            $parts.Add($nm + '=' + $vv)
-        }
-        return ($parts -join ' ')
-    }
-    # (M86) NAME / DEFINITION / ORPHAN / UNIQUE / ORDER verdicts come from the shared Dn* helpers -- pass the two declarations as
-    # one space-joined key list ($SP_KEYS). With several keys DnDefs' window runs from the block declaration line to the next
-    # heading at ANY depth -- the window of the absorbed SpDefs (M86 review blocker 1: round 0 narrowed it to the SAME depth and
-    # left an indented orphan definition green). Control: W164.
-    $SP_KEYS = $SPB_KEY + ' ' + $SPF_KEY
-    # Order control fixture -- a SYNTHETIC conventions file holding only the two declaration lines and three definition items;
-    # 'swap' reverses the first two definitions. Not a copy of the real conventions: if the real order is already broken, swapping
-    # its first two items can REDUCE the violations and the control would measure the baseline (M76 reversal measurement).
-    function DnOrderFixture([string]$mode, [string]$k1, [string]$k2) {
-        # (M86 round 1) 'deep' indents the second definition deeper and puts a column-0 prose line before it -- the control that
-        # the several-key window ignores depth (W164). 'deepx' adds one deeper-indented orphan definition 'zz-od'.
-        $f = Join-Path $sbx ('conv-spo-' + $mode + '.md')
-        if ($mode -eq 'swap') { $d1 = 'zz-ob'; $d2 = 'zz-oa' } else { $d1 = 'zz-oa'; $d2 = 'zz-ob' }
-        $bt = [string][char]0x60
-        $lines = @('## fixture', '', ('  - ' + $bt + $k1 + $bt + ' zz-oa zz-ob'), '', ('  - ' + $bt + $k2 + $bt + ' zz-oc'), '',
-            ('  - **' + $bt + $d1 + $bt + '** - x'), ('  - **' + $bt + $d2 + $bt + '** - x'), ('  - **' + $bt + 'zz-oc' + $bt + '** - x'))
-        if ($mode -eq 'deep' -or $mode -eq 'deepx') {
-            $lines = @('## fixture', '', ('  - ' + $bt + $k1 + $bt + ' zz-oa zz-ob'), '', ('  - ' + $bt + $k2 + $bt + ' zz-oc'), '',
-                ('  - **' + $bt + 'zz-oa' + $bt + '** - x'), 'zz prose', ('      - **' + $bt + 'zz-ob' + $bt + '** - x'), ('  - **' + $bt + 'zz-oc' + $bt + '** - x'))
-            if ($mode -eq 'deepx') { $lines += ('      - **' + $bt + 'zz-od' + $bt + '** - x') }
-        }
-        [System.IO.File]::WriteAllLines($f, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
-        return $f
-    }
-    function DnWireFixture([string]$key) {
-        $f = Join-Path $sbx 'conv-spw.md'
-        $first = @(DnNames $key) | Select-Object -First 1
-        $w = '`' + $key + '`'
-        $lines = New-Object System.Collections.ArrayList
-        foreach ($l in [System.IO.File]::ReadAllLines($CONV)) {
-            $i = $l.IndexOf($w, [System.StringComparison]::Ordinal)
-            if ($null -ne $first -and $i -ge 0) {
-                $head = $l.Substring(0, $i + $w.Length); $t = $l.Substring($i + $w.Length)
-                $j = $t.IndexOf(' ' + $first, [System.StringComparison]::Ordinal)
-                if ($j -ge 0) { $l = $head + $t.Substring(0, $j + 1) + 'zzz-wired' + $t.Substring($j + 1 + $first.Length) }
-            }
-            [void]$lines.Add($l)
-        }
-        [System.IO.File]::WriteAllLines($f, $lines.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
-        return $f
-    }
     if (PartOn 'W') {
     $SCOPE_KEY     = 'scope-decl:'
     $SCOPE_LIM_KEY = 'scope-limits:'
@@ -7646,9 +8039,9 @@ try {
     # carries-them-all axis. The baseline is constant for the same reason as `W22`.
     Chk "W25: adversarial control -- a bold listing carrying every marker does not count" ([string](MarksUsedIn $MK_FIX4 'zzz-mk:' @('zzz-m1', 'zzz-m2'))) '1'
     # negative control -- a bogus co-term must not be in the convention (same shape as Part E's -bogus).
-    Chk "W: control -- conventions has no bogus scope co-term" (HasToken $CONV ($SCOPE_ALIAS + '-bogus')) 'no'
+    Chk "W165: control -- conventions has no bogus scope co-term" (HasToken $CONV ($SCOPE_ALIAS + '-bogus')) 'no'
     # cross control -- scope declaration is a review/impl-report asset, so the milestone template has none.
-    Chk "W: control -- milestone template has no scope co-term" (HasToken $MS_TPL $SCOPE_ALIAS) 'no'
+    Chk "W166: control -- milestone template has no scope co-term" (HasToken $MS_TPL $SCOPE_ALIAS) 'no'
     # (W12) WIRING -- the bind really uses the co-term it is HANDED. Without it `ScopeAll` could ignore
     # its argument and `W3` would stay green (same shape as `V32`; the token is in no file, so the
     # baseline is constant by construction).
@@ -7677,8 +8070,8 @@ try {
     Chk "W16: the convention has exactly one definition line for the cache co-term" ([string](ScopeDefn $MC_ALIAS)) '1'
     Chk "W17: impl SKILL carries the cache co-term as a backticked token" (ScopeTok $IMPL_SKILL $MC_ALIAS) 'yes'
     # negative control / cross control -- same shape as the two above (discrimination / asset boundary).
-    Chk "W: control -- conventions has no bogus cache co-term" (HasToken $CONV ($MC_ALIAS + '-bogus')) 'no'
-    Chk "W: control -- milestone template has no cache co-term" (HasToken $MS_TPL $MC_ALIAS) 'no'
+    Chk "W167: control -- conventions has no bogus cache co-term" (HasToken $CONV ($MC_ALIAS + '-bogus')) 'no'
+    Chk "W168: control -- milestone template has no cache co-term" (HasToken $MS_TPL $MC_ALIAS) 'no'
     # (W18) WIRING -- same shape as `W12` (it reads only the token it is handed, which is in no file).
     Chk "W18: wiring -- another cache co-term does not satisfy the bind" (InBoth 'zzz-other-cache' $CONV $IMPL_SKILL) 'no'
     # (W19-W21 / M62-T04) does the artifact write WHAT THE PASS COVERS for `fleet-verify`? Externally,
@@ -8479,199 +8872,9 @@ try {
     Chk "W47: control -- the verdict function catches a declared-name backticked-token fixture" ([string]((AxisNameTokenHits $axtFix) - (AxisNameTokenHits $IMPL_TPL))) '2'
     }
 
-    # --- DECLARATION VERDICT REGISTRY (M86) ---------------------------------------------------------------------
-    # Declaration hygiene and the name-declaration main checks come from ONE row of this table -- "part|case ID|check|conventions
-    # file|keys|label". Checks: count (exactly one declaration line) / seps (no forbidden separator per key; several keys concatenate
-    # the values) / dup def orphan order (the shared Dn* helpers; several keys are read as one name list) / their -sum forms (summed
-    # per key -- the two docs-commit declarations). IDs, labels and expected values equal the hand-written case lines they replace
-    # (M86 impl report T02/T03 -- label lists compared before and after). Rows run only in their own part (PartOn). `cover` rows emit
-    # no case; they only list a declaration key this harness knows -- the coverage check (F27) compares the key set discovered in the
-    # conventions document set with this table's key set. Part N's declaration cases are NOT in this table: at M79 CaseIds read only the runner
-    # source case lines to check the `floor-ask-cases:` mapping (those keys are `cover` rows). From M88 AkCaseIds also reads this table's case rows,
-    # so the Part K (`hc-asks:`) declaration hygiene lives here. The keys are literals in source and the
-    # declaration's original is the conventions line itself -- the table only decides WHICH case ID asks WHICH key.
-    $DECL_REG = @'
-G|G9|count|CONV|xr-asks:|exactly one xr-asks declaration line
-G|G10|count|CONV|xr-ask-cases:|exactly one xr-ask-cases declaration line
-G|G11|count|CONV|xr-ask-from:|exactly one xr-ask-from declaration line
-G|G12|seps|CONV|xr-asks: xr-ask-cases: xr-ask-from:|no forbidden separators at the tail of the three cross-reference judgment declaration lines
-G|G13|dup|CONV|xr-asks:|main check - cross-reference judgment names are unique
-G|G14|def|CONV|xr-asks:|main check - exactly one definition item per judgment name
-G|G15|orphan|CONV|xr-asks:|main check - every judgment definition item has a declared name (0 orphans)
-G|G16|order|CONV|xr-asks:|main check - judgment definition items follow the declared name order
-I|I7|count|CONV|state-neg:|exactly one state-neg declaration line in the convention
-I|I8|count|CONV|state-past:|exactly one state-past declaration line in the convention
-I|I10|seps|CONV|state-neg:|no forbidden separator in the state-neg declaration tail
-I|I11|seps|CONV|state-past:|no forbidden separator in the state-past declaration tail
-I|I18|count|CONV|sep-cps:|exactly one sep-cps declaration line in the convention
-I|I19|count|CONV|sep-ok-cps:|exactly one sep-ok-cps declaration line in the convention
-K|K7|count|CONV|hc-asks:|exactly one hc-asks declaration line
-K|K8|count|CONV|hc-ask-cases:|exactly one hc-ask-cases declaration line
-K|K9|count|CONV|hc-ask-from:|exactly one hc-ask-from declaration line
-K|K11|seps|CONV|hc-asks: hc-ask-cases: hc-ask-from:|no forbidden separator in the three common-control judgment declaration tails
-K|K12|dup|CONV|hc-asks:|main check - common-control judgment names are unique
-K|K13|def|CONV|hc-asks:|main check - every judgment name has exactly one definition item
-K|K14|orphan|CONV|hc-asks:|main check - every judgment definition item has a declared name (orphan definitions 0)
-K|K15|order|CONV|hc-asks:|main check - judgment definition items follow the declared name order
-L|L1|count|CONV|count-word:|exactly one count-word declaration line
-L|L2|count|CONV|count-copula:|exactly one count-copula declaration line
-M|M1|count|CONV|epic-status:|epic-status declaration line is exactly 1
-M|M2|count|CONV|epic-since:|epic-since declaration line is exactly 1
-M|M11|count|CONV|epic-members:|epic-members declaration line is exactly 1
-M|M16|count|CONV|epic-flow:|exactly one epic-flow declaration line
-M|M17|count|CONV|epic-flow-sites:|exactly one epic-flow-sites declaration line
-M|M18|seps|CONV|epic-flow: epic-flow-sites:|no forbidden separators at the tail of the two trunk-emergence declaration lines
-M|M19|dup|CONV|epic-flow:|main check - trunk-emergence names are unique
-M|M20|def|CONV|epic-flow:|main check - exactly one definition item per name
-M|M21|orphan|CONV|epic-flow:|main check - every definition item has a declared name (0 orphans)
-M|M22|order|CONV|epic-flow:|main check - definition items follow the declared name order
-O|O1|count|CONV|retro-status:|retro-status declaration line is exactly 1
-O|O2|count|CONV|retro-block:|retro-block declaration line is exactly 1
-O|O15|count|CONV|retro-cadence:|retro-cadence declaration line is exactly 1
-O|O16|count|CONV|retro-pick:|retro-pick declaration line is exactly 1
-O|O26|seps|CONV|retro-cadence:|no forbidden separator in the retro-cadence declaration tail
-O|O27|seps|CONV|retro-pick:|no forbidden separator in the retro-pick declaration tail
-O|O46|count|CONV|retro-release-mark:|retro-release-mark declaration line is exactly 1
-O|O47|count|CONV|retro-mark-since:|retro-mark-since declaration line is exactly 1
-O|O52|seps|CONV|retro-release-mark: retro-mark-since: retro-mark-derive:|no forbidden separator in the three declaration tails
-O|O58|count|CONV|retro-mark-derive:|retro-mark-derive declaration line is exactly 1
-O|O60|count|CONV|retro-order-branches:|retro-order-branches declaration line is exactly 1
-O|O61|count|CONV|retro-order-verdict:|retro-order-verdict declaration line is exactly 1
-O|O63|seps|CONV|retro-order-branches: retro-order-verdict:|no forbidden separator in the tails of the two branch declarations
-O|O64|dup|CONV|retro-order-branches:|main check -- branch names are unique
-O|O65|def|CONV|retro-order-branches:|main check -- every branch name has exactly one definition item
-O|O66|orphan|CONV|retro-order-branches:|main check -- every branch definition item has a declared name (0 orphans)
-O|O67|order|CONV|retro-order-branches:|main check -- branch definition order equals declaration name order
-O|O100|count|CONV|mark-since-steps:|mark-since-steps declaration line is exactly 1
-O|O101|seps|CONV|mark-since-steps:|no forbidden separator in the mark-since-steps declaration tail
-O|O102|dup|CONV|mark-since-steps:|main check -- since-derivation step names are unique
-O|O103|def|CONV|mark-since-steps:|main check -- every step name has exactly one definition item
-O|O104|orphan|CONV|mark-since-steps:|main check -- every step definition item has a declared name (0 orphans)
-O|O105|order|CONV|mark-since-steps:|main check -- step definition order equals declaration name order
-P|P1|count|CONV|criteria-verdict:|criteria-verdict declaration line is exactly 1
-P|P2|count|CONV|criteria-since:|criteria-since declaration line is exactly 1
-P|P20|count|CONV|metrics-filled-since:|exactly one metrics-filled-since declaration line
-P|P24|count|CONV|cc-asks:|exactly one cc-asks declaration line
-P|P25|count|CONV|cc-ask-cases:|exactly one cc-ask-cases declaration line
-P|P26|count|CONV|cc-ask-from:|exactly one cc-ask-from declaration line
-P|P27|count|CONV|cc-ask-skip:|exactly one cc-ask-skip declaration line
-P|P28|seps|CONV|cc-asks: cc-ask-cases: cc-ask-from: cc-ask-skip:|no forbidden separators at the tail of the four completion-criteria judgment declaration lines
-P|P29|dup|CONV|cc-asks:|main check - completion-criteria judgment names are unique
-P|P30|def|CONV|cc-asks:|main check - exactly one definition item per judgment name
-P|P31|orphan|CONV|cc-asks:|main check - every judgment definition item has a declared name (0 orphans)
-P|P32|order|CONV|cc-asks:|main check - judgment definition items follow the declared name order
-R|R1|count|CONV|coverage-bookkeeping:|coverage-bookkeeping declaration line is exactly 1
-S|S1|count|CONV_REL|push-availability:|push-availability declaration line is exactly 1
-S|S2|count|CONV_REL|terminal-state:|terminal-state declaration line is exactly 1
-S|S8|count|CONV_REL|docs-commit-paths:|exactly one docs-commit-paths declaration line
-S|S9|seps|CONV_REL|docs-commit-paths:|no forbidden separator in the docs-commit-paths declaration tail
-S|S20|count|CONV_REL|docs-commit-deny:|exactly one docs-commit-deny declaration line
-S|S22|seps|CONV_REL|docs-commit-deny:|no forbidden separator in the docs-commit-deny declaration tail
-S|S23|count|CONV_REL|docs-commit-parts:|exactly one docs-commit-parts declaration line
-S|S24|seps|CONV_REL|docs-commit-parts:|no forbidden separator in the docs-commit-parts declaration tail
-S|S31|count|CONV_REL|docs-commit-preconds:|exactly one docs-commit-preconds declaration line
-S|S32|count|CONV_REL|docs-commit-epic-cases:|exactly one docs-commit-epic-cases declaration line
-S|S35|dup-sum|CONV_REL|docs-commit-preconds: docs-commit-epic-cases:|main check -- names of both declarations are unique
-S|S36|def-sum|CONV_REL|docs-commit-preconds: docs-commit-epic-cases:|main check -- every name has exactly one definition item
-S|S37|orphan-sum|CONV_REL|docs-commit-preconds: docs-commit-epic-cases:|main check -- no definition item outside the declarations
-S|S38|order-sum|CONV_REL|docs-commit-preconds: docs-commit-epic-cases:|main check -- definition order equals declaration name order
-S|S48|count|CONV|release-preflights:|exactly one release-preflights declaration line
-S|S49|seps|CONV|release-preflights:|no forbidden separator in the release-preflights declaration tail
-S|S51|dup|CONV|release-preflights:|main check -- preflight names are unique
-S|S52|def|CONV|release-preflights:|main check -- every name has exactly one definition item
-S|S53|orphan|CONV|release-preflights:|main check -- no definition item outside the declaration
-S|S54|order|CONV|release-preflights:|main check -- definition order equals declaration name order
-T|T1|count|CONV|source-eol:|source-eol declaration line is exactly 1
-U|U1|count|CONV|measure-order:|measure-order declaration line is exactly 1
-V|V1|count|CONV|control-form:|control-form declaration line is exactly 1
-V|V2|count|CONV|reversal-block:|reversal-block declaration line is exactly 1
-V|V3|count|CONV|reversal-columns:|reversal-columns declaration line is exactly 1
-V|V4|count|CONV|reversal-sep:|reversal-sep declaration line is exactly 1
-V|V5|count|CONV|reversal-since:|reversal-since declaration line is exactly 1
-V|V34|count|CONV|retire-ways:|exactly one retire-ways declaration line
-V|V35|seps|CONV|retire-ways:|no forbidden separators at the tail of the retire-ways declaration line
-V|V36|dup|CONV|retire-ways:|main check - retirement way names are unique
-V|V37|def|CONV|retire-ways:|main check - exactly one definition item per retirement way
-V|V38|orphan|CONV|retire-ways:|main check - every retirement way definition item has a declared name (0 orphans)
-V|V39|order|CONV|retire-ways:|main check - retirement way definition items follow the declared name order
-W|W1|count|CONV|scope-decl:|scope-decl declaration line is exactly 1
-W|W7|count|CONV|scope-limits:|scope-limits declaration line is exactly 1
-W|W13|count|CONV|measure-cache:|measure-cache declaration line is exactly 1
-W|W19|count|CONV|verify-scope:|verify-scope declaration line is exactly 1
-W|W26|seps|CONV|scope-decl:|no forbidden separator in the scope-decl declaration tail
-W|W49|count|CONV|infeasible-decl:|infeasible-decl declaration line is exactly 1
-W|W57|seps|CONV|infeasible-decl:|no forbidden separator in the infeasible-decl declaration tail
-W|W58|count|CONV|lean-decl:|lean-decl declaration line is exactly 1
-W|W66|seps|CONV|lean-decl:|no forbidden separator in the lean-decl declaration tail
-W|W67|count|CONV|scan-control:|scan-control declaration line is exactly 1
-W|W72|seps|CONV|scan-control:|no forbidden separator in the scan-control declaration tail
-W|W73|count|CONV|absent-job:|absent-job declaration line is exactly 1
-W|W78|seps|CONV|absent-job:|no forbidden separator in the absent-job declaration tail
-W|W79|count|CONV|scan-control-anchor:|scan-control-anchor declaration line is exactly 1
-W|W84|seps|CONV|scan-control-anchor:|no forbidden separator in the scan-control-anchor declaration tail
-W|W85|count|CONV|absent-job-anchor:|absent-job-anchor declaration line is exactly 1
-W|W90|seps|CONV|absent-job-anchor:|no forbidden separator in the absent-job-anchor declaration tail
-W|W91|count|CONV|lifecycle-decl:|lifecycle-decl declaration line is exactly 1
-W|W98|seps|CONV|lifecycle-decl:|no forbidden separator in the lifecycle-decl declaration tail
-W|W99|count|CONV|lifecycle-transitions:|lifecycle-transitions declaration line is exactly 1
-W|W101|seps|CONV|lifecycle-transitions:|no forbidden separator in the lifecycle-transitions declaration tail
-W|W27|seps|CONV|measure-cache:|no forbidden separator in the measure-cache declaration tail
-W|W28|seps|CONV|scope-limits:|no forbidden separator in the scope-limits declaration tail
-W|W29|seps|CONV|verify-scope:|no forbidden separator in the verify-scope declaration tail
-W|W127|count|CONV|start-point-map:|exactly one start-point-map declaration line
-W|W138|seps|CONV|start-point-map:|no forbidden separator in the start-point-map declaration tail
-W|W139|count|CONV|start-point-parent:|exactly one start-point-parent declaration line
-W|W140|seps|CONV|start-point-parent:|no forbidden separator in the start-point-parent declaration tail
-W|W148|count|CONV|start-point-pointer:|exactly one start-point-pointer declaration line
-W|W149|seps|CONV|start-point-pointer:|no forbidden separator in the start-point-pointer declaration tail
-W|W152|count|CONV|start-point-block-predicates:|exactly one start-point-block-predicates declaration line
-W|W153|count|CONV|start-point-form-predicates:|exactly one start-point-form-predicates declaration line
-W|W155|seps|CONV|start-point-block-predicates: start-point-form-predicates:|no forbidden separator in either predicate declaration tail
-W|W158|def|CONV|start-point-block-predicates: start-point-form-predicates:|main check -- exactly one definition item per predicate name
-W|W160|orphan|CONV|start-point-block-predicates: start-point-form-predicates:|main check -- every definition item has a declared name (orphan definitions 0)
-W|W161|dup|CONV|start-point-block-predicates: start-point-form-predicates:|main check -- names are unique across both predicate declarations
-W|W162|order|CONV|start-point-block-predicates: start-point-form-predicates:|main check -- definition item order equals the declaration name order
-W|W31|count|CONV|measure-axis:|measure-axis declaration line is exactly 1
-W|W32|count|CONV|measure-axis-job:|measure-axis-job declaration line is exactly 1
-W|W40|seps|CONV|measure-axis:|no forbidden separator in the measure-axis declaration tail
-W|W41|seps|CONV|measure-axis-job:|no forbidden separator in the measure-axis-job declaration tail
-W|W44|count|CONV|measure-axis-names:|measure-axis-names declaration line is exactly 1
-W|W48|seps|CONV|measure-axis-names:|no forbidden separator in the measure-axis-names declaration tail
--|-|cover|CONV|status-items:|N1
--|-|cover|CONV|autonomy-level:|N2
--|-|cover|CONV|autonomy-default:|N10
--|-|cover|CONV|autonomy-lines:|N11 N12
--|-|cover|CONV|floor-marks:|N18
--|-|cover|CONV|floor-items:|N30
--|-|cover|CONV|floor-mark-map:|N31
--|-|cover|CONV|floor-unmarked:|N32
--|-|cover|CONV|floor-excluded:|N33
--|-|cover|CONV|floor-asks:|N46
--|-|cover|CONV|floor-ask-cases:|N47
--|-|cover|CONV|floor-ask-from:|N48
--|-|cover|CONV|retro-flow:|O88
--|-|cover|CONV|retro-flow-sites:|O88
--|-|cover|CONV|retro-gate-since:|O88
--|-|cover|CONV|retro-review-after:|O88
--|-|cover|CONV|tr-draft:|W102 W103 W106
--|-|cover|CONV|tr-impl:|W102 W103 W106
--|-|cover|CONV|tr-review:|W102 W103 W106
--|-|cover|CONV|tr-release-commit:|W102 W103 W106
--|-|cover|CONV|tr-tag:|W102 W103 W106
--|-|cover|CONV|tr-retro:|W102 W103 W106
--|-|cover|CONV|tr-retro-skip:|W102 W103 W106
--|-|cover|CONV|tr-forced:|W102 W103 W106
--|-|cover|CONV|tr-debug-open:|W102 W103 W106
--|-|cover|CONV|tr-debug-done:|W102 W103 W106
--|-|cover|CONV|tr-debug-release:|W102 W103 W106
--|-|cover|CONV|tr-pr-create:|W102 W103 W106
--|-|cover|CONV|tr-pr-finalize:|W102 W103 W106
--|-|cover|CONV|tr-continuous-stop:|W102 W103 W106
--|-|cover|CONV|tr-downstream:|W102 W103 W106
--|-|cover|CONV|tr-part-select:|W102 W103 W106
--|-|cover|CONV|mutation-axes:|N24
-'@
-    function DeclReg { return @($DECL_REG -split "`r?`n" | Where-Object { $_ -ne '' }) }
+    # --- DECLARATION VERDICT REGISTRY CASE ROWS (M86) -- the definitions live in the shared-helper block at the top -------------
+    # Each row carries its own part label and follows part selection. The rows leave from this one place (M86 design -- the only
+    # case site outside a part block).
     foreach ($rgRow in (DeclReg)) {
         $rg = $rgRow -split '\|', 6
         if ($rg[2] -eq 'cover') { continue }
@@ -8689,155 +8892,6 @@ W|W48|seps|CONV|measure-axis-names:|no forbidden separator in the measure-axis-n
         Chk ($rg[1] + ': ' + $rg[5]) $rgGot $rgWant
     }
 
-    # (F24-F28, M86) COVERAGE -- discover the declaration lines of the conventions document set (glob 'docs/conventions*.md') in ONE
-    # pass and ask that each key has exactly one declaration line, that no tail carries a forbidden separator, and that the
-    # discovered key set equals this table's key set. The line shape equals DeclLines (leading spaces/tabs, '-', one or more
-    # spaces/tabs, the backticked key); only keys of the form [a-z][a-z0-9-]*: are counted.
-    function DeclDiscFiles([string]$dir) {
-        $fs = @(Get-ChildItem $dir -File -Force -ErrorAction SilentlyContinue |
-                Where-Object { $_.Name.StartsWith('conventions', [System.StringComparison]::Ordinal) -and
-                               $_.Name.EndsWith('.md', [System.StringComparison]::Ordinal) } | ForEach-Object { $_.FullName })
-        $lst = New-Object 'System.Collections.Generic.List[string]'
-        foreach ($f in $fs) { [void]$lst.Add($f) }
-        $lst.Sort([System.StringComparer]::Ordinal)
-        return @($lst.ToArray())
-    }
-    function DeclDisc([string]$dir = '', [string]$what = 'k') {
-        if ($dir -eq '') { $dir = Join-Path $ROOT 'docs' }
-        $out = New-Object System.Collections.Generic.List[string]
-        foreach ($f in (DeclDiscFiles $dir)) {
-            $raw = ReadUtf8 $f
-            if ($null -eq $raw) { continue }
-            foreach ($ln in ($raw -split "`r?`n")) {
-                $m = [regex]::Match($ln, '^[ \t]*-[ \t]+`([a-z][a-z0-9-]*:)`(.*)$')
-                if ($m.Success) { if ($what -eq 'k') { $out.Add($m.Groups[1].Value) } else { $out.Add($m.Groups[2].Value) } }
-            }
-        }
-        return @($out)
-    }
-    function DeclRegKeys {
-        $s = New-Object 'System.Collections.Generic.SortedSet[string]'([System.StringComparer]::Ordinal)
-        foreach ($row in (DeclReg)) { foreach ($k in (($row -split '\|', 6)[4] -split ' ')) { if ($k -ne '') { [void]$s.Add($k) } } }
-        return @($s)
-    }
-    function DeclDiscDup([string]$dir = '') {
-        $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
-        $dup = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
-        foreach ($k in (DeclDisc $dir 'k')) { if (-not $seen.Add($k)) { [void]$dup.Add($k) } }
-        return [string]$dup.Count
-    }
-    function DeclDiscSeps([string]$dir = '') {
-        return [string]@(DeclDisc $dir 't' | Where-Object { [regex]::IsMatch($_, $SEP_RE) }).Count
-    }
-    function DeclDiscUnreg([string]$dir = '') {
-        $d = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
-        foreach ($k in (DeclDisc $dir 'k')) { [void]$d.Add($k) }
-        $r = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
-        foreach ($k in (DeclRegKeys)) { [void]$r.Add($k) }
-        $n = 0
-        foreach ($k in $d) { if (-not $r.Contains($k)) { $n++ } }
-        foreach ($k in $r) { if (-not $d.Contains($k)) { $n++ } }
-        return [string]$n
-    }
-    function DeclFixture([string]$mode) {
-        $fx = Join-Path $sbx ('declfx-' + $mode)
-        if (Test-Path $fx) { Remove-Item -Recurse -Force $fx }
-        [void](New-Item -ItemType Directory -Path $fx)
-        foreach ($f in (DeclDiscFiles (Join-Path $ROOT 'docs'))) { Copy-Item $f $fx }
-        $fc = Join-Path $fx 'conventions.md'
-        $bt = [string][char]0x60
-        $enc = New-Object System.Text.UTF8Encoding($false)
-        $lines = New-Object System.Collections.Generic.List[string]
-        foreach ($l in ((ReadUtf8 $fc) -split "`r?`n")) { $lines.Add($l) }
-        $k = '- ' + $bt + 'retro-status:' + $bt
-        $out = New-Object System.Collections.Generic.List[string]
-        foreach ($l in $lines) {
-            $t = $l.TrimStart([char[]]@([char]0x20, [char]0x09))
-            $hit = $t.StartsWith($k, [System.StringComparison]::Ordinal)
-            if ($mode -eq 'drop' -and $hit) { continue }
-            if ($mode -eq 'sep' -and $hit) {
-                $w = $bt + 'retro-status:' + $bt + ' '
-                $i = $l.IndexOf($w, [System.StringComparison]::Ordinal)
-                if ($i -ge 0) { $l = $l.Substring(0, $i + $w.Length - 1) + [string][char]0x09 + $l.Substring($i + $w.Length) }
-            }
-            $out.Add($l)
-            if ($mode -eq 'dup' -and $hit) { $out.Add($l) }
-        }
-        if ($mode -eq 'add') { $out.Add(''); $out.Add('  - ' + $bt + 'zz-m86-unreg:' + $bt + ' zz') }
-        [System.IO.File]::WriteAllText($fc, ($out -join "`n"), $enc)
-        if ($mode -eq 'frag') {
-            [System.IO.File]::WriteAllText((Join-Path $fx 'conventions-zz-m86.md'), ('# fixture' + "`n`n" + '  - ' + $bt + 'zz-m86-frag:' + $bt + ' zz' + "`n"), $enc)
-        }
-        return $fx
-    }
-    # (F29-F31, M87, retro rf-108) A `cover` row names the case IDs that ask its key -- one or more, space-separated, in the row's last
-    # field (the label field of a case row). No field is added, so rows of the other check kinds read unchanged. Every ID must have a case
-    # in BOTH runner sources -- a case is a line whose space/tab-stripped text starts with `chk "ID:` / `Chk "ID:`, or a case row of that
-    # source's registry ("part|ID|check|..."); comment lines are not cases. What is re-checked is that the ID EXISTS -- whether that case
-    # really asks that key (its meaning) is not asked (the conventions' "what the machine asks" item).
-    function SrcCaseIds([string]$src) {
-        $q = [string][char]0x22
-        $O = [System.StringComparison]::Ordinal
-        $s = New-Object 'System.Collections.Generic.SortedSet[string]'([System.StringComparer]::Ordinal)
-        foreach ($ln in [System.IO.File]::ReadAllLines($src)) {
-            $t = $ln.TrimStart([char[]]@([char]0x20, [char]0x09))
-            if ($t.StartsWith('chk ' + $q, $O) -or $t.StartsWith('Chk ' + $q, $O)) {
-                $r = $t.Substring(5); $j = $r.IndexOf(':', $O)
-                if ($j -gt 0) { $id = $r.Substring(0, $j); if ([regex]::IsMatch($id, '^[A-Z][0-9]+[a-z]*$')) { [void]$s.Add($id) } }
-                continue
-            }
-            if ([regex]::IsMatch($t, '^[A-Z]\|[A-Z][0-9]+[a-z]*\|[a-z-]+\|')) { [void]$s.Add(($t -split '\|')[1]) }
-        }
-        return @($s)
-    }
-    function CoverIdBad([string]$regFile = '', [string]$shSrc = '', [string]$psSrc = '') {
-        if ($shSrc -eq '') { $shSrc = $RUN_SH }
-        if ($psSrc -eq '') { $psSrc = $RUN_PS1 }
-        $rows = if ($regFile -ne '') { @([System.IO.File]::ReadAllLines($regFile) | Where-Object { $_ -ne '' }) } else { @(DeclReg) }
-        $S = OrdSet @(SrcCaseIds $shSrc); $P = OrdSet @(SrcCaseIds $psSrc)
-        $c = 0
-        foreach ($row in $rows) {
-            $f = $row -split '\|', 6
-            if ($f.Count -lt 6 -or $f[2] -cne 'cover') { continue }
-            $k = 0; $bad = $false
-            foreach ($id in ($f[5] -split ' +')) {
-                if ($id -eq '' -or $id -eq '-') { continue }
-                $k++
-                if (-not $S.Contains($id) -or -not $P.Contains($id)) { $bad = $true }
-            }
-            if ($k -eq 0 -or $bad) { $c++ }
-        }
-        return [string]$c
-    }
-    # noid / empty / oneside: a registry copy (the real rows + one synthetic cover row -- oneside names F29). oneside-src: a ps1 source copy
-    # without the F29 case line (no real row is relied on -- a real row going off does not leak into the control).
-    function CoverFixture([string]$mode) {
-        $enc = New-Object System.Text.UTF8Encoding($false)
-        if ($mode -eq 'oneside-src') {
-            $pfx = 'Chk "F29:'
-            $out = New-Object System.Collections.Generic.List[string]
-            foreach ($l in [System.IO.File]::ReadAllLines($RUN_PS1)) { if (-not $l.TrimStart([char[]]@([char]0x20, [char]0x09)).StartsWith($pfx, [System.StringComparison]::Ordinal)) { $out.Add($l) } }
-            $fx = Join-Path $sbx 'cov-fx-ps1.txt'
-            [System.IO.File]::WriteAllLines($fx, $out.ToArray(), $enc)
-            return $fx
-        }
-        $extra = if ($mode -eq 'noid') { '-|-|cover|CONV|zz-cov:|Z999' } elseif ($mode -eq 'oneside') { '-|-|cover|CONV|zz-cov:|F29' } else { '-|-|cover|CONV|zz-cov:|' }
-        $fx = Join-Path $sbx ('cov-fx-' + $mode + '.txt')
-        [System.IO.File]::WriteAllLines($fx, [string[]](@(DeclReg) + $extra), $enc)
-        return $fx
-    }
-    if (PartOn 'F') {
-    Chk "F29: cover row extraction and case-ID extraction from both runner sources positive-control (>0)" $(if (@(DeclReg | Where-Object { ($_ -split '\|', 6)[2] -ceq 'cover' }).Count -gt 0 -and @(SrcCaseIds $RUN_SH).Count -gt 0 -and @(SrcCaseIds $RUN_PS1).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
-    Chk "F30: main check -- every cover row carries case IDs and each ID exists in both runner sources" (CoverIdBad) '0'
-    $cvb = [int](CoverIdBad)
-    Chk "F31: control -- a row naming a missing ID, an ID present in one runner only and an empty ID field each add one" (([string]([int](CoverIdBad (CoverFixture 'noid')) - $cvb)) + '|' + ([string]([int](CoverIdBad (CoverFixture 'oneside') '' (CoverFixture 'oneside-src')) - $cvb)) + '|' + ([string]([int](CoverIdBad (CoverFixture 'empty')) - $cvb))) '1|1|1'
-    Chk "F24: declaration-line discovery positive-control (>0) and registry key extraction (>0)" $(if (@(DeclDisc '' 'k').Count -gt 0 -and @(DeclRegKeys).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
-    Chk "F25: main check -- no key with two or more declaration lines in the conventions document set" (DeclDiscDup) '0'
-    Chk "F26: main check -- no forbidden separator in any declaration tail of the conventions document set" (DeclDiscSeps) '0'
-    Chk "F27: main check -- the discovered declaration key set and the registry key set have an empty symmetric difference" (DeclDiscUnreg) '0'
-    $dfb27 = [int](DeclDiscUnreg); $dfb25 = [int](DeclDiscDup); $dfb26 = [int](DeclDiscSeps)
-    Chk "F28: control -- in copies, an unregistered declaration added / a registered one dropped / a new fragment / a duplicated line / a TAB in a tail each add exactly one" ([string]([int](DeclDiscUnreg (DeclFixture 'add')) - $dfb27) + '|' + [string]([int](DeclDiscUnreg (DeclFixture 'drop')) - $dfb27) + '|' + [string]([int](DeclDiscUnreg (DeclFixture 'frag')) - $dfb27) + '|' + [string]([int](DeclDiscDup (DeclFixture 'dup')) - $dfb25) + '|' + [string]([int](DeclDiscSeps (DeclFixture 'sep')) - $dfb26)) '1|1|1|1|1'
-    }
 
     # `F1` RUNS ONLY IN A FULL RUN (M64-T03) -- in a partial run the cross-check is red by construction
     # and the control would be vacuous. The partial run prints a DIFFERENT prefix below, which also
