@@ -475,6 +475,13 @@ G|G13|dup|CONV|xr-asks:|본 검사 - 상호참조 무결성 판정 이름이 유
 G|G14|def|CONV|xr-asks:|본 검사 - 판정 이름마다 정의 항목이 정확히 하나
 G|G15|orphan|CONV|xr-asks:|본 검사 - 판정 정의 항목마다 선언된 이름이 있다(고아 정의 0)
 G|G16|order|CONV|xr-asks:|본 검사 - 판정 정의 항목의 순서가 선언의 이름 순서와 같다
+F|F37|count|CONV|nc-asks:|nc-asks 선언 줄 정확히 1개
+F|F38|count|CONV|nc-ask-cases:|nc-ask-cases 선언 줄 정확히 1개
+F|F39|seps|CONV|nc-asks: nc-ask-cases:|새 검사 체크리스트 판정 선언 두 줄 꼬리에 금지 구분자 0건
+F|F40|dup|CONV|nc-asks:|본 검사 - 새 검사 체크리스트 판정 이름이 유일하다
+F|F41|def|CONV|nc-asks:|본 검사 - 판정 이름마다 정의 항목이 정확히 하나
+F|F42|orphan|CONV|nc-asks:|본 검사 - 판정 정의 항목마다 선언된 이름이 있다(고아 정의 0)
+F|F43|order|CONV|nc-asks:|본 검사 - 판정 정의 항목의 순서가 선언의 이름 순서와 같다
 R|R1|count|CONV|coverage-bookkeeping:|coverage-bookkeeping 선언 줄 정확히 1개
 S|S1|count|CONV_REL|push-availability:|push-availability 선언 줄 정확히 1개
 S|S2|count|CONV_REL|terminal-state:|terminal-state 선언 줄 정확히 1개
@@ -845,9 +852,11 @@ in_all_three() { # <token> <f1> <f2> <f3> → yes|no
 
 # (C1) 상태값 선언 정합 — 네 값이 세 파일 전부에 등장(한 곳만 고치면 FAIL).
 if part_on C; then
-for st in 수정함 미해결 "원인만 규명" 확인함; do
-    chk "C1: 상태값 '$st' 세 파일 전부에 등장" "$(in_all_three "$st" "$CONV" "$DBG_SKILL" "$DBG_TPL")" "yes"
-done
+# (M94 `rf-121`) 예전에는 네 값을 도는 반복이 같은 ID `C1`을 네 번 냈다. 값마다 다른 번호의 줄로 풀어 번호 대장 안에 넣었다(C35~C37 — 이름 바꾸기).
+chk "C1: 상태값 '수정함' 세 파일 전부에 등장" "$(in_all_three "수정함" "$CONV" "$DBG_SKILL" "$DBG_TPL")" "yes"
+chk "C35: 상태값 '미해결' 세 파일 전부에 등장" "$(in_all_three "미해결" "$CONV" "$DBG_SKILL" "$DBG_TPL")" "yes"
+chk "C36: 상태값 '원인만 규명' 세 파일 전부에 등장" "$(in_all_three "원인만 규명" "$CONV" "$DBG_SKILL" "$DBG_TPL")" "yes"
+chk "C37: 상태값 '확인함' 세 파일 전부에 등장" "$(in_all_three "확인함" "$CONV" "$DBG_SKILL" "$DBG_TPL")" "yes"
 
 # 음성 통제 — 상태값: 존재하지 않는 상태값(보류함)은 세 파일 **어디에도** 없어야 한다.
 # 가드가 살아 있음(구별력)을 입증한다 — Part B의 `N+1종` 부재 통제와 동일 취지.
@@ -1267,10 +1276,10 @@ same_line() { # <file> <tokA> <tokB> → yes|no  (두 토큰이 같은 한 줄�
     [ -f "$1" ] && grep -F "$2" "$1" 2>/dev/null | grep -qF "$3" && echo yes || echo no
 }
 if part_on E; then
-for pair in "conventions:$CONV" "review SKILL:$REV_SKILL" "review 템플릿:$REV_TPL"; do
-    chk "E4: 계측 줄 골격(${MEAS_TOK}…(${REWORK_TOK})) ${pair%%:*}" \
-        "$(same_line "${pair#*:}" "$MEAS_TOK" "($REWORK_TOK)")" "yes"
-done
+# (M94 `rf-121`) 예전에는 세 파일을 도는 반복이 같은 ID `E4`를 세 번 냈다. 파일마다 다른 번호의 줄로 풀었다(E25 · E26 — 이름 바꾸기).
+chk "E4: 계측 줄 골격(${MEAS_TOK}…(${REWORK_TOK})) conventions" "$(same_line "$CONV" "$MEAS_TOK" "($REWORK_TOK)")" "yes"
+chk "E25: 계측 줄 골격(${MEAS_TOK}…(${REWORK_TOK})) review SKILL" "$(same_line "$REV_SKILL" "$MEAS_TOK" "($REWORK_TOK)")" "yes"
+chk "E26: 계측 줄 골격(${MEAS_TOK}…(${REWORK_TOK})) review 템플릿" "$(same_line "$REV_TPL" "$MEAS_TOK" "($REWORK_TOK)")" "yes"
 
 # (E5) 재검증 규약 선언 정합 — `in-review`만으로는 이 규약을 앵커할 수 없다. 그 토큰은 계측 줄에도
 # 있어(이중 용도) **재검증 절을 통째로 지워도 E2가 통과**한다(M32 리뷰의 반증 패스가 복사본에서 실증).
@@ -1750,6 +1759,59 @@ chk "F26: 본 검사 - 규약 문서 집합의 선언 꼬리에 금지 구분자
 chk "F27: 본 검사 - 발견한 선언 키 집합과 등록표 키 집합의 대칭차 0" "$(decl_disc_unreg)" "0"
 _dfb27=$(decl_disc_unreg "$ROOT/docs"); _dfb25=$(decl_disc_dup "$ROOT/docs"); _dfb26=$(decl_disc_seps "$ROOT/docs")
 chk "F28: 통제 - 사본에서 등록 밖 선언 더함 · 등록 선언 지움 · 새 조각 문서 · 선언 복제 · 꼬리 탭이 각자 하나씩 는다" "$(( $(decl_disc_unreg "$(decl_fixture add)") - _dfb27 ))|$(( $(decl_disc_unreg "$(decl_fixture drop)") - _dfb27 ))|$(( $(decl_disc_unreg "$(decl_fixture frag)") - _dfb27 ))|$(( $(decl_disc_dup "$(decl_fixture dup)") - _dfb25 ))|$(( $(decl_disc_seps "$(decl_fixture sep)") - _dfb26 ))" "1|1|1|1|1"
+fi
+# (F37~F51 · M94 `rf-118`) **새 검사 체크리스트 축의 판정 이름과 케이스 대응** — 규약 "새 검사를 세울 때 함께 붙일 것" 절의 「집행」이 항목들의
+# 자기 선언 판정을 `nc-asks:` · `nc-ask-cases:`로 든다. 선언 위생(F37~F43)은 등록표 행이 내고, 대응(F45~F47)은 `ak_*` 본체를 부른다.
+# **이 축은 한 파트의 축이 아니다** — 대응 케이스가 Part F · N · V에 흩어져 있고 그 파트들에 다른 절의 케이스가 섞여 있어, 다른 고지 축의
+# 「시작 번호 이상이 전부 대응에 있다」(`ak_case_unmapped`)를 두지 않는다. 케이스 실재만 `nc_case_missing`이 케이스 ID의 첫 글자로 파트를
+# 골라 `ak_case_ids`에 묻는다(`ak_*`는 고치지 않았다 — 다른 축의 값은 그대로다).
+# 통제(F48~F51)는 규약 사본 · 러너 사본에서 판정 값이 하나씩 움직이는지를 **차이**로 묻는다(`control-reads-delta`).
+NCA_KEY='nc-asks:'
+NCC_KEY='nc-ask-cases:'
+nc_case_missing() { # <대응 키> [규약 파일] [sh 러너] [ps1 러너] → 대응의 케이스 중 그 ID의 첫 글자 파트에서 두 러너 어느 한쪽에라도
+    # 케이스 줄이 없는 것의 수(서로 다른 케이스로 센다). 파트마다 두 러너를 한 번씩만 읽는다.
+    _ncpr=$(ak_pairs "$1" "${2:-}" | LC_ALL=C awk '{ print substr($0, index($0, "=") + 1) }' | LC_ALL=C sort -u)
+    _ncm=0
+    for _ncp in $(printf '%s\n' "$_ncpr" | LC_ALL=C awk 'NF { print substr($0, 1, 1) }' | LC_ALL=C sort -u); do
+        _ncs=$(ak_case_ids "$_ncp" "${3:-$RUN_SH}"); _ncq=$(ak_case_ids "$_ncp" "${4:-$RUN_PS1}")
+        for _ncv in $(printf '%s\n' "$_ncpr" | LC_ALL=C awk -v p="$_ncp" 'substr($0, 1, 1) == p'); do
+            { printf '%s\n' "$_ncs" | LC_ALL=C grep -qxF -- "$_ncv" && printf '%s\n' "$_ncq" | LC_ALL=C grep -qxF -- "$_ncv"; } || _ncm=$((_ncm + 1))
+        done
+    done
+    echo "$_ncm"
+}
+nc_fixture() { # <addname|nocase|unknown> → 규약 사본(addname: 판정 선언에 이름 하나 · nocase: 없는 케이스를 든 쌍 · unknown: 선언 밖 이름의 쌍)
+    _ncff="$SBX/conv-nc-$1.md"; _ncn1=$(dn_names "$NCA_KEY" | head -1)
+    LC_ALL=C awk -v m="$1" -v ka="- \`$NCA_KEY\`" -v kc="- \`$NCC_KEY\`" -v n1="$_ncn1" '{
+        t = $0; sub(/^[ \t]+/, "", t)
+        if (m == "addname" && substr(t, 1, length(ka)) == ka) { sub(/\r$/, ""); $0 = $0 " nc-zz-add" }
+        if (substr(t, 1, length(kc)) == kc) {
+            sub(/\r$/, "")
+            if (m == "nocase") $0 = $0 " " n1 "=F999"
+            if (m == "unknown") $0 = $0 " nc-zz-unknown=F25"
+        }
+        print }' "$CONV" > "$_ncff"
+    printf '%s' "$_ncff"
+}
+nc_runner_fixture() { # <ps1|sh> → 그 러너 사본에서 대응의 다른 파트(V) 케이스 줄 하나(`V32`)를 지운 것(케이스 실재가 파트를 ID에서 고르는지 ·
+    # 두 러너를 각각 보는지의 통제 — M94 리뷰 권장 2가 sh 칸을 더했다)
+    _ncrf="$SBX/runner-nc-dropv-$1.txt"
+    case $1 in
+        sh) LC_ALL=C awk -v p='chk "V32:' '{ t = $0; sub(/^[ \t]+/, "", t); if (substr(t, 1, length(p)) == p) next; print }' "$RUN_SH" > "$_ncrf" ;;
+        *) LC_ALL=C awk -v p='Chk "V32:' '{ t = $0; sub(/^[ \t]+/, "", t); if (substr(t, 1, length(p)) == p) next; print }' "$RUN_PS1" > "$_ncrf" ;;
+    esac
+    printf '%s' "$_ncrf"
+}
+if part_on F; then
+chk "F44: 새 검사 체크리스트 판정 이름 · 대응 추출 positive-control" "$([ "$(dn_names "$NCA_KEY" | grep -c .)" -ge 1 ] && [ "$(ak_pairs "$NCC_KEY" | grep -c .)" -ge 1 ] && echo ok || echo no)" "ok"
+chk "F45: 본 검사 - 새 검사 체크리스트 판정 이름마다 대응하는 케이스가 있다" "$(ak_ask_nocase "$NCA_KEY" "$NCC_KEY")" "0"
+chk "F46: 본 검사 - 대응의 이름이 전부 nc-asks에 있다" "$(ak_ask_unknown "$NCA_KEY" "$NCC_KEY")" "0"
+chk "F47: 본 검사 - 대응의 케이스가 두 러너 모두에 그 ID 파트의 케이스로 있다" "$(nc_case_missing "$NCC_KEY")" "0"
+chk "F48: 통제 - 판정 선언에 이름 하나를 더한 규약 사본에서 대응 없는 이름이 하나 는다" "$(( $(ak_ask_nocase "$NCA_KEY" "$NCC_KEY" "$(nc_fixture addname)") - $(ak_ask_nocase "$NCA_KEY" "$NCC_KEY") ))" "1"
+chk "F49: 통제 - 없는 케이스를 든 쌍을 더한 규약 사본에서 빠진 케이스가 하나 는다" "$(( $(nc_case_missing "$NCC_KEY" "$(nc_fixture nocase)") - $(nc_case_missing "$NCC_KEY") ))" "1"
+chk "F50: 통제 - 선언 밖 이름의 쌍을 더한 규약 사본에서 모르는 이름이 하나 는다" "$(( $(ak_ask_unknown "$NCA_KEY" "$NCC_KEY" "$(nc_fixture unknown)") - $(ak_ask_unknown "$NCA_KEY" "$NCC_KEY") ))" "1"
+_ncb51=$(nc_case_missing "$NCC_KEY")
+chk "F51: 통제 - ps1 · sh 러너 사본에서 다른 파트(V) 대응 케이스 줄 하나를 지우면 각자 빠진 케이스가 하나 는다" "$(( $(nc_case_missing "$NCC_KEY" "" "" "$(nc_runner_fixture ps1)") - _ncb51 ))|$(( $(nc_case_missing "$NCC_KEY" "" "$(nc_runner_fixture sh)") - _ncb51 ))" "1|1"
 fi
 # === Part G — 상호참조 무결성(M34 · M35에서 규약 문서 **집합**으로 일반화) ====
 # (M34) Part F가 문서의 **자기서술**을 집행한다면, Part G는 문서 **사이를 잇는 참조**를 집행한다 —
@@ -3731,7 +3793,7 @@ chk "N22: 음성 통제 - 붙지 않은 사본은 붉지 않는다" "$(floor_hit
 chk "N23: 픽스처 통제 - 하위 불릿으로 달아도 잡는다" "$(floor_hits "$(floor_fixture nest)")" "1"
 
 # --- 되돌림 축 선언 정합 (M53-T02) ------------------------------------------
-# 되돌림의 방향은 규약의 `mutation-axes:` 선언이 들고, **각 축이 그 절 안에서 실제로
+# 되돌림의 방향은 규약의 `mutation-axes:` 선언이 들고, **각 축이 그 항목의 창(선언 줄부터 다음 체크리스트 항목 전까지) 안에서 실제로
 # 서술되는지**를 문다. 선언만 있고 서술이 없으면 «축이 있다»는 말만 남고 무엇을 하라는 것인지가
 # 사라진다 — M53-T01 실측: 재작업 17라운드가 낳은 차단 25건 중 `adversarial` 방향이 연 것이 15건이고
 # `broken` 방향이 연 것은 0건이었다. **묻는 방향이 한쪽이면 나머지는 통째로 뒤 단계로 미뤄진다.**
@@ -3741,13 +3803,17 @@ MAXES=$(decl_tail "$CONV" 'mutation-axes:' | LC_ALL=C awk -v q="\`" '{
 }')
 NMAX=$(printf '%s\n' "$MAXES" | grep -c .)
 fi
-axis_desc_in() { # <규약 경로> <축 토큰> → **그 절 안에서** 그 축을 서술하는 줄 수
+axis_desc_in() { # <규약 경로> <축 토큰> → **그 항목의 창 안에서** 그 축을 서술하는 줄 수
     # **창은 선언 줄부터 다음 최상위 체크리스트 항목 전까지다.** 파일 전역을 훑으면 서술을 **지우지
     # 않고 다른 절로 옮기는** 편집이 초록으로 지나간다 — 같은 피해에 이르는 다른 모양이고,
     # M53-T03의 **적대 변이 `adv-move`가 실측으로 그것을 보였다**(양 사본 240/0 초록). 이 저장소가
     # 창 경계에서 세 번 데인 자리라(M52 리뷰 라운드 1·2·3) 이번엔 impl 안에서 닫는다.
+    # (M94 리뷰 차단 1) **창은 선언 줄에서만 연다.** 예전에는 `mutation-axes:`가 든 **아무 줄**에서나 열려, 다른 절(되돌림 표의 선언 형식 절의
+    # `axis` 칸 항목)이 그 키를 언급하는 자리에서 다음 제목까지 창이 다시 열렸다 — 서술을 그 절로 옮겨도 `N26` · `N29`가 초록이었다(두 러너 실측).
+    # 선언 줄의 꼴은 선언 판정(`decl_lines`)과 같다 — `-` 뒤 공백 · 탭 하나 이상, 그다음 백틱 키(M94 리뷰 라운드 1 사소 3).
     LC_ALL=C awk -v ax="$2" '
-        index($0, "mutation-axes:") > 0 { win = 1; next }
+        { t = $0; sub(/^[ \t]+/, "", t) }
+        t ~ /^-[ \t]+`mutation-axes:`/ { win = 1; next }
         win && $0 ~ /^[0-9]+\. / { win = 0 }
         win && substr($0, 1, 1) == "#" { win = 0 }
         win && index($0, "- **`" ax "`") > 0 { n++ }
@@ -3761,7 +3827,7 @@ axis_missing() { # <규약 경로> → 서술이 없는 축의 수
     done
     echo "$_am"
 }
-axis_fixture() { # <모드> → 사본 규약 경로 (clean | nodesc | moved)
+axis_fixture() { # <모드> → 사본 규약 경로 (clean | nodesc | moved | movedsec)
     _axf="$SBX/axis-$1.md"
     case "$1" in
         nodesc) LC_ALL=C awk '{ if (index($0, "- **`adversarial`") > 0) sub(/adversarial/, "zzz-gone"); print }' \
@@ -3771,6 +3837,13 @@ axis_fixture() { # <모드> → 사본 규약 경로 (clean | nodesc | moved)
                     { print }
                     END { if (held != "") { print ""; print "## zzz-appendix"; print ""; print held } }
                 ' "$CONV" > "$_axf" ;;
+        # (M94 리뷰 차단 1) 서술 머리를 그 키를 **마지막으로 언급하는 줄**(다른 절) 뒤로 옮긴다 — 창이 언급마다 열리던 동안 초록이던 모양이다.
+        movedsec) LC_ALL=C awk '
+                    NR == FNR { if (index($0, "mutation-axes:") > 0) last = FNR; next }
+                    index($0, "- **`adversarial`") > 0 && index($0, "mutation-axes:") == 0 && FNR < last { held = $0; next }
+                    { print }
+                    FNR == last && held != "" { print held }
+                ' "$CONV" "$CONV" > "$_axf" ;;
         *)      cat "$CONV" > "$_axf" ;;
     esac
     printf '%s' "$_axf"
@@ -3785,10 +3858,10 @@ chk "N26: 본 검사 - 서술이 없는 되돌림 축 0개" "$(axis_missing "$CO
 chk "N27: 픽스처 통제 - 축의 서술이 사라지면 잡는다" "$(axis_missing "$(axis_fixture nodesc)")" "1"
 chk "N28: 음성 통제 - 손대지 않은 사본은 붉지 않는다" "$(axis_missing "$(axis_fixture clean)")" "0"
 # (N29) **적대 변이의 승격**(M53). 서술을 **지우지 않고 다른 절로 옮기는** 편집 — 적대 변이가 초록으로
-# 열었던 자리이고, 창을 절로 좁혀 닫았다. 이 케이스가 없으면 **창을 되돌려도 아무것도 붉지 않는다**
+# 열었던 자리이고, 창을 그 항목으로 좁혀 닫았다(M94 리뷰가 창을 선언 줄에서만 열게 마저 좁혔다). 이 케이스가 없으면 **창을 되돌려도 아무것도 붉지 않는다**
 # (실측: 창 좁히기를 되돌린 변이가 240/0 초록이었다). 규약의 「성립한 적대 변이는 픽스처로 승격한다」가
-# 이 자리를 가리킨다.
-chk "N29: 적대 통제 - 서술을 절 밖으로 옮기면 잡는다" "$(axis_missing "$(axis_fixture moved)")" "1"
+# 이 자리를 가리킨다. (M94 리뷰 차단 1) 둘째 칸은 그 키를 언급하는 **다른 절** 뒤로 옮긴 사본이다 — 창이 언급마다 열리던 동안 이 칸이 0이었다.
+chk "N29: 적대 통제 - 서술을 항목 창 밖(부록 · 그 키를 언급하는 다른 절)으로 옮기면 잡는다" "$(axis_missing "$(axis_fixture moved)")|$(axis_missing "$(axis_fixture movedsec)")" "1|1"
 # (N30~N45 · M78) **안전 바닥의 이름 선언** — 바닥 목록이 산문 열거(옛 「열이다」 ⑴~⑽ — Part L이 수만 물었다)에서 선언으로 올라왔다.
 # 이름을 지우면 정의 · 칸 대조가, 칸에서 빼면 칸 대조가, 표지를 대응에서 빼면 표지 대조가 붉다. 바닥 선언 · 정의 · `floor-marks:`를 모두 함께 고친 편집은 초록이다(규약의 ⒝).
 # `floor-unmarked:` · `floor-excluded:`의 추출에는 따로 positive-control이 없다 — 둘 중 하나가 비면 이름이 칸을 잃어 `N41`이 붉다.
