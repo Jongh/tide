@@ -553,6 +553,13 @@ G|G13|dup|CONV|xr-asks:|main check - cross-reference judgment names are unique
 G|G14|def|CONV|xr-asks:|main check - exactly one definition item per judgment name
 G|G15|orphan|CONV|xr-asks:|main check - every judgment definition item has a declared name (0 orphans)
 G|G16|order|CONV|xr-asks:|main check - judgment definition items follow the declared name order
+F|F37|count|CONV|nc-asks:|exactly one nc-asks declaration line
+F|F38|count|CONV|nc-ask-cases:|exactly one nc-ask-cases declaration line
+F|F39|seps|CONV|nc-asks: nc-ask-cases:|no forbidden separators at the tail of the two new-check checklist judgment declaration lines
+F|F40|dup|CONV|nc-asks:|main check - new-check checklist judgment names are unique
+F|F41|def|CONV|nc-asks:|main check - exactly one definition item per judgment name
+F|F42|orphan|CONV|nc-asks:|main check - every judgment definition item has a declared name (0 orphans)
+F|F43|order|CONV|nc-asks:|main check - judgment definition items follow the declared name order
 I|I7|count|CONV|state-neg:|exactly one state-neg declaration line in the convention
 I|I8|count|CONV|state-past:|exactly one state-past declaration line in the convention
 I|I10|seps|CONV|state-neg:|no forbidden separator in the state-neg declaration tail
@@ -1039,9 +1046,11 @@ try {
 
     # (C1) status-set consistency -- all four values in all three files; fixing only one -> FAIL.
     if (PartOn 'C') {
-    foreach ($st in @($ST_FIXED, $ST_OPEN, $ST_CAUSE, $ST_CONFIRM)) {
-        Chk "C1: status '$st' in all three files" (InAllThree $st $CONV $DBG_SKILL $DBG_TPL) 'yes'
-    }
+    # (M94 rf-121) The loop over the four values used to emit the same ID C1 four times. Each value now has its own numbered line (C35-C37 -- renames).
+    Chk "C1: status '$ST_FIXED' in all three files" (InAllThree $ST_FIXED $CONV $DBG_SKILL $DBG_TPL) 'yes'
+    Chk "C35: status '$ST_OPEN' in all three files" (InAllThree $ST_OPEN $CONV $DBG_SKILL $DBG_TPL) 'yes'
+    Chk "C36: status '$ST_CAUSE' in all three files" (InAllThree $ST_CAUSE $CONV $DBG_SKILL $DBG_TPL) 'yes'
+    Chk "C37: status '$ST_CONFIRM' in all three files" (InAllThree $ST_CONFIRM $CONV $DBG_SKILL $DBG_TPL) 'yes'
 
     # status negative control: a non-existent status ($ST_BOGUS) must appear in NONE of the three files,
     # proving the guard discriminates -- same intent as B1's N+1<jong> absence control.
@@ -1633,9 +1642,10 @@ try {
         return 'no'
     }
     if (PartOn 'E') {
-    foreach ($pair in @(@('conventions', $CONV), @('review SKILL', $REV_SKILL), @('review template', $REV_TPL))) {
-        Chk "E4: metrics-line skeleton ($MEAS_TOK...($REWORK_TOK)) in $($pair[0])" (SameLine $pair[1] $MEAS_TOK "($REWORK_TOK)") 'yes'
-    }
+    # (M94 rf-121) The loop over the three files used to emit the same ID E4 three times. Each file now has its own numbered line (E25 / E26 -- renames).
+    Chk "E4: metrics-line skeleton ($MEAS_TOK...($REWORK_TOK)) in conventions" (SameLine $CONV $MEAS_TOK "($REWORK_TOK)") 'yes'
+    Chk "E25: metrics-line skeleton ($MEAS_TOK...($REWORK_TOK)) in review SKILL" (SameLine $REV_SKILL $MEAS_TOK "($REWORK_TOK)") 'yes'
+    Chk "E26: metrics-line skeleton ($MEAS_TOK...($REWORK_TOK)) in review template" (SameLine $REV_TPL $MEAS_TOK "($REWORK_TOK)") 'yes'
 
     # (E5) re-verify rule declaration consistency -- 'in-review' alone cannot anchor this rule: that token
     # also lives in the metrics line (dual use), so DELETING the whole re-verify clause still passes E2
@@ -2175,6 +2185,69 @@ try {
     Chk "F27: main check -- the discovered declaration key set and the registry key set have an empty symmetric difference" (DeclDiscUnreg) '0'
     $dfb27 = [int](DeclDiscUnreg); $dfb25 = [int](DeclDiscDup); $dfb26 = [int](DeclDiscSeps)
     Chk "F28: control -- in copies, an unregistered declaration added / a registered one dropped / a new fragment / a duplicated line / a TAB in a tail each add exactly one" ([string]([int](DeclDiscUnreg (DeclFixture 'add')) - $dfb27) + '|' + [string]([int](DeclDiscUnreg (DeclFixture 'drop')) - $dfb27) + '|' + [string]([int](DeclDiscUnreg (DeclFixture 'frag')) - $dfb27) + '|' + [string]([int](DeclDiscDup (DeclFixture 'dup')) - $dfb25) + '|' + [string]([int](DeclDiscSeps (DeclFixture 'sep')) - $dfb26)) '1|1|1|1|1'
+    }
+    # (F37-F51, M94 rf-118) NEW-CHECK CHECKLIST JUDGMENT NAMES AND THEIR CASES -- the "enforcement" item of the conventions section on what to
+    # attach when building a new check names the judgments its items claim about their own declarations with nc-asks: / nc-ask-cases:.
+    # Declaration hygiene (F37-F43) comes from registry rows, the mapping (F45-F47) calls the Ak* bodies. THIS AXIS IS NOT ONE PART'S AXIS --
+    # the mapped cases are spread over Parts F / N / V and those parts also hold other sections' cases, so the "every case from the start
+    # number is mapped" check (AkCaseUnmapped) of the other notice axes is not built. Only case existence goes through NcCaseMissing, which picks
+    # the part from the first letter of the case ID and asks AkCaseIds (Ak* is unchanged -- other axes keep their values).
+    # The controls (F48-F51) ask, as a DELTA, whether a verdict moves by one on a conventions / runner copy (control-reads-delta).
+    $NCA_KEY = 'nc-asks:'
+    $NCC_KEY = 'nc-ask-cases:'
+    # -> the number of mapped cases missing, in the part named by the ID's first letter, from either runner (distinct cases). Each part is read once per runner.
+    function NcCaseMissing([string]$cases, [string]$akConv = '', [string]$shRun = '', [string]$psRun = '') {
+        if ($shRun -eq '') { $shRun = $RUN_SH }
+        if ($psRun -eq '') { $psRun = $RUN_PS1 }
+        $ids = OrdSet @(@(AkPairs $cases $akConv) | ForEach-Object { FlPairMark $_ })
+        $shSets = @{}; $psSets = @{}; $n = 0
+        foreach ($v in $ids) {
+            $p = $v.Substring(0, 1)
+            if (-not $shSets.ContainsKey($p)) { $shSets[$p] = OrdSet @(AkCaseIds $p $shRun); $psSets[$p] = OrdSet @(AkCaseIds $p $psRun) }
+            if (-not ($shSets[$p].Contains($v) -and $psSets[$p].Contains($v))) { $n++ }
+        }
+        return [string]$n
+    }
+    # addname: one more judgment name / nocase: a pair naming a missing case / unknown: a pair naming an undeclared judgment.
+    function NcFixture([string]$mode) {
+        $f = Join-Path $sbx ('conv-nc-' + $mode + '.md')
+        $bt = [string][char]0x60
+        $ka = '- ' + $bt + $NCA_KEY + $bt; $kc = '- ' + $bt + $NCC_KEY + $bt
+        $n1 = @(DnNames $NCA_KEY) | Select-Object -First 1
+        $ws = [char[]]@([char]0x20, [char]0x09)
+        $out = foreach ($l in [System.IO.File]::ReadAllLines($CONV)) {
+            $t = $l.TrimStart($ws)
+            if ($mode -eq 'addname' -and $t.StartsWith($ka, [System.StringComparison]::Ordinal)) { $l = $l + ' nc-zz-add' }
+            if ($t.StartsWith($kc, [System.StringComparison]::Ordinal)) {
+                if ($mode -eq 'nocase') { $l = $l + ' ' + $n1 + '=F999' }
+                if ($mode -eq 'unknown') { $l = $l + ' nc-zz-unknown=F25' }
+            }
+            $l
+        }
+        [System.IO.File]::WriteAllLines($f, [string[]]@($out), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    # <ps1|sh> -> a copy of that runner with one mapped case line of another part (V32) dropped (control: case existence picks the part from
+    # the ID and looks at each runner -- the M94 review recommendation 2 added the sh cell).
+    function NcRunnerFixture([string]$which) {
+        $f = Join-Path $sbx ('runner-nc-dropv-' + $which + '.txt')
+        $src = $RUN_PS1; $pfx = 'Chk ' + [string][char]0x22 + 'V32:'
+        if ($which -eq 'sh') { $src = $RUN_SH; $pfx = 'chk ' + [string][char]0x22 + 'V32:' }
+        $ws = [char[]]@([char]0x20, [char]0x09)
+        $ln = @([System.IO.File]::ReadAllLines($src) | Where-Object { -not $_.TrimStart($ws).StartsWith($pfx, [System.StringComparison]::Ordinal) })
+        [System.IO.File]::WriteAllLines($f, [string[]]$ln, (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
+    if (PartOn 'F') {
+    Chk "F44: new-check checklist judgment name / mapping extraction positive control" $(if (@(DnNames $NCA_KEY).Count -ge 1 -and @(AkPairs $NCC_KEY).Count -ge 1) { 'ok' } else { 'no' }) 'ok'
+    Chk "F45: main check - every new-check checklist judgment name has a mapped case" (AkAskNoCase $NCA_KEY $NCC_KEY) '0'
+    Chk "F46: main check - every name in the mapping is in nc-asks" (AkAskUnknown $NCA_KEY $NCC_KEY) '0'
+    Chk "F47: main check - every mapped case exists as a case of its ID's part in both runners" (NcCaseMissing $NCC_KEY) '0'
+    Chk "F48: control - a conventions copy with one more judgment name adds one name without a case" ([string]([int](AkAskNoCase $NCA_KEY $NCC_KEY (NcFixture 'addname')) - [int](AkAskNoCase $NCA_KEY $NCC_KEY))) '1'
+    Chk "F49: control - a conventions copy with a pair naming a missing case adds one missing case" ([string]([int](NcCaseMissing $NCC_KEY (NcFixture 'nocase')) - [int](NcCaseMissing $NCC_KEY))) '1'
+    Chk "F50: control - a conventions copy with a pair naming an undeclared judgment adds one unknown name" ([string]([int](AkAskUnknown $NCA_KEY $NCC_KEY (NcFixture 'unknown')) - [int](AkAskUnknown $NCA_KEY $NCC_KEY))) '1'
+    $ncb51 = [int](NcCaseMissing $NCC_KEY)
+    Chk "F51: control - ps1 / sh runner copies with one mapped case line of another part (V) dropped each add one missing case" ([string]([int](NcCaseMissing $NCC_KEY '' '' (NcRunnerFixture 'ps1')) - $ncb51) + '|' + [string]([int](NcCaseMissing $NCC_KEY '' (NcRunnerFixture 'sh')) - $ncb51)) '1|1'
     }
     # === Part G -- cross-reference integrity (M34; generalized to a FILE SET in M35) =====
     # (M34) Part F enforces what a document says ABOUT ITSELF; Part G enforces the REFERENCES BETWEEN
@@ -4310,7 +4383,7 @@ try {
 
     # --- reversal-axis declaration consistency (M53-T02) ----------------------
     # The convention's `mutation-axes:` line declares the reversal directions and this asks
-    # whether each declared axis is actually DESCRIBED in that section. A declaration without a
+    # whether each declared axis is actually DESCRIBED in that item window. A declaration without a
     # description leaves "there are axes" and nothing telling you what to do -- M53-T01 measured it:
     # of 25 blockers born from 17 rework rounds, the `adversarial` direction opened 15 and `broken`
     # opened 0. When the question points one way, the rest is deferred wholesale to a later stage.
@@ -4319,19 +4392,26 @@ try {
         if (($i % 2) -eq 0 -and $_ -ne '') { $_ }
     })
     }
-    # THE WINDOW IS THAT SECTION -- from the declaration line to the next top-level checklist item.
+    # THE WINDOW IS THAT ITEM -- from the declaration line to the next top-level checklist item.
     # Scanning the whole file lets an edit that MOVES the description to another section (rather than
     # deleting it) sail through green: same damage, different shape. M53-T03's adversarial mutation
     # `adv-move` measured exactly that (240/0 green in both copies). This repo has been burned at a
     # window boundary three times (M52 review rounds 1-3), so this one is closed inside impl.
+    # (M94 review blocker 1) THE WINDOW OPENS ONLY AT THE DECLARATION LINE. It used to open at ANY line containing mutation-axes:, so another
+    # section that mentions the key (the axis-column item of the reversal-table section) reopened it up to the next heading -- moving the
+    # description there left N26 / N29 green in both runners. The head match now also carries the closing backtick, as in run.sh.
     function AxisDescIn([string]$path, [string]$ax) {
         $n = 0
         $win = $false
+        $bt = [string][char]0x60
+        # The declaration-line shape is the one DeclLines uses -- '-' then one or more spaces/tabs, then the backticked key (M94 review round 1 minor 3).
+        $k = '^-[ \t]+' + [regex]::Escape($bt + 'mutation-axes:' + $bt)
+        $ws = [char[]]@([char]0x20, [char]0x09)
         foreach ($l in [System.IO.File]::ReadAllLines($path)) {
-            if ($l.Contains('mutation-axes:')) { $win = $true; continue }
+            if ($l.TrimStart($ws) -cmatch $k) { $win = $true; continue }
             if ($win -and ($l -match '^[0-9]+\. ')) { $win = $false }
             if ($win -and $l.StartsWith('#', [System.StringComparison]::Ordinal)) { $win = $false }
-            if ($win -and $l.Contains('- **' + [string][char]0x60 + $ax)) { $n++ }
+            if ($win -and $l.Contains('- **' + $bt + $ax + $bt)) { $n++ }
         }
         return $n
     }
@@ -4362,20 +4442,39 @@ try {
         [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
         return $f
     }
+    # (M94 review blocker 1) movedsec: the description head moved to just after the LAST line mentioning the key (another section) -- the
+    # shape that stayed green while the window reopened at every mention.
+    function AxisFixtureMovedSec() {
+        $f = Join-Path $sbx 'axis-movedsec.md'
+        $lines = [System.IO.File]::ReadAllLines($CONV)
+        $last = -1
+        for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i].Contains('mutation-axes:')) { $last = $i } }
+        $out = New-Object System.Collections.ArrayList
+        $held = ''
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            $x = $lines[$i]
+            if ($i -lt $last -and $x.Contains('- **' + [string][char]0x60 + 'adversarial') -and (-not $x.Contains('mutation-axes:'))) { $held = $x; continue }
+            [void]$out.Add($x)
+            if ($i -eq $last -and $held -ne '') { [void]$out.Add($held) }
+        }
+        [System.IO.File]::WriteAllLines($f, $out.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+        return $f
+    }
     if (PartOn 'N') {
     Chk "N24: mutation-axes declaration line is exactly 1" (DeclCount $CONV 'mutation-axes:') '1'
     # (N25) Extraction positive-control -- a broken backtick-span parse makes the check below vacuous.
     Chk "N25: reversal-axis extraction positive-control (>0)" $(if (@($mAxes).Count -gt 0) { 'ok' } else { 'no' }) 'ok'
-    # (N26) THE MAIN CHECK. Every declared axis must be described in the section.
+    # (N26) THE MAIN CHECK. Every declared axis must be described in the item window.
     Chk "N26: main check -- declared axes with no description: 0" ([string](AxisMissing $CONV)) '0'
     # Fixture control -- the REAL verdict runs against the fixture (M46 precedent).
     Chk "N27: control -- an axis losing its description is caught" ([string](AxisMissing (AxisFixture 'nodesc'))) '1'
     Chk "N28: negative control -- an untouched copy stays green" ([string](AxisMissing (AxisFixture 'clean'))) '0'
     # (N29) PROMOTING THE ADVERSARIAL MUTATION (M53). Moving the description to another section rather
     # than deleting it -- the shape the adversarial mutation walked through green, closed by narrowing
-    # the window to the section. Without this case, REVERTING that narrowing reddens nothing (measured:
+    # the window to the item (the M94 review made it open only at the declaration line). Without this case, REVERTING that narrowing reddens nothing (measured:
     # 240/0 green). The convention's "a landed adversarial mutation is promoted to a fixture" points here.
-    Chk "N29: adversarial control -- moving the description out of the section is caught" ([string](AxisMissing (AxisFixture 'moved'))) '1'
+    # (M94 review blocker 1) The second cell is a copy with the description moved after ANOTHER section that mentions the key -- it was 0 while the window reopened at every mention.
+    Chk "N29: adversarial control -- moving the description out of the item window (appendix / another section mentioning the key) is caught" ([string](AxisMissing (AxisFixture 'moved')) + '|' + [string](AxisMissing (AxisFixtureMovedSec))) '1|1'
     # (N30~N45, M78) THE SAFETY FLOOR NAME DECLARATION -- the floor list moved from a prose enumeration (Part L only counted it)
     # to declarations. Dropping a name reddens the definition / slot checks, dropping it from a slot reddens the slot check, and
     # dropping a mark from the map reddens the mark check. Editing every floor declaration, definition and `floor-marks:`
