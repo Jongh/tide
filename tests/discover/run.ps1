@@ -88,7 +88,12 @@ trap {
 # canonically-equivalent difference between got and want would pass here and fail there.
 # The [string] casts also close a second hazard: with an ARRAY $got, `-eq` returns the FILTERED
 # SUBARRAY and a non-empty one is truthy -- a vacuous pass.
+# (M95 / rf-123) every emitted case ID (the label before its first colon) is recorded in order. F52-F54 read it to compare the
+# RUN COUNT of a loop over a declaration-derived list with the declaration's item count -- counting inside the loop would make
+# a control that is deleted together with the loop (the M88 `partial` lesson), so the count is taken where cases are EMITTED.
+$script:idsRun = New-Object System.Collections.Generic.List[string]
 function Chk($desc, $got, $want) {
+    $ci = ([string]$desc).IndexOf(':'); if ($ci -gt 0) { $script:idsRun.Add(([string]$desc).Substring(0, $ci)) }   # a label without a colon is outside the case-line rule and is not recorded (same as sh `chk`, M95 round 1)
     if ([string]::Equals([string]$got, [string]$want, [System.StringComparison]::Ordinal)) { $script:pass++; Write-Host ("PASS  {0,-56} ({1})" -f $desc, $got) }
     else { $script:fail++; Write-Host ("FAIL  {0,-56} (got {1}, want {2})" -f $desc, $got, $want) }
 }
@@ -135,10 +140,24 @@ function GitInit($d) { New-Item -ItemType Directory -Force -Path $d | Out-Null; 
         return @($raw -split "`r?`n" | Where-Object { $_ -cmatch $re })
     }
     function DeclCount($path, $key) { return [string](@(DeclLines $path $key)).Count }
-    # The tail after the key on the declaration line -- the ONE place both the marker extraction and
-    # the separator check read, so they can never see different strings. The .sh twin does the same
+    # The tail after the key on the declaration line -- the ONE place the tail is read. The separator check reads the RAW tail
+    # (`DeclTailRaw`); the marker extraction and the other consumers read it with only the trailing run of tab / VT / FF / CR
+    # removed (`DeclTail`, M95 round 1). The two differ only in that run, and the separator check reddens it on the raw tail,
+    # so "a consumer strips a character the check cannot see" (M42 blocker 1) does not arise. The .sh twin does the same
     # with awk index()+substr() (literal, no regex on either side).
+    # (M95 round 1 / rf-124) CONSUMERS READ THE TAIL WITH ITS TRAILING RUN OF TAB / VT / FF / CR REMOVED. Dozens of places in both
+    # runners split the tail into tokens and the split width differs per place (sh awk default splitting drops a tab, ps1
+    # `-split ' '` keeps it), so one trailing tab on a declaration line reddened different cases in the two runners (M94 `f39-tab`,
+    # the M95 review blocker 2 `start-point-map:` repro). So it is trimmed in the shared reader instead of per place -- the sh twin
+    # `decl_tail` does the same. The M42 lesson (when the stripped and the forbidden characters overlap, the ban is not enforced)
+    # still holds: the forbidden-separator check reads the RAW tail (`DeclTailRaw`), so a trailing tab is still red. A tab in the
+    # middle of the line is not trimmed (boundary -- the separator check reddens it in both runners).
     function DeclTail($path, $key) {
+        $t = DeclTailRaw $path $key
+        if ($null -eq $t) { return $null }
+        return $t.TrimEnd([char[]]@([char]0x09, [char]0x0B, [char]0x0C, [char]0x0D))
+    }
+    function DeclTailRaw($path, $key) {
         $line = @(DeclLines $path $key) | Select-Object -First 1
         if ($null -eq $line) { return $null }
         $w = '`' + $key + '`'
@@ -151,7 +170,7 @@ function GitInit($d) { New-Item -ItemType Directory -Force -Path $d | Out-Null; 
     # U+202F / U+205F / U+3000. The .sh twin spells the same set as UTF-8 bytes (octal escapes).
     $SEP_RE = '[\t\v\f\r\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]'
     function BadSeps($path, $key) {
-        $tail = DeclTail $path $key
+        $tail = DeclTailRaw $path $key
         if ($null -eq $tail) { return '0' }
         if ([regex]::IsMatch($tail, $SEP_RE)) { return '1' } else { return '0' }
     }
@@ -192,7 +211,11 @@ function GitInit($d) { New-Item -ItemType Directory -Force -Path $d | Out-Null; 
         foreach ($k in ($key -split ' ' | Where-Object { $_ -ne '' })) {
             $tail = DeclTail $flConv $k
             if ($null -eq $tail) { continue }
-            foreach ($t in ($tail -split ' ')) { if ($t.Trim($ws) -ne '') { $out.Add($t) } }
+            # (M95 / rf-124) the token is TRIMMED of tab / CR / VT / FF before it is added -- the sh twin (`dn_names`) emits the same
+            # string. The old version kept a trailing tab on the token; sh consumers dropped it by word splitting while ps1 compared it
+            # as is, so the same input reddened different case sets (M94 `f39-tab`). Forbidden tail separators are still caught on the
+            # RAW tail (`DeclTailRaw`) by F26 and each axis's `seps` row -- only name extraction trims (`F55` asks it).
+            foreach ($t in ($tail -split ' ')) { if ($t.Trim($ws) -ne '') { $out.Add($t.Trim($ws)) } }
         }
         return @($out)
     }
@@ -1797,6 +1820,36 @@ try {
 
     # negative control -- a bogus anchor must NOT appear in the canonical catalog (same intent as B1 N+1).
     Chk "F35: control -- canonical has no bogus anchor" (HasAnchor $CANON_CMD 'bogusanchor') 'no'
+
+    # (F52-F54, F56, F57 / M95 `rf-123`) RUN COUNT OF A LOOP OVER A DECLARATION-DERIVED LIST. The loop above emits F2 / F32 / F33
+    # once per `role-anchors:` pair. Each is one case line, so the number ledger (conventions "case retirement") cannot see how
+    # many times the loop ran -- cutting it short or filtering a pair stayed green (boundary 5). So each ID's count of cases
+    # ACTUALLY EMITTED (`idsRun`) is compared with the pair count of the declaration. The expected value counts the tokens holding
+    # `=` in the RAW declaration -- it skips the shape filter of `AnchorPairs`, so a filter dropping a pair is red too.
+    function AnchorDeclN([string]$file = '') {
+        if ($file -eq '') { $file = $CANON_CMD }
+        $raw = ReadUtf8 $file
+        if ($null -eq $raw) { return '0' }
+        $m = [regex]::Match($raw, 'role-anchors:([^>]*)')
+        if (-not $m.Success) { return '0' }
+        return [string]@($m.Groups[1].Value.Split([char]0x20) | Where-Object { $_.Contains('=') }).Count
+    }
+    function IdRuns([string]$id, $list = $null) {
+        if ($null -eq $list) { $list = $script:idsRun }
+        return [string]@($list | Where-Object { [string]::Equals([string]$_, $id, [System.StringComparison]::Ordinal) }).Count
+    }
+    Chk "F52: F2 run count equals the role-anchors pair count" (IdRuns 'F2') (AnchorDeclN)
+    Chk "F53: F32 run count equals the role-anchors pair count" (IdRuns 'F32') (AnchorDeclN)
+    Chk "F54: F33 run count equals the role-anchors pair count" (IdRuns 'F33') (AnchorDeclN)
+    # (F56) control -- a catalog copy with one pair dropped lowers the expected count by one (the expectation is derived, control-reads-delta).
+    $cmdDrop = Join-Path $sbx 'cmd-drop-pair.md'
+    [System.IO.File]::WriteAllText($cmdDrop, ([regex]::new('role-anchors: [^ ]* ')).Replace((ReadUtf8 $CANON_CMD), 'role-anchors: ', 1), (New-Object System.Text.UTF8Encoding($false)))
+    Chk "F56: control - a catalog copy with one pair dropped lowers the expected run count by one" ([string]([int](AnchorDeclN) - [int](AnchorDeclN $cmdDrop))) '1'
+    # (F57) control -- dropping one F2 from the run ID list lowers the count by one (the same input as a loop cut one pass short;
+    # the count reads the real record).
+    $f57 = New-Object System.Collections.Generic.List[string]; $f57d = $false
+    foreach ($x in $script:idsRun) { if (-not $f57d -and [string]::Equals($x, 'F2', [System.StringComparison]::Ordinal)) { $f57d = $true; continue }; $f57.Add($x) }
+    Chk "F57: control - dropping one F2 from the run ID list lowers the count by one" ([string]([int](IdRuns 'F2') - [int](IdRuns 'F2' $f57))) '1'
     }
 
     # --- (M43+) document self-description + runner-source discipline ----
@@ -2248,6 +2301,17 @@ try {
     Chk "F50: control - a conventions copy with a pair naming an undeclared judgment adds one unknown name" ([string]([int](AkAskUnknown $NCA_KEY $NCC_KEY (NcFixture 'unknown')) - [int](AkAskUnknown $NCA_KEY $NCC_KEY))) '1'
     $ncb51 = [int](NcCaseMissing $NCC_KEY)
     Chk "F51: control - ps1 / sh runner copies with one mapped case line of another part (V) dropped each add one missing case" ([string]([int](NcCaseMissing $NCC_KEY '' '' (NcRunnerFixture 'ps1')) - $ncb51) + '|' + [string]([int](NcCaseMissing $NCC_KEY '' (NcRunnerFixture 'sh')) - $ncb51)) '1|1'
+    # (F55 / M95 `rf-124`) control -- in a conventions copy whose declaration line carries a trailing tab, name extraction equals
+    # the original. The shared extraction (`DnNames` / sh `dn_names`) trims tab off the tokens, so both runners emit the same
+    # names -- the old version kept the tab on the last token (M94 `f39-tab`). The forbidden tail separator itself is reddened by
+    # F26 on the raw tail -- this control asks only that extraction is the same (same shape as rf-109's `M15`).
+    $kcTab = '- ' + [string][char]0x60 + $NCC_KEY + [string][char]0x60
+    $tabWs = [char[]]@([char]0x20, [char]0x09)
+    $tabLines = foreach ($l in [System.IO.File]::ReadAllLines($CONV)) { if ($l.TrimStart($tabWs).StartsWith($kcTab, [System.StringComparison]::Ordinal)) { $l + [string][char]0x09 } else { $l } }
+    $convTab = Join-Path $sbx 'conv-nc-tailtab.md'
+    [System.IO.File]::WriteAllLines($convTab, [string[]]$tabLines, (New-Object System.Text.UTF8Encoding($false)))
+    $tabSame = ((@(DnNames $NCC_KEY $convTab) -join "`n") -ceq (@(DnNames $NCC_KEY) -join "`n")) -and -not ([string](DeclTailRaw $convTab $NCC_KEY) -ceq [string](DeclTailRaw $CONV $NCC_KEY))
+    Chk "F55: control - name extraction from a copy with a trailing tab on the declaration line equals the original" $(if ($tabSame) { 'same' } else { 'differ' }) 'same'
     }
     # === Part G -- cross-reference integrity (M34; generalized to a FILE SET in M35) =====
     # (M34) Part F enforces what a document says ABOUT ITSELF; Part G enforces the REFERENCES BETWEEN
@@ -8586,6 +8650,15 @@ try {
     $KEY_FAIL = '- ' + $VERDICT_WORD + ' `' + $VERDICT_FAIL + '`'
     $KEY_OK = '- ' + $VERDICT_WORD + ' `' + $VERDICT_OK + '`'
     $KEY_UNREAD = '- **' + (Uni 0xD310,0xC815,0xC744,0x0020,0xC77D,0xC9C0,0x0020,0xBABB,0xD558,0xBA74) + '**'
+    # (M95 / rf-106) the fourth branch -- verdict not-possible, but the impl report's rework round is larger than the review's
+    # metric, so the rework is already done (declaration key "jae-jak-eop-kkeut"). Its head does not start with "- verdict `", so it
+    # is never counted as a KEY_FAIL item -- a bold-phrase head like the unreadable branch.
+    $VERDICT_REWORK = Uni 0xC7AC,0xC791,0xC5C5,0xB05D                    # jae-jak-eop-kkeut = rework done (map key)
+    $bpK3Full = '**' + $VERDICT_WORD + ' `' + $VERDICT_FAIL + '`' + (Uni 0xC774,0xACE0,0x0020,0xC7AC,0xC791,0xC5C5,0xC774,0x0020,0xC774,0xBBF8,0x0020,0xB05D,0xB0AC,0xC73C,0xBA74) + '**'
+    $KEY_REWORK = '- ' + $bpK3Full
+    # (M95 round 1 / review minor 4) the third shape head is the WHOLE bold verdict head ("**verdict `") -- counting only the
+    # rework-done head left a look-alike conflicting branch ("**verdict `not-possible` and {other condition}**") uncounted.
+    $bpK3 = '**' + $VERDICT_WORD + ' `'
     $fpWs = [char[]]@([char]0x20, [char]0x09)   # space and tab only -- the sh copy strips exactly [ \t]
     function SecSpan([string]$path, [string]$anchor) {
         $out = New-Object System.Collections.Generic.List[string]
@@ -8646,6 +8719,12 @@ try {
     Chk "W118: the not-possible branch is the line assembled from the declaration" (DnLabel $SPF_KEY (FormProbe $CYC_SKILL $CYC_SEC_ANCHOR $KEY_FAIL (SpmLine $CONV $VERDICT_FAIL $KEY_FAIL))) (DnLabel $SPF_KEY '1 yes no')
     Chk "W119: the possible branch is the line assembled from the declaration" (DnLabel $SPF_KEY (FormProbe $CYC_SKILL $CYC_SEC_ANCHOR $KEY_OK (SpmLine $CONV $VERDICT_OK $KEY_OK))) (DnLabel $SPF_KEY '1 yes no')
     Chk "W120: the unreadable-verdict branch is the line assembled from the declaration" (DnLabel $SPF_KEY (FormProbe $CYC_SKILL $CYC_SEC_ANCHOR $KEY_UNREAD (SpmLine $CONV $VERDICT_UNREAD $KEY_UNREAD))) (DnLabel $SPF_KEY '1 yes no')
+    Chk "W169: the rework-done not-possible branch is the line assembled from the declaration" (DnLabel $SPF_KEY (FormProbe $CYC_SKILL $CYC_SEC_ANCHOR $KEY_REWORK (SpmLine $CONV $VERDICT_REWORK $KEY_REWORK))) (DnLabel $SPF_KEY '1 yes no')
+    # (W176 / M95 round 1 / review minor 9) control -- in a cycle skill copy without the rework-done branch line, W169's extraction is
+    # zero (no vacuous pass).
+    $cycNoRework = Join-Path $sbx 'cyc-no-rework.md'
+    [System.IO.File]::WriteAllLines($cycNoRework, [string[]]@([System.IO.File]::ReadAllLines($CYC_SKILL) | Where-Object { -not $_.TrimStart($fpWs).StartsWith($KEY_REWORK, [System.StringComparison]::Ordinal) }), (New-Object System.Text.UTF8Encoding($false)))
+    Chk "W176: control - without the rework-done branch line the form verdict's extraction is zero" ((FormProbe $cycNoRework $CYC_SEC_ANCHOR $KEY_REWORK (SpmLine $CONV $VERDICT_REWORK $KEY_REWORK)) -split ' ')[0] '0'
     # (W121) MAIN CHECK -- do the two skills use the same verdict value set. The notation differs, so the
     # VALUES are extracted and sorted ORDINALLY (Sort-Object is culture-aware -- see OrdinalSortUnique).
     function VerdictSet([string]$path) {
@@ -8661,6 +8740,60 @@ try {
     $vsStatus = VerdictSet (Join-Path $ROOT 'skills/status/SKILL.md')
     $vsCycle = VerdictSet $CYC_SKILL
     Chk "W131: positive-control for verdict-value extraction" $(if ($vsStatus -ne '' -and $vsCycle -ne '') { 'ok' } else { 'no' }) 'ok'
+    # (W170-W175 / M95 `rf-106`) THE STATUS REWORK-ROUND BRANCH. M85 put a "compare the rework rounds" sub-item under status's
+    # not-possible item, but no case asked it -- deleting that sentence stayed green (M85-impl follow-up 2). W121 compares only the
+    # verdict value sets. So it is asked (1) that the not-possible item is unique and holds, INSIDE ITS ITEM WINDOW, a sub-item carrying
+    # the rework-round token, and (2) that the first `/tide:` destination inside that sub-item's window equals the destination of the
+    # `start-point-map:` key for rework-done -- (2) is the correspondence of the cycle branch (declaration) and the status branch. Windows
+    # open by indentation depth: the head line starts one, the first non-blank line not deeper than it ends it.
+    $ST_SKILL = Join-Path $ROOT 'skills/status/SKILL.md'
+    $stHead = '- ' + $VERDICT_WORD + ' "' + $VERDICT_FAIL + '"'
+    $stTok = '`' + (Uni 0xC7AC,0xC791,0xC5C5,0x0020,0xB77C,0xC6B4,0xB4DC) + '(rework)`'
+    function StInd([string]$s) { return ($s.Length - $s.TrimStart(' ').Length) }
+    function StFailProbe([string]$path) {
+        $L = [System.IO.File]::ReadAllLines($path)
+        $n = $L.Count; $c = 0; $h = -1; $sub = 'no'; $dest = '-'
+        for ($i = 0; $i -lt $n; $i++) { if ($L[$i].TrimStart($fpWs).StartsWith($stHead, [System.StringComparison]::Ordinal)) { $c++; if ($h -lt 0) { $h = $i } } }
+        if ($h -ge 0) {
+            $d = StInd $L[$h]
+            for ($i = $h + 1; $i -lt $n; $i++) {
+                $t = $L[$i].TrimStart($fpWs)
+                if ($t -ne '' -and (StInd $L[$i]) -le $d) { break }
+                if ($t.StartsWith('- ', [System.StringComparison]::Ordinal) -and $t.Contains($stTok)) {
+                    $sub = 'yes'; $sd = StInd $L[$i]
+                    for ($j = $i; $j -lt $n; $j++) {
+                        $u = $L[$j].TrimStart($fpWs)
+                        if ($j -gt $i -and $u -ne '' -and (StInd $L[$j]) -le $sd) { break }
+                        $m = [regex]::Match($u, '/tide:[a-z-]+')
+                        if ($m.Success) { $dest = $m.Value.Substring(6); break }
+                    }
+                    break
+                }
+            }
+        }
+        return ('{0} {1} {2}' -f $c, $sub, $dest)
+    }
+    $stRaw = (StFailProbe $ST_SKILL) -split ' '
+    Chk "W170: status has one not-possible item holding the rework-round sub-item inside its window" ($stRaw[0] + ' ' + $stRaw[1]) '1 yes'
+    Chk "W171: the status rework-round sub-item's destination equals the start-point-map rework-done destination" $stRaw[2] (SpmDest $CONV $VERDICT_REWORK)
+    $stFxDir = Join-Path $sbx 'stfx'
+    if (-not (Test-Path $stFxDir)) { New-Item -ItemType Directory -Path $stFxDir | Out-Null }
+    $stBase = @(
+        ('- ' + $VERDICT_WORD + ' "' + $VERDICT_OK + '" ' + $ARROW + ' /tide:release'),
+        ($stHead + ' ' + $ARROW + ' compare the rework rounds:'),
+        ('  - the ' + $stTok + ' value of the impl report is larger ' + $ARROW + ' the rework is already done --'),
+        '    /tide:review',
+        ('  - otherwise ' + $ARROW + ' rerun /tide:impl M{N}'),
+        '- next item')
+    function StFx([string]$name, [string[]]$lines) { $p = Join-Path $stFxDir $name; [System.IO.File]::WriteAllLines($p, $lines, (New-Object System.Text.UTF8Encoding($false))); return $p }
+    $stFxBase = StFx 'base.md' $stBase
+    $stFxNoHead = StFx 'nohead.md' (@($stBase[0]) + @($stBase[2..5]))
+    $stFxMoved = StFx 'moved.md' (@($stBase[0..2]) + @('    (the destination is on the line below)', $stBase[4], '    /tide:review', $stBase[5]))
+    $stFxOutside = StFx 'outside.md' (@($stBase[0..1]) + @($stBase[2].Substring(2), $stBase[3].Substring(2)) + @($stBase[4..5]))
+    Chk "W172: control - with no not-possible item head the extraction is zero" (StFailProbe $stFxNoHead) '0 no -'
+    Chk "W173: control - moving the destination to the sibling sub-item removes it from the rework-round sub-item window" ((StFailProbe $stFxMoved) -split ' ')[2] '-'
+    Chk "W174: control - a rework-round sentence outside the not-possible item window is not counted as its sub-item" ((StFailProbe $stFxOutside) -split ' ')[1] 'no'
+    Chk "W175: false-positive direction - the normal fixture is 1 yes review" (StFailProbe $stFxBase) '1 yes review'
     # (W132-W135) controls -- four form-breaking mutations promoted to fixtures. The expected line and the fixture's
     # NOT-POSSIBLE branch line are assembled from the real convention declaration -- pinning a destination in the
     # fixture makes the controls go falsely red on a legitimate declaration change (M73 reversal measurement). The
@@ -8730,23 +8863,26 @@ try {
         if ($m.Success) { return $s.Substring($m.Length) }
         return $s
     }
-    function BlockProbe([string]$path, [string]$anchor, [string]$wp, [string]$wt, [string]$wo, [string]$wf, [string]$wu) {
+    # (M95) four branches now -- possible, rework-done, not-possible, unreadable in that order. The normal branch-shaped line count
+    # is not a hand constant but the declaration's pair count ($spmN).
+    function BlockProbe([string]$path, [string]$anchor, [string]$wp, [string]$wt, [string]$wo, [string]$wr, [string]$wf, [string]$wu) {
         $L = @(SecSpan $path $anchor)
         $n = $L.Count; $pc = 0; $pi = -1; $bc = 0
         for ($i = 0; $i -lt $n; $i++) {
             if ($L[$i].Contains($SP_PTR_TOK)) { $pc++; if ($pi -lt 0) { $pi = $i } }
             $t = BpUnmark ($L[$i].TrimStart($fpWs))
-            if ($t.StartsWith($bpK1, [System.StringComparison]::Ordinal) -or $t.StartsWith($bpK2, [System.StringComparison]::Ordinal)) { $bc++ }
+            if ($t.StartsWith($bpK1, [System.StringComparison]::Ordinal) -or $t.StartsWith($bpK2, [System.StringComparison]::Ordinal) -or $t.StartsWith($bpK3, [System.StringComparison]::Ordinal)) { $bc++ }
         }
         $par = ($pi -ge 1 -and [string]::Equals($L[$pi - 1].TrimStart($fpWs), $wp, [System.StringComparison]::Ordinal))
         $ptr = ($pi -ge 0 -and [string]::Equals($L[$pi].TrimStart($fpWs), $wt, [System.StringComparison]::Ordinal))
-        $blk = ($pi -ge 0 -and $pi + 3 -lt $n -and
+        $blk = ($pi -ge 0 -and $pi + 4 -lt $n -and
                 [string]::Equals($L[$pi + 1].TrimStart($fpWs), $wo, [System.StringComparison]::Ordinal) -and
-                [string]::Equals($L[$pi + 2].TrimStart($fpWs), $wf, [System.StringComparison]::Ordinal) -and
-                [string]::Equals($L[$pi + 3].TrimStart($fpWs), $wu, [System.StringComparison]::Ordinal))
+                [string]::Equals($L[$pi + 2].TrimStart($fpWs), $wr, [System.StringComparison]::Ordinal) -and
+                [string]::Equals($L[$pi + 3].TrimStart($fpWs), $wf, [System.StringComparison]::Ordinal) -and
+                [string]::Equals($L[$pi + 4].TrimStart($fpWs), $wu, [System.StringComparison]::Ordinal))
         $aft = $false
         if ($pi -ge 0) {
-            $j = $pi + 4
+            $j = $pi + 5
             while ($j -lt $n -and $L[$j].TrimStart($fpWs) -eq '') { $j++ }
             $aft = ($j -ge $n -or $L[$j].TrimStart($fpWs).StartsWith('- ', [System.StringComparison]::Ordinal))
         }
@@ -8758,10 +8894,13 @@ try {
     $cycWantPointer = SptLine $CONV
     $cycWantOk = SpmLine $CONV $VERDICT_OK $KEY_OK
     $cycWantUnread = SpmLine $CONV $VERDICT_UNREAD $KEY_UNREAD
-    function CycBlockRaw([string]$path) { return (BlockProbe $path $CYC_SEC_ANCHOR $cycWantParent $cycWantPointer $cycWantOk $cycWantFail $cycWantUnread) }
+    $cycWantRework = SpmLine $CONV $VERDICT_REWORK $KEY_REWORK
+    $spmN = [string](SpmPairs $CONV)   # (M95) normal branch-shaped line count -- from the declaration's pair count (the hand constant 3 is gone)
+    $spmN1 = [string]([int]$spmN + 1)
+    function CycBlockRaw([string]$path) { return (BlockProbe $path $CYC_SEC_ANCHOR $cycWantParent $cycWantPointer $cycWantOk $cycWantRework $cycWantFail $cycWantUnread) }
     function CycBlock([string]$path) { return (DnLabel $SPB_KEY (CycBlockRaw $path)) }  # the block verdict under the declared names (M75)
-    # (W137) MAIN CHECK -- the branch block. Normal is "1 yes yes yes yes yes 3" (seven values from round 2 -- the pointer line is the third).
-    Chk "W137: the start-point branches stand as the block assembled from the declarations" (CycBlock $CYC_SKILL) (DnLabel $SPB_KEY '1 yes yes yes yes yes 3')
+    # (W137) MAIN CHECK -- the branch block. Normal is "1 yes yes yes yes yes {declared pair count}" (seven values from round 2 -- the pointer line is the third).
+    Chk "W137: the start-point branches stand as the block assembled from the declarations" (CycBlock $CYC_SKILL) (DnLabel $SPB_KEY ('1 yes yes yes yes yes ' + $spmN))
     # (W138-W140) declaration side -- the parent declaration is unique, and both tails carry no forbidden separator
     # (same shape as the other declaration lines, W26 etc.).
     # (W141-W145) controls -- the round 0 review's mutations promoted to fixtures. The base fixture's parent and branch
@@ -8773,9 +8912,10 @@ try {
     $blkBase.Add('  ' + $cycWantParent)
     $blkBase.Add('    ' + $cycWantPointer)
     $blkBase.Add('    ' + $cycWantOk)
+    $blkBase.Add('    ' + $cycWantRework)
     $blkBase.Add('    ' + $cycWantFail)
     $blkBase.Add('    ' + $cycWantUnread)
-    $blkBase.Add('    - explanation of the three lines above -- how to read the verdict and the accident state go here')
+    $blkBase.Add('    - explanation of the branch lines above -- how to read the verdict and the accident state go here')
     $blkBase.Add('- **no milestone document** ' + $ARROW + ' **milestone ' + $STEP_WORD + '**')
     $blkBase.Add('## ' + (Uni 0xB4A4,0x0020,0xC808))
     function BlkFx([string]$name, [scriptblock]$edit) {
@@ -8786,21 +8926,22 @@ try {
         Set-Content -LiteralPath $p -Encoding utf8 -Value $l
         return $p
     }
-    # Insert positions mirror the sh copy's 1-based "after line N" (List.Insert index N).
+    # Insert positions mirror the sh copy's 1-based "after line N" (List.Insert index N). (M95) One more branch line shifted them by
+    # one -- what each insert means (after the last branch / after the pointer / after the explanation / before the parent) is unchanged.
     $fxBlk = BlkFx 'blk.md' { param($l) }
-    $fxLazy = BlkFx 'blk-lazy.md' { param($l) $l.Insert(8, '    it no longer goes to that milestone and stops.') }
+    $fxLazy = BlkFx 'blk-lazy.md' { param($l) $l.Insert(9, '    it no longer goes to that milestone and stops.') }
     $fxParent = BlkFx 'blk-parent.md' { param($l) $l[3] = '  - impl' + [char]0x00B7 + 'review reports both present ' + $ARROW + ' **milestone ' + $STEP_WORD + '** -- the branches below are for reference' }
-    $fxCmt = BlkFx 'blk-cmt.md' { param($l) $l.Insert(5, '<!-- retired branches:'); $l.Insert(9, '-->') }
-    $fxStar = BlkFx 'blk-star.md' { param($l) $l.Insert(9, '    * ' + $VERDICT_WORD + ' `' + $VERDICT_FAIL + '` ' + $ARROW + ' **milestone ' + $STEP_WORD + '**') }
+    $fxCmt = BlkFx 'blk-cmt.md' { param($l) $l.Insert(5, '<!-- retired branches:'); $l.Insert(10, '-->') }
+    $fxStar = BlkFx 'blk-star.md' { param($l) $l.Insert(10, '    * ' + $VERDICT_WORD + ' `' + $VERDICT_FAIL + '` ' + $ARROW + ' **milestone ' + $STEP_WORD + '**') }
     $fxHead = BlkFx 'blk-head.md' { param($l) $l.Insert(3, '### retired rules') }
-    Chk "W141: control -- a same-indent continuation line after the block is caught" (CycBlock $fxLazy) (DnLabel $SPB_KEY '1 yes yes yes no yes 3')
-    Chk "W142: control -- a changed parent condition is caught" (CycBlock $fxParent) (DnLabel $SPB_KEY '1 no yes yes yes yes 3')
-    Chk "W143: control -- a comment wrapped around the branches is caught" (CycBlock $fxCmt) (DnLabel $SPB_KEY '1 yes yes no yes yes 3')
-    Chk "W144: control -- a conflicting branch under another list marker is caught" (CycBlock $fxStar) (DnLabel $SPB_KEY '1 yes yes yes yes yes 4')
-    Chk "W145: control -- a sub-heading right before the parent line is caught" (CycBlock $fxHead) (DnLabel $SPB_KEY '1 yes yes yes yes no 3')
+    Chk "W141: control -- a same-indent continuation line after the block is caught" (CycBlock $fxLazy) (DnLabel $SPB_KEY ('1 yes yes yes no yes ' + $spmN))
+    Chk "W142: control -- a changed parent condition is caught" (CycBlock $fxParent) (DnLabel $SPB_KEY ('1 no yes yes yes yes ' + $spmN))
+    Chk "W143: control -- a comment wrapped around the branches is caught" (CycBlock $fxCmt) (DnLabel $SPB_KEY ('1 yes yes no yes yes ' + $spmN))
+    Chk "W144: control -- a conflicting branch under another list marker is caught" (CycBlock $fxStar) (DnLabel $SPB_KEY ('1 yes yes yes yes yes ' + $spmN1))
+    Chk "W145: control -- a sub-heading right before the parent line is caught" (CycBlock $fxHead) (DnLabel $SPB_KEY ('1 yes yes yes yes no ' + $spmN))
     # (W146) FALSE-POSITIVE DIRECTION -- the base fixture (a normal block with a sibling explanation and a next item)
     # must stay green.
-    Chk "W146: false-positive direction -- a normal block with an explanation item and a next item stays green" (CycBlock $fxBlk) (DnLabel $SPB_KEY '1 yes yes yes yes yes 3')
+    Chk "W146: false-positive direction -- a normal block with an explanation item and a next item stays green" (CycBlock $fxBlk) (DnLabel $SPB_KEY ('1 yes yes yes yes yes ' + $spmN))
     # (W147-W151 / M73 round 2) THE POINTER LINE IS PINNED TOO -- the round 1 review measured that rewriting the prose of
     # the pointer line (inside the block, checked only for its token) flips the parent condition at 141/0 GREEN in both
     # copies. The pointer line must now equal the line assembled from `start-point-pointer:`. Both declaration values get
@@ -8808,7 +8949,7 @@ try {
     Chk "W147: positive-control for the start-point-parent value" $(if ($cycWantParent -ne '' -and $cycWantParent -ne '- ') { 'ok' } else { 'no' }) 'ok'
     Chk "W150: positive-control for the start-point-pointer value" $(if ($cycWantPointer -ne '') { 'ok' } else { 'no' }) 'ok'
     $fxPtr = BlkFx 'blk-ptr.md' { param($l) $l[4] = '    -- this condition and the branches below are retired; regardless of the verdict it always goes **milestone ' + $STEP_WORD + '** (how to read the verdict: the `review-report` row)' }
-    Chk "W151: control -- a parent condition flipped by the pointer line's prose is caught" (CycBlock $fxPtr) (DnLabel $SPB_KEY '1 yes no yes yes yes 3')
+    Chk "W151: control -- a parent condition flipped by the pointer line's prose is caught" (CycBlock $fxPtr) (DnLabel $SPB_KEY ('1 yes no yes yes yes ' + $spmN))
     # (W152-W159, M75) PREDICATE NAME DECLARATIONS -- the conventions hold the value names of the block and form verdicts and the
     # runner only reads them. Bound: uniqueness, extraction, forbidden separators, NAME COUNT = number of values the verdict emits,
     # exactly one definition item per name, and wiring (renaming in the declaration changes the output). The meaning of the
@@ -8995,6 +9136,31 @@ try {
     # `F1` RUNS ONLY IN A FULL RUN (M64-T03) -- in a partial run the cross-check is red by construction
     # and the control would be vacuous. The partial run prints a DIFFERENT prefix below, which also
     # closes the misreading that its total could be compared with the case-count declaration.
+    # (F58 / M95 `rf-123`) THE SET OF IDS EMITTED MORE THAN ONCE equals the list of IDs that carry a run-count check (F52-F54). A new
+    # place where a loop emits several run cases under one ID -- over a literal or a declaration-derived list -- cannot come in
+    # without a run-count check (the side that closes number-ledger boundary 5). The list is the IDs this runner asks run counts of.
+    # This case must stand after every part (right before F1) so the record is complete. In a partial run it runs only with part F.
+    # (M95 round 1 / review blocker 1) the expected side is not a hand constant but READ FROM THIS RUNNER'S SOURCE -- the set of IDs
+    # asked by case lines whose got slot is exactly `(IdRuns '{ID}')` (run-count cases, `RcIds`). The earlier version was a hand list
+    # (`LOOP_IDS`), so adding a new loop's ID to the list alone stayed green without any run-count case. Whether a run-count case's
+    # EXPECTED value comes from a declaration is not asked (boundary -- conventions "case retirement", paragraph 5).
+    function RcIds([string]$file = '') {
+        if ($file -eq '') { $file = $RUN_PS1 }
+        $ids = foreach ($l in [System.IO.File]::ReadAllLines($file)) {
+            $m = [regex]::Match($l, '^[ \t]*Chk "[A-Z][0-9]+: [^"]*" \(IdRuns ''([A-Z][0-9]+)''\) ')
+            if ($m.Success) { $m.Groups[1].Value }
+        }
+        return ((OrdinalSortUnique @($ids)) -join ' ')
+    }
+    if (PartOn 'F') {
+    $dupIds = OrdinalSortUnique @($script:idsRun | Group-Object -CaseSensitive | Where-Object { $_.Count -gt 1 } | ForEach-Object { $_.Name })
+    Chk "F58: the IDs emitted more than once equal the ID set asked by the run-count case lines" ($dupIds -join ' ') (RcIds)
+    # (F59) control -- a runner copy with one run-count case line (F52) dropped lowers the expected set by one (the expected side is
+    # derived from the source, control-reads-delta).
+    $rcDrop = Join-Path $sbx 'run-drop-rc.ps1'
+    [System.IO.File]::WriteAllLines($rcDrop, [string[]]@([System.IO.File]::ReadAllLines($RUN_PS1) | Where-Object { -not $_.TrimStart([char[]]@([char]0x20, [char]0x09)).StartsWith('Chk "F52:', [System.StringComparison]::Ordinal) }), (New-Object System.Text.UTF8Encoding($false)))
+    Chk "F59: control - a runner copy with one run-count case line dropped lowers the expected ID set by one" ([string](@((RcIds) -split ' ' | Where-Object { $_ -ne '' }).Count - @((RcIds $rcDrop) -split ' ' | Where-Object { $_ -ne '' }).Count)) '1'
+    }
     if (PartFull) {
     Chk "F1: README cases declaration == actual case count" (DeclaredCases) ([string]($script:pass + $script:fail + 1))
     }

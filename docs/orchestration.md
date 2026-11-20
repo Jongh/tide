@@ -70,8 +70,8 @@ svc-auth >= v0.3.0
 
 부모 폴더에서 `/tide:fleet-cycle`을 실행하면 발견한 자식 레포들을 **의존성 순서(피의존
 먼저)로** 돌며, 각 레포를 그 레포 루트에 앵커해 `/tide:cycle` 의미(`milestone → impl →
-review`)를 실행한다. 각 레포는 자기 보고서 상태로 시작점을 정한다(impl 보고서 없음→impl
-부터, 있고 review 없음→review부터, 둘 다 있음→새 milestone).
+review`)를 실행한다. 각 레포는 자기 보고서 상태로 시작점을 정한다(갈래 — 리뷰 판정과 재작업 라운드에
+따른 갈래까지 — 의 단일 원본은 `skills/cycle/SKILL.md`의 "시작점 판단" 절이다).
 
 - **release는 제외(불변)**: fleet-cycle은 **milestone→review까지만** 자동화한다. 어떤
   레포에서도 `release`를 실행하지 않고, 어떤 레포의 `.tide/phase`도 `release`로 쓰지

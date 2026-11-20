@@ -44,7 +44,12 @@ rm -rf "$SBX"; mkdir -p "$SBX"
 trap 'rm -rf "$SBX"' EXIT
 
 pass=0; fail=0
+# (M95 · rf-123) 낸 케이스의 ID를 차례로 적어 둔다 — 라벨의 첫 콜론 앞이다. 선언에서 파생된 목록을 도는 반복의 **실행 수**를
+# 선언 항목 수와 대조하는 판정(`F52`~`F54`)이 이 기록을 읽는다. 반복 안의 카운터를 세면 반복과 함께 지워지는 통제가 되므로
+# 케이스를 **낸 자리**에서 센다(M88의 `부분` 교훈).
+ids_run=''
 chk() { # <desc> <got> <want>
+    case $1 in *:*) ids_run="$ids_run ${1%%:*}" ;; esac   # 콜론 없는 라벨은 케이스 줄 규칙 밖이라 적지 않는다(ps1 `Chk`와 같다 · M95 라운드 1)
     if [ "$2" = "$3" ]; then pass=$((pass + 1)); printf 'PASS  %-56s (%s)\n' "$1" "$2"
     else fail=$((fail + 1)); printf 'FAIL  %-56s (got %s, want %s)\n' "$1" "$2" "$3"; fi
 }
@@ -104,12 +109,13 @@ decl_lines() { # <file> <키> → 선언 줄(0줄 이상)
 decl_count() { # <file> <키> → 선언 줄 개수
     decl_lines "$1" "$2" | grep -c .
 }
-# 선언 줄에서 키 **바로 뒤 꼬리**. 표지 추출(`markers_of`)과 구분자 검사(`bad_seps`)가 **같은
-# 문자열**을 보게 하는 단일 자리다. 정규식을 쓰지 않고 `index`+`substr`로 끊어 ps1 사본의
+# 선언 줄에서 키 **바로 뒤 꼬리**. 꼬리를 읽는 단일 자리다 — 구분자 검사(`bad_seps`)는 원문(`decl_tail_raw`)을, 표지 추출(`markers_of`)
+# 등 소비자는 끝의 탭 · VT · FF · CR 연속만 뗀 꼬리(`decl_tail`)를 본다(M95 라운드 1). 둘의 차이는 그 끝 연속뿐이고, 그 문자는 구분자 검사가
+# 원문에서 붉히므로 「검사가 보지 못하는 문자를 소비자가 지운다」(M42 차단 1)는 생기지 않는다. 정규식을 쓰지 않고 `index`+`substr`로 끊어 ps1 사본의
 # `IndexOf`+`Substring`과 **문자 그대로 같은 의미**를 갖는다(키가 리터럴이므로 이스케이프 축이
 # 아예 없어진다). 앞의 `tr -d '\r'`는 CRLF 체크아웃에서 꼬리 끝에 CR이 붙는 것을 막는다 —
 # ps1은 줄을 `\r?\n`으로 쪼개 애초에 CR을 보지 않으므로 여기서 맞춘다.
-decl_tail() { # <file> <키> → 꼬리 1줄(없으면 빈 출력)
+decl_tail_raw() { # <file> <키> → 꼬리 1줄 원문(없으면 빈 출력) — 금지 구분자 검사(`bad_seps`)만 이것을 읽는다
     # 줄 끝 CR은 `decl_lines`가 이미 벗겼고 **줄 가운데 CR은 그대로 넘어온다** — 그래야 `bad_seps`가
     # 그것을 볼 수 있다. 앞선 판본은 여기서 `tr -d '\r'`로 **통째로 지웠고**, 그러면 ⑴ 양옆 표지가
     # **한 토큰으로 붙어** 표지를 조용히 잃고 ⑵ CR이 `SEP_RE`에 있어도 도달할 수 없어 금지가
@@ -119,13 +125,21 @@ decl_tail() { # <file> <키> → 꼬리 1줄(없으면 빈 출력)
     decl_lines "$1" "$2" | head -1 |
         awk -v k="\`$2\`" '{ i = index($0, k); if (i > 0) print substr($0, i + length(k)) }'
 }
+# (M95 라운드 1 · rf-124) **소비자가 읽는 꼬리는 끝의 탭 · VT · FF · CR 연속을 뗀 것이다.** 꼬리를 토큰으로 가르는 자리가 두 러너에 수십 곳이고
+# 가르는 폭이 자리마다 달라(sh awk 기본 분할은 탭을 떼고 ps1 `-split ' '`는 남긴다), 선언 줄 끝의 탭 하나에 두 러너가 서로 다른 케이스를 붉혔다
+# (M94 `f39-tab` · M95 리뷰 차단 2의 `start-point-map:` 재현). 그래서 자리마다 맞추지 않고 공용 읽기 한 곳에서 뗀다 — ps1 `DeclTail`도 같다.
+# **지우는 문자와 금지하는 문자가 겹치면 금지는 집행되지 않는다**(위 M42 교훈)는 그대로 지킨다 — 금지 구분자 검사는 뗀 꼬리가 아니라
+# 원문(`decl_tail_raw`)을 보므로 끝 탭은 여전히 붉다. 줄 가운데의 탭은 떼지 않는다(경계 — 그 탭은 금지 구분자 검사가 두 러너에서 붉힌다).
+decl_tail() { # <file> <키> → 꼬리 1줄(끝의 탭 · VT · FF · CR 연속을 뗀다 · 없으면 빈 출력)
+    decl_tail_raw "$1" "$2" | LC_ALL=C awk '{ sub(/[\t\v\f\r]+$/, ""); print }'
+}
 # **구분자 집합** — 두 셸 중 **어느 하나라도 공백으로 볼 수 있는** 문자 전부(ASCII 공백 0x20은 뺀다).
 # .NET `\s` = `[\f\n\r\t\v\x85\p{Z}]`이고 `\p{Z}`가 NBSP·OGHAM·U+2000~200A·U+2028/2029·U+202F·
 # U+205F·U+3000을 포함한다 — 그 합집합을 **바이트**로 적는다. 8진 이스케이프만 쓴다(dash의 `printf`가
 # `\xHH`를 해석하지 않는다는 M37 실측). 비교는 `LC_ALL=C`로 고정해 바이트 매칭으로 둔다.
 SEP_RE=$(printf '[\t\013\014\r]|\302[\205\240]|\341\232\200|\342\200[\200-\212\250\251\257]|\342\201\237|\343\200\200')
 bad_seps() { # <file> <키> → 꼬리에 금지 구분자가 있으면 1, 없으면 0
-    decl_tail "$1" "$2" | LC_ALL=C grep -Ec "$SEP_RE"
+    decl_tail_raw "$1" "$2" | LC_ALL=C grep -Ec "$SEP_RE"
 }
 # **첫 매치 고정**은 이제 `decl_tail`이 `index()`로 한다(위) — 예전 구현은 `sed "s/.*$1//"`이었는데
 # sed의 선행 `.*`는 탐욕이라 한 줄에 키가 둘이면 **마지막**을, ps1의 `IndexOf`는 **첫 번째**를
@@ -155,8 +169,11 @@ FAF_KEY='floor-ask-from:'
 dn_names() { # <키 …> [규약 파일] → 공백으로 가른 이름 한 줄씩(공백 · 탭 · CR · VT · FF만으로 된 토큰은 빼고 — 금지 구분자 검사의 자리)
     # (M86) 키를 공백으로 이어 여럿 주면 선언 차례대로 이름을 잇는다 — 두 선언이 정의 목록 하나를 나눠 쓰는 시작점 술어(`SPB_KEY` ·
     # `SPF_KEY`)가 같은 함수로 읽힌다(옛 `sp_*`의 흡수). 키 하나는 종전과 같다.
+    # (M95 · rf-124) 토큰 앞뒤의 탭 · CR · VT · FF는 떼고 낸다 — ps1 사본(`DnNames`)과 같은 문자열을 내게 하는 자리다. 앞선 판본은 꼬리 탭을
+    # 토큰에 붙인 채 냈고, sh 소비자는 단어 분할로 우연히 떼었지만 ps1 소비자는 그대로 비교해 같은 입력에서 붉은 케이스 집합이 갈렸다(M94 `f39-tab`).
+    # 꼬리의 금지 구분자는 원문 꼬리(`decl_tail_raw`)를 보는 `F26` · 축마다의 `seps` 행이 그대로 붉힌다 — 떼는 자리는 이름 추출뿐이다(`F55`가 묻는다).
     for _dnk in $1; do
-        decl_tail "${2:-$CONV}" "$_dnk" | LC_ALL=C awk '{ n = split($0, a, /[ ]/); for (i = 1; i <= n; i++) if (a[i] ~ /[^ \t\r\v\f]/) print a[i] }'
+        decl_tail "${2:-$CONV}" "$_dnk" | LC_ALL=C awk '{ n = split($0, a, /[ ]/); for (i = 1; i <= n; i++) if (a[i] ~ /[^ \t\r\v\f]/) { t = a[i]; sub(/^[\t\r\v\f]+/, "", t); sub(/[\t\r\v\f]+$/, "", t); print t } }'
     done
 }
 dn_pairs() { # <키> [규약 파일] → 선언의 백틱 구획마다 「이름=값」 한 줄(첫 `=`로 가른다 · `=`가 없는 구획은 버린다)
@@ -1413,6 +1430,27 @@ chk "F34: 앵커 맵의 이름이 전부 실제 커맨드 스킬" "$names_real" 
 
 # 음성 통제 — 존재하지 않는 가짜 앵커는 캐노니컬에 없어야 한다(B1 N+1종 부재와 동형).
 chk "F35: 통제 — 캐노니컬에 가짜 앵커 없음" "$(has_anchor "$CANON_CMD" "bogusanchor")" "no"
+
+# (F52~F54 · F56 · F57 · M95 `rf-123`) **선언에서 파생된 반복의 실행 수.** 위 반복은 `role-anchors:` 쌍마다 `F2` · `F32` · `F33`을
+# 한 번씩 낸다. 케이스 줄은 하나라 번호 대장(규약 「케이스 은퇴」 절)은 반복이 몇 번 돌았는지 보지 못한다 — 반복을 일찍 끊거나 쌍
+# 하나를 걸러도 초록이었다(경계 ⑸). 그래서 ID마다 **실제로 낸 케이스 수**(`ids_run`)를 선언의 쌍 수와 견준다. 기대값은 선언 원문에서
+# `=`를 담은 토큰을 센 것이다 — 추출(`anchor_pairs`)의 꼴 거름을 거치지 않으므로, 거름이 쌍 하나를 버려도 붉다.
+anchor_decl_n() { # [카탈로그 파일] → `role-anchors:` 선언 원문에서 `=`를 담은 토큰의 수
+    grep -o 'role-anchors:[^>]*' "${1:-$CANON_CMD}" 2>/dev/null | head -1 |
+        sed 's/role-anchors://' | tr ' ' '\n' | grep -c '='
+}
+id_runs() { # <ID> [ID 목록] → 목록(기본: 이 실행이 낸 케이스 ID)에서 그 ID의 수
+    printf '%s\n' ${2-$ids_run} | LC_ALL=C grep -cxF -- "$1"
+}
+chk "F52: F2의 실행 수가 role-anchors 선언의 쌍 수와 같다" "$(id_runs F2)" "$(anchor_decl_n)"
+chk "F53: F32의 실행 수가 role-anchors 선언의 쌍 수와 같다" "$(id_runs F32)" "$(anchor_decl_n)"
+chk "F54: F33의 실행 수가 role-anchors 선언의 쌍 수와 같다" "$(id_runs F33)" "$(anchor_decl_n)"
+# (F56) 통제 — 쌍 하나를 지운 카탈로그 사본에서 기대값이 하나 준다(기대값이 선언에서 파생된다 · `control-reads-delta`).
+LC_ALL=C sed 's/role-anchors: [^ ]* /role-anchors: /' "$CANON_CMD" > "$SBX/cmd-drop-pair.md"
+chk "F56: 통제 - 쌍 하나를 지운 카탈로그 사본에서 기대 실행 수가 하나 준다" "$(( $(anchor_decl_n) - $(anchor_decl_n "$SBX/cmd-drop-pair.md") ))" "1"
+# (F57) 통제 — 실행 ID 목록에서 `F2` 하나를 지우면 셈이 하나 준다(반복을 한 번 일찍 끊은 실행과 같은 입력 · 셈이 실제 기록을 읽는다).
+_f57=$(printf '%s\n' $ids_run | LC_ALL=C awk '$0 == "F2" && !d { d = 1; next } { print }')
+chk "F57: 통제 - 실행 ID 목록에서 F2 하나를 지우면 셈이 하나 준다" "$(( $(id_runs F2) - $(id_runs F2 "$_f57") ))" "1"
 fi
 
 # --- (M43~) 문서 자기서술 정합 · 러너 소스 규율 -------------------
@@ -1812,6 +1850,11 @@ chk "F49: 통제 - 없는 케이스를 든 쌍을 더한 규약 사본에서 빠
 chk "F50: 통제 - 선언 밖 이름의 쌍을 더한 규약 사본에서 모르는 이름이 하나 는다" "$(( $(ak_ask_unknown "$NCA_KEY" "$NCC_KEY" "$(nc_fixture unknown)") - $(ak_ask_unknown "$NCA_KEY" "$NCC_KEY") ))" "1"
 _ncb51=$(nc_case_missing "$NCC_KEY")
 chk "F51: 통제 - ps1 · sh 러너 사본에서 다른 파트(V) 대응 케이스 줄 하나를 지우면 각자 빠진 케이스가 하나 는다" "$(( $(nc_case_missing "$NCC_KEY" "" "" "$(nc_runner_fixture ps1)") - _ncb51 ))|$(( $(nc_case_missing "$NCC_KEY" "" "$(nc_runner_fixture sh)") - _ncb51 ))" "1|1"
+# (F55 · M95 `rf-124`) 통제 — 선언 줄 꼬리에 탭을 붙인 규약 사본에서 이름 추출이 원본과 같다. 공용 추출(`dn_names` · ps1 `DnNames`)이 토큰
+# 앞뒤의 탭을 떼므로 두 러너가 같은 이름을 낸다 — 앞선 판본은 마지막 토큰에 탭을 붙인 채 냈다(M94 `f39-tab`). 꼬리의 금지 구분자 자체는
+# `F26`이 원문 꼬리로 붉힌다 — 이 통제는 이름 추출의 같음만 묻는다(`rf-109`의 `M15`와 같은 꼴).
+LC_ALL=C awk -v kc="- \`$NCC_KEY\`" '{ t = $0; sub(/^[ \t]+/, "", t); if (substr(t, 1, length(kc)) == kc) { sub(/\r$/, ""); $0 = $0 "\t" } print }' "$CONV" > "$SBX/conv-nc-tailtab.md"
+chk "F55: 통제 - 선언 줄 꼬리 탭 사본에서 이름 추출이 원본과 같다" "$([ "$(dn_names "$NCC_KEY" "$SBX/conv-nc-tailtab.md")" = "$(dn_names "$NCC_KEY")" ] && [ "$(decl_tail_raw "$SBX/conv-nc-tailtab.md" "$NCC_KEY")" != "$(decl_tail_raw "$CONV" "$NCC_KEY")" ] && echo same || echo differ)" "same"
 fi
 # === Part G — 상호참조 무결성(M34 · M35에서 규약 문서 **집합**으로 일반화) ====
 # (M34) Part F가 문서의 **자기서술**을 집행한다면, Part G는 문서 **사이를 잇는 참조**를 집행한다 —
@@ -7022,6 +7065,9 @@ SPM_KEY='start-point-map:'
 KEY_FAIL='- 판정 `불가`'
 KEY_OK='- 판정 `가능`'
 KEY_UNREAD='- **판정을 읽지 못하면**'
+# (M95 · rf-106) 넷째 갈래 — 판정 `불가`이지만 impl 보고서의 재작업 라운드가 리뷰 계측보다 커서 재작업이 이미 끝난 경우(선언 키 `재작업끝`).
+# 머리가 `- 판정 \``으로 시작하지 않으므로 `KEY_FAIL`의 갈래 항목으로 세어지지 않는다 — 읽지 못한 갈래처럼 굵은 구절 머리다.
+KEY_REWORK='- **판정 `불가`이고 재작업이 이미 끝났으면**'
 sec_span() { # <파일> <절 앵커> → 그 절의 줄만 (없으면 빈 출력)
     # 줄 가운데의 단독 CR도 줄을 가른다 — ps1 사본의 `ReadAllLines`와 같은 줄 집합을 보게 한다(M73 리뷰 사소 8).
     LC_ALL=C awk -v anc="$2" '
@@ -7068,6 +7114,10 @@ chk "W128: 선언 쌍 추출 positive-control(>=3)" "$([ "$(spm_pairs "$CONV")" 
 chk "W118: 불가 갈래가 선언에서 조립한 한 줄이다" "$(dn_label "$SPF_KEY" "$(form_probe "$CYC_SKILL" "$CYC_SEC_ANCHOR" "$KEY_FAIL" "$(spm_line "$CONV" '불가' "$KEY_FAIL")")")" "$(dn_label "$SPF_KEY" '1 yes no')"
 chk "W119: 가능 갈래가 선언에서 조립한 한 줄이다" "$(dn_label "$SPF_KEY" "$(form_probe "$CYC_SKILL" "$CYC_SEC_ANCHOR" "$KEY_OK" "$(spm_line "$CONV" '가능' "$KEY_OK")")")" "$(dn_label "$SPF_KEY" '1 yes no')"
 chk "W120: 읽지 못한 갈래가 선언에서 조립한 한 줄이다" "$(dn_label "$SPF_KEY" "$(form_probe "$CYC_SKILL" "$CYC_SEC_ANCHOR" "$KEY_UNREAD" "$(spm_line "$CONV" '읽지못함' "$KEY_UNREAD")")")" "$(dn_label "$SPF_KEY" '1 yes no')"
+chk "W169: 재작업이 끝난 불가 갈래가 선언에서 조립한 한 줄이다" "$(dn_label "$SPF_KEY" "$(form_probe "$CYC_SKILL" "$CYC_SEC_ANCHOR" "$KEY_REWORK" "$(spm_line "$CONV" '재작업끝' "$KEY_REWORK")")")" "$(dn_label "$SPF_KEY" '1 yes no')"
+# (W176 · M95 라운드 1 · 리뷰 사소 9) 통제 — 재작업끝 갈래 줄을 지운 cycle 스킬 사본에서 `W169`의 추출이 0이다(공허한 통과 방지).
+LC_ALL=C awk -v k="$KEY_REWORK" '{ t = $0; sub(/^[ \t]+/, "", t); if (substr(t, 1, length(k)) == k) next; print }' "$CYC_SKILL" > "$SBX/cyc-no-rework.md"
+chk "W176: 통제 - 재작업끝 갈래 줄이 없으면 형태 판정의 추출이 0이다" "$(form_probe "$SBX/cyc-no-rework.md" "$CYC_SEC_ANCHOR" "$KEY_REWORK" "$(spm_line "$CONV" '재작업끝' "$KEY_REWORK")" | LC_ALL=C awk '{ print $1 }')" "0"
 # (W121) **본 검사 — 두 스킬의 판정 값 집합이 같은가**(M72-T03의 「무는 것」 ③). 표기가 갈려 있으므로
 # (status는 곧은 따옴표 · cycle은 백틱) **값 자체**를 뽑아 **ordinal**로 정렬해 비교한다.
 verdict_set() { # <파일> → 그 파일이 쓰는 판정 값을 ordinal 정렬해 한 줄로
@@ -7084,6 +7134,57 @@ verdict_set() { # <파일> → 그 파일이 쓰는 판정 값을 ordinal 정렬
 chk "W121: status와 cycle의 판정 값 집합이 같다" "$(verdict_set "$ROOT/skills/status/SKILL.md")" "$(verdict_set "$CYC_SKILL")"
 # (W131) `W121`의 추출 positive-control — 양쪽이 비면 `"" == ""`로 공허하게 성립한다.
 chk "W131: 판정 값 추출 positive-control" "$([ -n "$(verdict_set "$ROOT/skills/status/SKILL.md")" ] && [ -n "$(verdict_set "$CYC_SKILL")" ] && echo ok || echo no)" "ok"
+# (W170~W174 · M95 `rf-106`) **status의 재작업 라운드 갈래.** M85가 status의 판정 `불가` 항목에 「재작업 라운드를 견준다」 하위 항목을
+# 세웠지만 그것을 묻는 케이스가 없어 그 문장을 지워도 초록이었다(M85-impl 후속 2). `W121`은 판정 값 집합만 견준다. 그래서 ⑴ `불가` 항목이
+# 하나이고 그 **항목 창 안에** `` `재작업 라운드(rework)` `` 를 담은 하위 항목이 있는가 ⑵ 그 하위 항목 창 안의 첫 `/tide:` 목적지가
+# `start-point-map:`의 `재작업끝` 목적지와 같은가를 묻는다 — ⑵가 cycle 갈래(선언)와 status 갈래의 대응이다. 창은 들여쓰기 깊이로 연다 —
+# 시작은 머리 줄, 끝은 그 줄보다 깊지 않은 첫 비어 있지 않은 줄이다(항목 하나가 곧 창이다).
+ST_SKILL="$ROOT/skills/status/SKILL.md"
+st_fail_probe() { # <파일> → "<불가 항목 수> <라운드 하위 항목이 창 안에 있는가> <그 하위 항목 창의 첫 /tide: 목적지 · 없으면 ->"
+    LC_ALL=C awk -v head='- 판정 "불가"' -v tok='`재작업 라운드(rework)`' '
+        function ind(s,   k) { k = 0; while (substr(s, k + 1, 1) == " ") k++; return k }
+        { sub(/\r$/, ""); L[++n] = $0 }
+        END {
+            for (i = 1; i <= n; i++) { t = L[i]; sub(/^[ \t]+/, "", t); if (substr(t, 1, length(head)) == head) { c++; if (!h) h = i } }
+            sub_ = "no"; dest = "-"
+            if (h) {
+                d = ind(L[h])
+                for (i = h + 1; i <= n; i++) {
+                    t = L[i]; sub(/^[ \t]+/, "", t)
+                    if (t != "" && ind(L[i]) <= d) break
+                    if (substr(t, 1, 2) == "- " && index(t, tok) > 0) {
+                        sub_ = "yes"; sd = ind(L[i])
+                        for (j = i; j <= n; j++) {
+                            u = L[j]; sub(/^[ \t]+/, "", u)
+                            if (j > i && u != "" && ind(L[j]) <= sd) break
+                            if (match(u, /\/tide:[a-z-]+/)) { dest = substr(u, RSTART + 6, RLENGTH - 6); break }
+                        }
+                        break
+                    }
+                }
+            }
+            printf "%d %s %s\n", c, sub_, dest
+        }' "$1"
+}
+_st_raw=$(st_fail_probe "$ST_SKILL")
+chk "W170: status의 불가 항목이 하나이고 그 창 안에 재작업 라운드 대조 하위 항목이 있다" "$(printf '%s\n' "$_st_raw" | LC_ALL=C awk '{ print $1, $2 }')" "1 yes"
+chk "W171: status 라운드 대조 하위 항목의 목적지가 start-point-map 재작업끝 목적지와 같다" "$(printf '%s\n' "$_st_raw" | LC_ALL=C awk '{ print $3 }')" "$(spm_dest "$CONV" '재작업끝')"
+mkdir -p "$SBX/stfx"
+{
+    printf '%s\n' '- 판정 "가능" → /tide:release'
+    printf '%s\n' '- 판정 "불가" → 재작업 라운드를 견준다:'
+    printf '%s\n' '  - impl 보고서 개요의 `재작업 라운드(rework)` 값이 더 크면 → 재작업이 이미 끝났다 —'
+    printf '%s\n' '    /tide:review'
+    printf '%s\n' '  - 아니면 → /tide:impl M{N} 재실행'
+    printf '%s\n' '- 다음 항목'
+} > "$SBX/stfx/base.md"
+LC_ALL=C awk 'NR == 2 { next } { print }' "$SBX/stfx/base.md" > "$SBX/stfx/nohead.md"
+LC_ALL=C awk 'NR == 4 { print "    (목적지는 아래 줄)"; next } NR == 5 { print; print "    /tide:review"; next } { print }' "$SBX/stfx/base.md" > "$SBX/stfx/moved.md"
+LC_ALL=C awk 'NR == 3 { sub(/^  /, "") } NR == 4 { sub(/^  /, "") } { print }' "$SBX/stfx/base.md" > "$SBX/stfx/outside.md"
+chk "W172: 통제 - 불가 항목 머리가 없으면 추출이 0이다" "$(st_fail_probe "$SBX/stfx/nohead.md")" "0 no -"
+chk "W173: 통제 - 목적지를 형제 하위 항목으로 옮기면 라운드 하위 항목 창의 목적지가 사라진다" "$(st_fail_probe "$SBX/stfx/moved.md" | LC_ALL=C awk '{ print $3 }')" "-"
+chk "W174: 통제 - 불가 항목 창 밖의 라운드 문장은 하위 항목으로 세지 않는다" "$(st_fail_probe "$SBX/stfx/outside.md" | LC_ALL=C awk '{ print $2 }')" "no"
+chk "W175: 오탐 방향 - 정상 픽스처는 1 yes review다" "$(st_fail_probe "$SBX/stfx/base.md")" "1 yes review"
 # (W132~W135) 통제 — 형태를 깨는 변이 넷을 픽스처로 승격한다. 기대 줄과 픽스처의 **불가** 갈래 줄은 실제 규약
 # 선언에서 조립한다 — 픽스처에 목적지를 박으면 선언을 정당하게 바꾼 편집에서 통제가 거짓으로 붉는다(M73 되돌림 실측). 가능 ·
 # 읽지 못함 줄은 박혀 있다 — 이 통제들은 불가 키만 판정한다. 줄을 **전부** 조립하는 것은 블록 픽스처(`W141`~`W146` · `W151`)뿐이다.
@@ -7128,10 +7229,13 @@ spp_line() { # <규약 파일> → 선언에서 조립한 부모 줄 (선언이 
 spt_line() { # <규약 파일> → 선언에서 조립한 포인터 줄(앞 공백을 걷은 문면 · 선언이 없으면 빈 출력)
     decl_tail "$1" "$SPT_KEY" | LC_ALL=C sed 's/^ //'
 }
-block_probe() { # <파일> <절 앵커> <부모 줄> <포인터 줄> <가능 줄> <불가 줄> <읽지못함 줄>
-    # → "<포인터 줄 수> <부모 줄> <포인터 줄> <갈래 셋 연속> <블록 뒤 첫 줄이 목록 항목> <부모 앞 줄이 목록 항목> <갈래 모양 줄 수>"
-    sec_span "$1" "$2" | LC_ALL=C awk -v tok="$SP_PTR_TOK" -v wp="$3" -v wt="$4" -v wo="$5" -v wf="$6" -v wu="$7" \
-        -v k1='판정 `' -v k2='**판정을 읽지 못하면**' '
+block_probe() { # <파일> <절 앵커> <부모 줄> <포인터 줄> <가능 줄> <재작업끝 줄> <불가 줄> <읽지못함 줄>
+    # → "<포인터 줄 수> <부모 줄> <포인터 줄> <갈래 넷 연속> <블록 뒤 첫 줄이 목록 항목> <부모 앞 줄이 목록 항목> <갈래 모양 줄 수>"
+    # (M95) 갈래가 넷이 됐다 — 가능 · 재작업끝 · 불가 · 읽지못함 차례다. 갈래 모양 줄 수의 정상값은 손 상수가 아니라 선언의 쌍 수(`SPM_N`)다.
+    # (M95 라운드 1 · 리뷰 사소 4) 셋째 머리는 굵은 판정 머리 전체(`**판정 \``)다 — 재작업끝 갈래 머리만 세면 닮은 꼴의 상충 갈래
+    # (`**판정 \`불가\`이고 {다른 조건}**`)가 세어지지 않는다.
+    sec_span "$1" "$2" | LC_ALL=C awk -v tok="$SP_PTR_TOK" -v wp="$3" -v wt="$4" -v wo="$5" -v wr="$6" -v wf="$7" -v wu="$8" \
+        -v k1='판정 `' -v k2='**판정을 읽지 못하면**' -v k3='**판정 `' '
         function lstrip(s) { sub(/^[ \t]+/, "", s); return s }
         function unmark(s) { if (s ~ /^[-*+] /) return substr(s, 3); sub(/^[0-9]+\. /, "", s); return s }
         function yn(b) { return b ? "yes" : "no" }
@@ -7140,13 +7244,13 @@ block_probe() { # <파일> <절 앵커> <부모 줄> <포인터 줄> <가능 줄
             for (i = 1; i <= n; i++) {
                 if (index(L[i], tok) > 0) { pc++; if (!pi) pi = i }
                 t = unmark(lstrip(L[i]))
-                if (substr(t, 1, length(k1)) == k1 || substr(t, 1, length(k2)) == k2) bc++
+                if (substr(t, 1, length(k1)) == k1 || substr(t, 1, length(k2)) == k2 || substr(t, 1, length(k3)) == k3) bc++
             }
             par = (pi > 1 && lstrip(L[pi - 1]) == wp)
             ptr = (pi > 0 && lstrip(L[pi]) == wt)
-            blk = (pi > 0 && pi + 3 <= n && lstrip(L[pi + 1]) == wo && lstrip(L[pi + 2]) == wf && lstrip(L[pi + 3]) == wu)
+            blk = (pi > 0 && pi + 4 <= n && lstrip(L[pi + 1]) == wo && lstrip(L[pi + 2]) == wr && lstrip(L[pi + 3]) == wf && lstrip(L[pi + 4]) == wu)
             aft = 0
-            if (pi > 0) { j = pi + 4; while (j <= n && lstrip(L[j]) == "") j++; aft = (j > n || substr(lstrip(L[j]), 1, 2) == "- ") }
+            if (pi > 0) { j = pi + 5; while (j <= n && lstrip(L[j]) == "") j++; aft = (j > n || substr(lstrip(L[j]), 1, 2) == "- ") }
             bef = (pi > 2 && substr(lstrip(L[pi - 2]), 1, 2) == "- ")
             printf "%d %s %s %s %s %s %d\n", pc, yn(par), yn(ptr), yn(blk), yn(aft), yn(bef), bc
         }'
@@ -7155,12 +7259,14 @@ CYC_WANT_PARENT=$(spp_line "$CONV")
 CYC_WANT_POINTER=$(spt_line "$CONV")
 CYC_WANT_OK=$(spm_line "$CONV" '가능' "$KEY_OK")
 CYC_WANT_UNREAD=$(spm_line "$CONV" '읽지못함' "$KEY_UNREAD")
+CYC_WANT_REWORK=$(spm_line "$CONV" '재작업끝' "$KEY_REWORK")
+SPM_N=$(spm_pairs "$CONV")   # (M95) 갈래 모양 줄 수의 정상값 — 선언의 쌍 수에서 온다(손 상수 3을 걷었다)
 _cyc_block_raw() { # <대상 파일> → 블록 판정 한 줄(위치 값)
-    block_probe "$1" "$CYC_SEC_ANCHOR" "$CYC_WANT_PARENT" "$CYC_WANT_POINTER" "$CYC_WANT_OK" "$CYC_WANT_FAIL" "$CYC_WANT_UNREAD"
+    block_probe "$1" "$CYC_SEC_ANCHOR" "$CYC_WANT_PARENT" "$CYC_WANT_POINTER" "$CYC_WANT_OK" "$CYC_WANT_REWORK" "$CYC_WANT_FAIL" "$CYC_WANT_UNREAD"
 }
 _cyc_block() { dn_label "$SPB_KEY" "$(_cyc_block_raw "$1")"; } # <대상 파일> → 블록 판정을 선언의 이름으로(M75)
-# (W137) **본 검사 — 갈래 블록.** 정상은 `1 yes yes yes yes yes 3`이다(라운드 2부터 일곱 값 — 포인터 줄이 셋째 값).
-chk "W137: 시작점 갈래가 선언에서 조립한 블록으로 선다" "$(_cyc_block "$CYC_SKILL")" "$(dn_label "$SPB_KEY" '1 yes yes yes yes yes 3')"
+# (W137) **본 검사 — 갈래 블록.** 정상은 `1 yes yes yes yes yes {선언 쌍 수}`이다(라운드 2부터 일곱 값 — 포인터 줄이 셋째 값).
+chk "W137: 시작점 갈래가 선언에서 조립한 블록으로 선다" "$(_cyc_block "$CYC_SKILL")" "$(dn_label "$SPB_KEY" "1 yes yes yes yes yes $SPM_N")"
 # (W138~W140) 선언 쪽 — 부모 선언 줄의 유일성과, 두 선언 꼬리의 금지 구분자(다른 선언 줄과 같은 형태 · `W26` 등).
 # (W141~W145) 통제 — 라운드 0 리뷰가 잰 변이를 픽스처로 승격한다. 바탕 픽스처의 부모 · 갈래 줄은 **선언에서 조립**한다.
 _fx_ins() { LC_ALL=C awk -v n="$3" -v t="$4" '{ print } NR == n { print t }' "$1" > "$2"; }   # <원본> <대상> <줄 번호> <넣을 줄>
@@ -7172,32 +7278,34 @@ _fx_rep() { LC_ALL=C awk -v n="$3" -v t="$4" 'NR == n { print t; next } { print 
     printf '%s\n' "  $CYC_WANT_PARENT"
     printf '%s\n' "    $CYC_WANT_POINTER"
     printf '%s\n' "    $CYC_WANT_OK"
+    printf '%s\n' "    $CYC_WANT_REWORK"
     printf '%s\n' "    $CYC_WANT_FAIL"
     printf '%s\n' "    $CYC_WANT_UNREAD"
-    printf '%s\n' '    - 위 세 줄의 설명 — 판정을 읽는 법과 사고 상태는 여기에 적는다'
+    printf '%s\n' '    - 위 갈래 줄들의 설명 — 판정을 읽는 법과 사고 상태는 여기에 적는다'
     printf '%s\n' '- **마일스톤 문서가 하나도 없음** → **milestone 단계부터**'
     printf '%s\n' '## 뒤 절'
 } > "$SBX/cycfx/blk.md"
-_fx_ins "$SBX/cycfx/blk.md" "$SBX/cycfx/blk-lazy.md" 8 '    이제는 그 마일스톤으로 가지 않고 멈춘다.'
+# (M95) 갈래 줄이 하나 늘어 삽입 위치가 한 줄씩 밀렸다 — 넣는 자리의 뜻(마지막 갈래 뒤 · 포인터 뒤 · 설명 뒤 · 부모 앞)은 그대로다.
+_fx_ins "$SBX/cycfx/blk.md" "$SBX/cycfx/blk-lazy.md" 9 '    이제는 그 마일스톤으로 가지 않고 멈춘다.'
 _fx_rep "$SBX/cycfx/blk.md" "$SBX/cycfx/blk-parent.md" 4 '  - impl·review 보고서 모두 있음 → **milestone 단계부터** — 아래 갈래는 참고용이다'
 _fx_ins "$SBX/cycfx/blk.md" "$SBX/cycfx/blk-cmt1.md" 5 '<!-- 폐기된 갈래:'
-_fx_ins "$SBX/cycfx/blk-cmt1.md" "$SBX/cycfx/blk-cmt.md" 9 '-->'
-_fx_ins "$SBX/cycfx/blk.md" "$SBX/cycfx/blk-star.md" 9 '    * 판정 `불가` → **milestone 단계부터**'
+_fx_ins "$SBX/cycfx/blk-cmt1.md" "$SBX/cycfx/blk-cmt.md" 10 '-->'
+_fx_ins "$SBX/cycfx/blk.md" "$SBX/cycfx/blk-star.md" 10 '    * 판정 `불가` → **milestone 단계부터**'
 _fx_ins "$SBX/cycfx/blk.md" "$SBX/cycfx/blk-head.md" 3 '### 폐기된 규칙'
-chk "W141: 통제 - 블록 뒤 같은 깊이의 이어지는 줄을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-lazy.md")" "$(dn_label "$SPB_KEY" '1 yes yes yes no yes 3')"
-chk "W142: 통제 - 바뀐 부모 조건을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-parent.md")" "$(dn_label "$SPB_KEY" '1 no yes yes yes yes 3')"
-chk "W143: 통제 - 갈래를 감싼 주석을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-cmt.md")" "$(dn_label "$SPB_KEY" '1 yes yes no yes yes 3')"
-chk "W144: 통제 - 다른 목록 기호의 상충 갈래를 잡는다" "$(_cyc_block "$SBX/cycfx/blk-star.md")" "$(dn_label "$SPB_KEY" '1 yes yes yes yes yes 4')"
-chk "W145: 통제 - 부모 줄 바로 앞의 소제목을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-head.md")" "$(dn_label "$SPB_KEY" '1 yes yes yes yes no 3')"
+chk "W141: 통제 - 블록 뒤 같은 깊이의 이어지는 줄을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-lazy.md")" "$(dn_label "$SPB_KEY" "1 yes yes yes no yes $SPM_N")"
+chk "W142: 통제 - 바뀐 부모 조건을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-parent.md")" "$(dn_label "$SPB_KEY" "1 no yes yes yes yes $SPM_N")"
+chk "W143: 통제 - 갈래를 감싼 주석을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-cmt.md")" "$(dn_label "$SPB_KEY" "1 yes yes no yes yes $SPM_N")"
+chk "W144: 통제 - 다른 목록 기호의 상충 갈래를 잡는다" "$(_cyc_block "$SBX/cycfx/blk-star.md")" "$(dn_label "$SPB_KEY" "1 yes yes yes yes yes $((SPM_N + 1))")"
+chk "W145: 통제 - 부모 줄 바로 앞의 소제목을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-head.md")" "$(dn_label "$SPB_KEY" "1 yes yes yes yes no $SPM_N")"
 # (W146) **오탐 방향** — 바탕 픽스처(형제 설명 항목과 다음 항목이 있는 정상 블록)는 초록이어야 한다.
-chk "W146: 오탐 방향 - 설명 항목과 다음 항목이 붙은 정상 블록은 초록이다" "$(_cyc_block "$SBX/cycfx/blk.md")" "$(dn_label "$SPB_KEY" '1 yes yes yes yes yes 3')"
+chk "W146: 오탐 방향 - 설명 항목과 다음 항목이 붙은 정상 블록은 초록이다" "$(_cyc_block "$SBX/cycfx/blk.md")" "$(dn_label "$SPB_KEY" "1 yes yes yes yes yes $SPM_N")"
 # (W147~W151 · M73 라운드 2) **포인터 줄까지 못박는다** — 라운드 1 리뷰가 블록 안에서 토큰만 보던 포인터 줄의 산문으로 부모 조건을
 # 뒤집는 편집이 두 사본 141/0 초록임을 쟀다. 포인터 줄도 선언(`start-point-pointer:`)에서 조립한 줄과 줄 전체가 같아야 한다. 두 선언 값에는
 # 추출 positive-control을 둔다(`W128`과 같은 형태 — 값이 비면 기대 줄이 비어 판정이 공허하다).
 chk "W147: start-point-parent 값 추출 positive-control" "$([ -n "$CYC_WANT_PARENT" ] && [ "$CYC_WANT_PARENT" != '- ' ] && echo ok || echo no)" "ok"
 chk "W150: start-point-pointer 값 추출 positive-control" "$([ -n "$CYC_WANT_POINTER" ] && echo ok || echo no)" "ok"
 _fx_rep "$SBX/cycfx/blk.md" "$SBX/cycfx/blk-ptr.md" 5 '    — 이 조건과 아래 갈래는 폐기됐다. 판정과 무관하게 언제나 **milestone 단계부터** 간다 (판정을 읽는 법은 `review-report` 행)'
-chk "W151: 통제 - 포인터 줄 산문으로 뒤집은 부모 조건을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-ptr.md")" "$(dn_label "$SPB_KEY" '1 yes no yes yes yes 3')"
+chk "W151: 통제 - 포인터 줄 산문으로 뒤집은 부모 조건을 잡는다" "$(_cyc_block "$SBX/cycfx/blk-ptr.md")" "$(dn_label "$SPB_KEY" "1 yes no yes yes yes $SPM_N")"
 # (W152~W159 · M75) **판정 술어의 이름 선언** — 블록 · 형태 판정의 값 이름은 규약의 두 선언이 들고 러너는 읽기만 한다. 무는 것은 선언의 유일성 ·
 # 추출 · 금지 구분자 · **이름 수 = 판정이 내는 값 수** · 이름마다 정의 항목 정확히 하나 · 배선(선언을 바꾸면 출력이 따라 바뀐다)까지다. 정의 문장의
 # 뜻과, 선언과 정의를 함께 바꾼 이름 순서가 값의 위치와 맞는가는 묻지 않는다(규약이 적는 경계 — 정의 항목의 순서 = 선언 순서는 아래 `W162`가 문다).
@@ -7348,6 +7456,22 @@ decl_reg_run
 # **`F1`은 전수 실행에서만 돈다**(M64-T03) — 부분 실행에서 이 대조가 돌면 구조상 언제나 붉어
 # 통제가 공허해진다. 부분 실행의 결과 줄은 아래에서 **다른 접두**로 나가므로 그 총계를 케이스 수
 # 선언과 견줄 수 있다는 오해도 함께 닫힌다.
+# (F58 · M95 `rf-123`) **같은 ID를 두 번 이상 낸 케이스의 집합**이 실행 수 판정(`F52`~`F54`)을 가진 ID 목록과 같다. 반복문이 같은 ID로 실행 케이스
+# 여럿을 내는 자리가 새로 생기면 — 리터럴 목록이든 선언에서 파생된 목록이든 — 실행 수 판정 없이 들어올 수 없다(번호 대장 경계 ⑸를 닫는 쪽).
+# (M95 라운드 1 · 리뷰 차단 1) 기대 쪽은 손 상수가 아니라 **이 러너 소스에서 읽는다** — got 칸이 정확히 `"$(id_runs {ID})"`인 케이스 줄(실행 수 케이스)이
+# 묻는 ID의 집합이다(`rc_ids`). 앞선 판본은 손 목록(`LOOP_IDS`)이라 새 반복의 ID를 목록에만 더하면 실행 수 케이스 없이 초록이었다. 실행 수 케이스의
+# **기대값**이 선언에서 오는가는 묻지 않는다(경계 — 규약 「케이스 은퇴」 절 ⑸ 문단). 이 케이스는 모든 파트 뒤(F1 바로 앞)에 서야 기록이 전부 모인다.
+# 부분 실행에서는 F 파트에서만 돈다.
+rc_ids() { # [러너 파일] → 실행 수 케이스 줄이 묻는 ID(ordinal 정렬 · 중복 제거 · 한 줄)
+    LC_ALL=C grep -oE '^[[:blank:]]*chk "[A-Z][0-9]+: [^"]*" "\$\(id_runs [A-Z][0-9]+\)"' "${1:-$ROOT/tests/discover/run.sh}" |
+        LC_ALL=C sed 's/.*id_runs \([A-Z][0-9]*\))"$/\1/' | LC_ALL=C sort -u | LC_ALL=C tr '\n' ' ' | LC_ALL=C sed 's/ *$//'
+}
+if part_on F; then
+chk "F58: 같은 ID를 두 번 이상 낸 케이스가 실행 수 케이스 줄이 묻는 ID 집합과 같다" "$(printf '%s\n' $ids_run | LC_ALL=C sort | LC_ALL=C uniq -d | LC_ALL=C tr '\n' ' ' | LC_ALL=C sed 's/ *$//')" "$(rc_ids)"
+# (F59) 통제 — 실행 수 케이스 줄(`F52`) 하나를 지운 러너 사본에서 기대 집합이 하나 준다(기대 쪽이 소스에서 파생된다 · `control-reads-delta`).
+LC_ALL=C grep -v '^[[:blank:]]*chk "F52:' "$ROOT/tests/discover/run.sh" > "$SBX/run-drop-rc.sh"
+chk "F59: 통제 - 실행 수 케이스 줄 하나를 지운 러너 사본에서 기대 ID 집합이 하나 준다" "$(( $(printf '%s\n' $(rc_ids) | grep -c .) - $(printf '%s\n' $(rc_ids "$SBX/run-drop-rc.sh") | grep -c .) ))" "1"
+fi
 if part_full; then
 chk "F1: README cases 선언 == 실제 케이스 수" "$(declared_cases)" "$((pass + fail + 1))"
 fi
