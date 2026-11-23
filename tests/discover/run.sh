@@ -110,11 +110,11 @@ decl_count() { # <file> <키> → 선언 줄 개수
     decl_lines "$1" "$2" | grep -c .
 }
 # 선언 줄에서 키 **바로 뒤 꼬리**. 꼬리를 읽는 단일 자리다 — 구분자 검사(`bad_seps`)는 원문(`decl_tail_raw`)을, 표지 추출(`markers_of`)
-# 등 소비자는 끝의 탭 · VT · FF · CR 연속만 뗀 꼬리(`decl_tail`)를 본다(M95 라운드 1). 둘의 차이는 그 끝 연속뿐이고, 그 문자는 구분자 검사가
-# 원문에서 붉히므로 「검사가 보지 못하는 문자를 소비자가 지운다」(M42 차단 1)는 생기지 않는다. 정규식을 쓰지 않고 `index`+`substr`로 끊어 ps1 사본의
+# 등 소비자는 끝의 탭 · VT · FF · CR 연속을 떼고(M95 라운드 1) 그 문자가 든 다른 공백 연속을 공백 하나로 바꾼 꼬리(`decl_tail` · M96)를 본다.
+# 둘의 차이는 그 문자들뿐이고, 그 문자는 구분자 검사가 원문에서 붉히므로 「검사가 보지 못하는 문자를 소비자가 지운다」(M42 차단 1)는 생기지 않는다. 원문 꼬리(`decl_tail_raw`)는 정규식을 쓰지 않고 `index`+`substr`로 끊어 ps1 사본의
 # `IndexOf`+`Substring`과 **문자 그대로 같은 의미**를 갖는다(키가 리터럴이므로 이스케이프 축이
-# 아예 없어진다). 앞의 `tr -d '\r'`는 CRLF 체크아웃에서 꼬리 끝에 CR이 붙는 것을 막는다 —
-# ps1은 줄을 `\r?\n`으로 쪼개 애초에 CR을 보지 않으므로 여기서 맞춘다.
+# 아예 없어진다). 소비자용 꼬리(`decl_tail`)의 정규화만 정규식이고, ps1 `DeclTail`이 같은 패턴을 쓴다.
+# 줄 끝 CR은 `decl_lines`가 벗긴다(아래 `decl_tail_raw` 주석 — 옛 `tr -d '\r'`는 M42에 없앴다).
 decl_tail_raw() { # <file> <키> → 꼬리 1줄 원문(없으면 빈 출력) — 금지 구분자 검사(`bad_seps`)만 이것을 읽는다
     # 줄 끝 CR은 `decl_lines`가 이미 벗겼고 **줄 가운데 CR은 그대로 넘어온다** — 그래야 `bad_seps`가
     # 그것을 볼 수 있다. 앞선 판본은 여기서 `tr -d '\r'`로 **통째로 지웠고**, 그러면 ⑴ 양옆 표지가
@@ -129,9 +129,13 @@ decl_tail_raw() { # <file> <키> → 꼬리 1줄 원문(없으면 빈 출력) �
 # 가르는 폭이 자리마다 달라(sh awk 기본 분할은 탭을 떼고 ps1 `-split ' '`는 남긴다), 선언 줄 끝의 탭 하나에 두 러너가 서로 다른 케이스를 붉혔다
 # (M94 `f39-tab` · M95 리뷰 차단 2의 `start-point-map:` 재현). 그래서 자리마다 맞추지 않고 공용 읽기 한 곳에서 뗀다 — ps1 `DeclTail`도 같다.
 # **지우는 문자와 금지하는 문자가 겹치면 금지는 집행되지 않는다**(위 M42 교훈)는 그대로 지킨다 — 금지 구분자 검사는 뗀 꼬리가 아니라
-# 원문(`decl_tail_raw`)을 보므로 끝 탭은 여전히 붉다. 줄 가운데의 탭은 떼지 않는다(경계 — 그 탭은 금지 구분자 검사가 두 러너에서 붉힌다).
-decl_tail() { # <file> <키> → 꼬리 1줄(끝의 탭 · VT · FF · CR 연속을 뗀다 · 없으면 빈 출력)
-    decl_tail_raw "$1" "$2" | LC_ALL=C awk '{ sub(/[\t\v\f\r]+$/, ""); print }'
+# 원문(`decl_tail_raw`)을 보므로 끝 탭은 여전히 붉다.
+# (M96 · rf-125) **그 밖의 자리(키 바로 뒤 · 두 토큰 사이)에서 탭 · VT · FF · CR이 든 공백 연속은 ASCII 공백 하나가 된다.** 끝만 뗐더니 같은
+# 분할 폭 차이가 한 자리 옆에서 다시 났다 — `start-point-map:`의 토큰 사이 탭 하나에 sh `{W138}` · ps1 `{W118, W119, W137, W138}`이 붉었고
+# (M95 라운드 1 리뷰 권장 1), `sep-cps:` 안의 탭은 ps1 Part I를 중단시켰는데 sh는 계속 읽었다. 공백만으로 된 연속은 그대로 둔다. 금지 구분자
+# 검사는 여전히 원문을 보므로 그런 탭은 두 러너에서 모두 붉다 — 같아지는 것은 소비자가 받는 토큰뿐이다. ps1 `DeclTail`도 같은 패턴이다.
+decl_tail() { # <file> <키> → 꼬리 1줄(끝의 탭 · VT · FF · CR 연속을 떼고, 그것이 든 다른 공백 연속은 공백 하나로 · 없으면 빈 출력)
+    decl_tail_raw "$1" "$2" | LC_ALL=C awk '{ sub(/[\t\v\f\r]+$/, ""); gsub(/[ \t\v\f\r]*[\t\v\f\r][ \t\v\f\r]*/, " "); print }'
 }
 # **구분자 집합** — 두 셸 중 **어느 하나라도 공백으로 볼 수 있는** 문자 전부(ASCII 공백 0x20은 뺀다).
 # .NET `\s` = `[\f\n\r\t\v\x85\p{Z}]`이고 `\p{Z}`가 NBSP·OGHAM·U+2000~200A·U+2028/2029·U+202F·
@@ -1855,6 +1859,22 @@ chk "F51: 통제 - ps1 · sh 러너 사본에서 다른 파트(V) 대응 케이�
 # `F26`이 원문 꼬리로 붉힌다 — 이 통제는 이름 추출의 같음만 묻는다(`rf-109`의 `M15`와 같은 꼴).
 LC_ALL=C awk -v kc="- \`$NCC_KEY\`" '{ t = $0; sub(/^[ \t]+/, "", t); if (substr(t, 1, length(kc)) == kc) { sub(/\r$/, ""); $0 = $0 "\t" } print }' "$CONV" > "$SBX/conv-nc-tailtab.md"
 chk "F55: 통제 - 선언 줄 꼬리 탭 사본에서 이름 추출이 원본과 같다" "$([ "$(dn_names "$NCC_KEY" "$SBX/conv-nc-tailtab.md")" = "$(dn_names "$NCC_KEY")" ] && [ "$(decl_tail_raw "$SBX/conv-nc-tailtab.md" "$NCC_KEY")" != "$(decl_tail_raw "$CONV" "$NCC_KEY")" ] && echo same || echo differ)" "same"
+# (F60 · M96 `rf-125`) 통제 — 선언 줄 **머리**(키 바로 뒤)와 **두 토큰 사이**의 공백 하나를 탭으로 바꾼 규약 사본에서, 공용 꼬리 읽기(`decl_tail`)와
+# 이름 추출이 원본과 같고 원문 꼬리(`decl_tail_raw`)는 다르다. 공용 읽기가 탭이 든 공백 연속을 공백 하나로 바꾸므로 두 러너의 소비자가 같은 토큰을
+# 받는다 — 앞선 판본은 끝 탭만 뗐고, 토큰 사이 탭에서 두 러너의 붉은 집합이 갈렸다(M95 라운드 1 리뷰 권장 1). 탭 자체는 `F26`이 원문으로 붉힌다.
+nc_inner_tab() { # <head|mid> → 그 자리의 공백 하나를 탭으로 바꾼 규약 사본 경로
+    LC_ALL=C awk -v kc="- \`$NCC_KEY\`" -v w="\`$NCC_KEY\`" -v m="$1" '{ t = $0; sub(/^[ \t]+/, "", t)
+        if (substr(t, 1, length(kc)) == kc) { sub(/\r$/, ""); i = index($0, w) + length(w); h = substr($0, 1, i - 1); r = substr($0, i)
+            if (m == "head") r = "\t" substr(r, 2); else { j = index(substr(r, 2), " "); if (j > 0) r = substr(r, 1, j) "\t" substr(r, j + 2) }
+            $0 = h r }
+        print }' "$CONV" > "$SBX/conv-nc-$1tab.md"
+    printf '%s' "$SBX/conv-nc-$1tab.md"
+}
+nc_inner_same() { # <head|mid> → 꼬리 읽기 · 이름 추출이 원본과 같고 원문 꼬리는 다르면 same
+    _nci=$(nc_inner_tab "$1")
+    if [ "$(decl_tail "$_nci" "$NCC_KEY")" = "$(decl_tail "$CONV" "$NCC_KEY")" ] && [ "$(dn_names "$NCC_KEY" "$_nci")" = "$(dn_names "$NCC_KEY")" ] && [ "$(decl_tail_raw "$_nci" "$NCC_KEY")" != "$(decl_tail_raw "$CONV" "$NCC_KEY")" ]; then echo same; else echo differ; fi
+}
+chk "F60: 통제 - 선언 줄 머리 · 토큰 사이 탭 사본에서 꼬리 읽기와 이름 추출이 원본과 같다(원문 꼬리는 다르다)" "$(nc_inner_same head)|$(nc_inner_same mid)" "same|same"
 fi
 # === Part G — 상호참조 무결성(M34 · M35에서 규약 문서 **집합**으로 일반화) ====
 # (M34) Part F가 문서의 **자기서술**을 집행한다면, Part G는 문서 **사이를 잇는 참조**를 집행한다 —
@@ -4961,7 +4981,8 @@ rt_open_lost() { # [retro 경로] → 직전 섹션의 열린 행 키 중 최상
 }
 rt_lost_fixture() { # <drop|dispose|dropdone> [원본 회고] → 회고 사본(drop: 직전 섹션 첫 열린 키의 최상단 행을 지움 · dispose: 그 행의 상태를 처분으로 · dropdone: 직전 섹션에서 반영이던 첫 키의 최상단 행을 지움)
     _rtlf="$SBX/retro-lost-$1.md"; _rtls="${2:-$RETRO}"
-    if [ "$1" = dropdone ]; then _rtlk=$(rt_prev_rows "$_rtls" | LC_ALL=C awk -v d="$RFIRST" '$2 == d { print $1; exit }'); else _rtlk=$(rt_prev_open "$_rtls" | head -1); fi
+    if [ "$1" = dropdone ]; then _rtlk=$(rt_done_key "$_rtls"); else _rtlk=$(rt_prev_open "$_rtls" | head -1); fi
+    if [ -n "${3:-}" ]; then _rtlk=$3; fi   # (M96 리뷰) 셋째 인자가 있으면 그 키의 최상단 행을 다룬다(O128 넷째 칸)
     LC_ALL=C awk -v mk="$RBLK" -v q='`' -v k="$_rtlk" -v m="$1" -v dp="$RDISP" '
         index($0, "<!-- " mk ":start -->") > 0 { inb = 1; print; next }
         index($0, "<!-- " mk ":end -->") > 0 { inb = 0; print; next }
@@ -4972,11 +4993,36 @@ rt_lost_fixture() { # <drop|dispose|dropdone> [원본 회고] → 회고 사본(
 }
 # (M91 · `rf-117`) 소실 통제의 기준 — 섹션이 둘 이상이면 원본 그대로, 하나뿐이면 최상단 표의 행을 그대로 옮긴 직전 섹션을 붙인 사본(rt_sec_fixture prev)이다.
 # 과거 섹션을 나눈 문서에서도 통제가 지울 열린 행 · 반영 행을 갖게 해 허용된 편집을 막지 않는다. 섹션이 둘 이상이면 출력은 이 갈래 전과 같다.
-rt_lost_base() { if [ "$(rt_sec_count "${1:-$RETRO}")" -lt 2 ]; then rt_sec_fixture prev "${1:-$RETRO}"; else printf '%s' "${1:-$RETRO}"; fi; }   # [회고 경로] → 소실 통제의 기준 경로
-rt_lost_ctl() { # [회고 경로] → 기준 대비 「열린 행을 지운 사본 | 처분으로 옮긴 사본 | 반영이던 행을 지운 사본」의 소실 증가
-    _rtcb=$(rt_lost_base "${1:-}"); _rtc0=$(rt_open_lost "$_rtcb")
-    printf '%s|%s|%s' "$(( $(rt_open_lost "$(rt_lost_fixture drop "$_rtcb")") - _rtc0 ))" "$(( $(rt_open_lost "$(rt_lost_fixture dispose "$_rtcb")") - _rtc0 ))" "$(( $(rt_open_lost "$(rt_lost_fixture dropdone "$_rtcb")") - _rtc0 ))"
+# (M96 · `rf-119`) **셋째 칸은 지울 반영 행이 있어야 뜻이 있다** — 직전 섹션에서 `반영`이고 최상단 표에도 있는 키가 없으면 셋째 칸은 지울 행이 없어
+# 0이 나오고 기대값도 0이라 공허하게 통과했다(M91 리뷰 권장 4). 회고를 막 쓰기 시작한 대상 레포는 직전 표에 `반영` 행이 없는 것이 정상이라, 그 상태를
+# 붉히지 않고 **합성 반영 행 하나를 직전 표와 최상단 표에 함께 더한 사본**을 기준으로 쓴다(M91이 섹션 하나뿐인 문서에 섹션을 붙인 방식). 그래도 키를
+# 찾지 못하면 셋째 칸은 0 대신 `none`을 내 기대값과 다르다 — 지울 행이 없는 통제가 다시 초록으로 숨지 않는다(통제 `O128`).
+rt_done_key() { # [회고 경로] → 직전 섹션에서 반영이고 최상단 표(마커 창)에도 있는 첫 키(없으면 빈 출력)
+    _rtdk=$(retro_keys "${1:-$RETRO}")
+    rt_prev_rows "${1:-$RETRO}" | LC_ALL=C awk -v d="$RFIRST" '$2 == d { print $1 }' | while IFS= read -r _rtdc; do
+        if printf '%s\n' "$_rtdk" | LC_ALL=C grep -qxF -- "$_rtdc"; then printf '%s\n' "$_rtdc"; break; fi
+    done
 }
+rt_done_fixture() { # [원본 회고] → 직전 섹션 표 끝과 최상단 표(마커 창 끝)에 합성 반영 행(`rf-0`) 하나를 더한 사본
+    _rtdf="$SBX/retro-done.md"
+    LC_ALL=C awk -v mk="$RBLK" -v dn="$RFIRST" '
+        BEGIN { row = "| `rf-0` **synthetic done row** | - | **" dn "** | - |" }
+        substr($0, 1, 3) == "## " { s++; if (s == 3 && !added) { print row; added = 1 } }
+        index($0, "<!-- " mk ":end -->") > 0 && !top { print row; top = 1 }
+        { print }
+        END { if (s == 2 && !added) print row }' "${1:-$RETRO}" > "$_rtdf"
+    printf '%s' "$_rtdf"
+}
+rt_lost_base() { # [회고 경로] → 소실 통제의 기준 경로(섹션 하나뿐이면 직전 섹션을 붙이고, 지울 반영 행이 없으면 합성 반영 행을 더한 사본)
+    if [ "$(rt_sec_count "${1:-$RETRO}")" -lt 2 ]; then _rtlb=$(rt_sec_fixture prev "${1:-$RETRO}"); else _rtlb=${1:-$RETRO}; fi
+    if [ -z "$(rt_done_key "$_rtlb")" ]; then rt_done_fixture "$_rtlb"; else printf '%s' "$_rtlb"; fi
+}
+rt_lost_ctl_on() { # <기준 경로> → 그 기준 대비 「열린 행을 지운 사본 | 처분으로 옮긴 사본 | 반영이던 행을 지운 사본」의 소실 증가(지울 반영 행이 없으면 셋째 칸 none)
+    _rtcb=$1; _rtc0=$(rt_open_lost "$_rtcb")
+    if [ -z "$(rt_done_key "$_rtcb")" ]; then _rtc3=none; else _rtc3=$(( $(rt_open_lost "$(rt_lost_fixture dropdone "$_rtcb")") - _rtc0 )); fi
+    printf '%s|%s|%s' "$(( $(rt_open_lost "$(rt_lost_fixture drop "$_rtcb")") - _rtc0 ))" "$(( $(rt_open_lost "$(rt_lost_fixture dispose "$_rtcb")") - _rtc0 ))" "$_rtc3"
+}
+rt_lost_ctl() { rt_lost_ctl_on "$(rt_lost_base "${1:-}")"; }   # [회고 경로] → 소실 통제(기준은 rt_lost_base)
 # (M91 · `rf-117`) **직전 섹션이 없으면 대상 없음** — 과거 섹션을 `retro-archive.md`로 나누면(retro 스킬이 허용) 회고 문서에 섹션이 하나만 남는다.
 # 그때 추출 positive-control이 붉으면 허용된 편집을 막는다. 「대상 없음」은 **섹션 수로만** 정한다 — 섹션이 둘 이상인데 추출이 0이면 여전히 붉다
 # (추출 결과로 정하면 추출이 깨졌을 때 조용히 통과한다).
@@ -4984,21 +5030,27 @@ rt_sec_count() { LC_ALL=C awk 'substr($0, 1, 3) == "## " { n++ } END { print n +
 rt_prev_verdict() { # [retro 경로] → 섹션이 둘 미만이면 ok(대상 없음) · 둘 이상이면 직전 섹션 열린 키 추출이 비지 않을 때만 ok
     if [ "$(rt_sec_count "${1:-}")" -lt 2 ]; then echo ok; elif [ "$(rt_prev_open "${1:-}" | grep -c .)" -gt 0 ]; then echo ok; else echo no; fi
 }
-rt_sec_fixture() { # <one|noopen|prev> [원본 회고] → 회고 사본(one: 최상단 섹션만 남김 · noopen: 최상단 섹션 뒤에 최상단 표의 행을 모두 반영으로 바꾼 직전 섹션 하나 · prev: 그 행을 상태 그대로 옮긴 직전 섹션 하나)
+rt_sec_fixture() { # <one|noopen|prev|nodone> [원본 회고] → 회고 사본(one: 최상단 섹션만 남김 · noopen: 최상단 섹션 뒤에 최상단 표의 행을 모두 반영으로 바꾼 직전 섹션 하나 · prev: 그 행을 상태 그대로 옮긴 직전 섹션 하나 · nodone: prev에서 반영 행을 뺀 직전 섹션 하나)
     _rtsf="$SBX/retro-sec-$1.md"
     LC_ALL=C awk -v m="$1" -v mk="$RBLK" -v q='`' -v dn="$RFIRST" '
         substr($0, 1, 3) == "## " { s++; if (s >= 2) exit }
         { print }
         index($0, "<!-- " mk ":start -->") > 0 { inb = 1; next }
         index($0, "<!-- " mk ":end -->") > 0 { inb = 0; next }
-        inb && substr($0, 1, 1) == "|" { n = split($0, f, "|"); split(f[2], a, q); if (n >= 5 && a[2] ~ /^rf-[0-9]+$/) { if (m == "prev") { r[++nr] = $0; next } f[4] = " **" dn "** "; o = f[1]; for (i = 2; i <= n; i++) o = o "|" f[i]; r[++nr] = o } }
-        END { if (m == "noopen" || m == "prev") { print "## zz-prev"; print ""; for (i = 1; i <= nr; i++) print r[i] } }' "${2:-$RETRO}" > "$_rtsf"
+        inb && substr($0, 1, 1) == "|" { n = split($0, f, "|"); split(f[2], a, q); if (n >= 5 && a[2] ~ /^rf-[0-9]+$/) { if (m == "prev") { r[++nr] = $0; next } if (m == "nodone") { v = f[4]; gsub(/[* ]/, "", v); if (v != dn) r[++nr] = $0; next } f[4] = " **" dn "** "; o = f[1]; for (i = 2; i <= n; i++) o = o "|" f[i]; r[++nr] = o } }
+        END { if (m == "noopen" || m == "prev" || m == "nodone") { print "## zz-prev"; print ""; for (i = 1; i <= nr; i++) print r[i] } }' "${2:-$RETRO}" > "$_rtsf"
     printf '%s' "$_rtsf"
 }
 chk "O124: 직전 섹션 열린 행 추출 positive-control(>0 · 섹션이 하나뿐이면 대상 없음)" "$(rt_prev_verdict)" "ok"
 chk "O125: 본 검사 - 직전 섹션의 열린 행이 최상단 표에서 사라지지 않았다" "$(rt_open_lost)" "0"
 chk "O126: 소실 통제 - 열린 행을 지운 사본 1 · 그 행을 처분으로 옮긴 사본 0 · 직전에 반영이던 행을 지운 사본 0" "$(rt_lost_ctl)" "1|0|0"
 chk "O127: 섹션 수 통제 - 섹션 하나뿐인 사본은 O124 대상 없음 · O125 소실 0 · O126 통제 성립 · 직전 표의 열린 키가 0인 두 섹션 사본은 O124가 붉다" "$(rt_prev_verdict "$(rt_sec_fixture one)")|$(rt_open_lost "$(rt_sec_fixture one)")|$(rt_lost_ctl "$(rt_sec_fixture one)")|$(rt_prev_verdict "$(rt_sec_fixture noopen)")|$(rt_sec_count "$(rt_sec_fixture noopen)")" "ok|0|1|0|0|no|2"
+# (M96 리뷰 권장) 넷째 칸 — 직전 섹션의 첫 `반영` 키(최상단 표에 있는지 따지지 않는다)의 최상단 행을 지운 사본에서 `rt_done_key`가 고른 키가
+# 최상단 표에 있다(intop). 「최상단 표에도 있는 키」 조건이 빠지면 지운 그 키를 골라 셋째 칸이 지울 행 없이 0을 내므로 gone으로 붉다. 키가 없으면 nokey.
+_rtgb=$(rt_lost_base); _rtgk=$(rt_prev_rows "$_rtgb" | LC_ALL=C awk -v d="$RFIRST" '$2 == d { print $1; exit }')
+if [ -z "$_rtgk" ]; then _rtgv=nokey; else _rtgf=$(rt_lost_fixture drop "$_rtgb" "$_rtgk"); _rtgc=$(rt_done_key "$_rtgf")
+    if [ -z "$_rtgc" ] || retro_keys "$_rtgf" | LC_ALL=C grep -qxF -- "$_rtgc"; then _rtgv=intop; else _rtgv=gone; fi; fi
+chk "O128: 반영 행 통제 - 직전 표에 반영 행이 없는 두 섹션 사본에서 O126이 합성 반영 행으로 셋째 칸을 채우고, 그 사본 그대로를 기준으로 하면 셋째 칸이 none이다(공허한 0이 아니다) · 직전 첫 반영 키를 최상단에서 지운 사본에서 고른 키가 최상단에 있다" "$(rt_lost_ctl "$(rt_sec_fixture nodone)")|$(rt_lost_ctl_on "$(rt_sec_fixture nodone)" | LC_ALL=C awk -F'|' '{ print $3 }')|$(rt_prev_rows "$(rt_sec_fixture nodone)" | LC_ALL=C awk -v d="$RFIRST" '$2 == d' | grep -c .)|$_rtgv" "1|0|0|none|0|intop"
 fi
 
 # === Part P — 완료 기준 대조 (M55) ============================================
