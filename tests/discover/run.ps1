@@ -141,21 +141,29 @@ function GitInit($d) { New-Item -ItemType Directory -Force -Path $d | Out-Null; 
     }
     function DeclCount($path, $key) { return [string](@(DeclLines $path $key)).Count }
     # The tail after the key on the declaration line -- the ONE place the tail is read. The separator check reads the RAW tail
-    # (`DeclTailRaw`); the marker extraction and the other consumers read it with only the trailing run of tab / VT / FF / CR
-    # removed (`DeclTail`, M95 round 1). The two differ only in that run, and the separator check reddens it on the raw tail,
-    # so "a consumer strips a character the check cannot see" (M42 blocker 1) does not arise. The .sh twin does the same
-    # with awk index()+substr() (literal, no regex on either side).
+    # (`DeclTailRaw`); the marker extraction and the other consumers read it with the trailing run of tab / VT / FF / CR removed
+    # (M95 round 1) and every other blank run holding one of them turned into one space (`DeclTail`, M96). The two differ only in
+    # those characters, and the separator check reddens them on the raw tail, so "a consumer strips a character the check cannot
+    # see" (M42 blocker 1) does not arise. The RAW tail is cut the same way by the .sh twin `decl_tail_raw`
+    # with awk index()+substr() (literal, no regex on either side); only the consumer normalization in `DeclTail` is a regex,
+    # and the .sh `decl_tail` uses the same pattern.
     # (M95 round 1 / rf-124) CONSUMERS READ THE TAIL WITH ITS TRAILING RUN OF TAB / VT / FF / CR REMOVED. Dozens of places in both
     # runners split the tail into tokens and the split width differs per place (sh awk default splitting drops a tab, ps1
     # `-split ' '` keeps it), so one trailing tab on a declaration line reddened different cases in the two runners (M94 `f39-tab`,
     # the M95 review blocker 2 `start-point-map:` repro). So it is trimmed in the shared reader instead of per place -- the sh twin
     # `decl_tail` does the same. The M42 lesson (when the stripped and the forbidden characters overlap, the ban is not enforced)
-    # still holds: the forbidden-separator check reads the RAW tail (`DeclTailRaw`), so a trailing tab is still red. A tab in the
-    # middle of the line is not trimmed (boundary -- the separator check reddens it in both runners).
+    # still holds: the forbidden-separator check reads the RAW tail (`DeclTailRaw`), so a trailing tab is still red.
+    # (M96 / rf-125) A RUN OF BLANKS THAT HOLDS A TAB / VT / FF / CR ANYWHERE ELSE IN THE TAIL (right after the key, or between two
+    # tokens) BECOMES ONE ASCII SPACE. Trimming only the end left the same split-width gap one place over: a tab between two
+    # tokens of `start-point-map:` reddened sh {W138} and ps1 {W118, W119, W137, W138} (M95 round 1 review, minor 1), and a tab
+    # inside `sep-cps:` aborted ps1 Part I while sh read on. A run of plain spaces is left as it is. The separator check still
+    # reads the RAW tail, so every such tab is still red in both runners -- only the consumers' tokens become the same.
+    # The sh twin `decl_tail` applies the same pattern.
     function DeclTail($path, $key) {
         $t = DeclTailRaw $path $key
         if ($null -eq $t) { return $null }
-        return $t.TrimEnd([char[]]@([char]0x09, [char]0x0B, [char]0x0C, [char]0x0D))
+        $t = $t.TrimEnd([char[]]@([char]0x09, [char]0x0B, [char]0x0C, [char]0x0D))
+        return [regex]::Replace($t, '[ \t\v\f\r]*[\t\v\f\r][ \t\v\f\r]*', ' ')
     }
     function DeclTailRaw($path, $key) {
         $line = @(DeclLines $path $key) | Select-Object -First 1
@@ -2312,6 +2320,32 @@ try {
     [System.IO.File]::WriteAllLines($convTab, [string[]]$tabLines, (New-Object System.Text.UTF8Encoding($false)))
     $tabSame = ((@(DnNames $NCC_KEY $convTab) -join "`n") -ceq (@(DnNames $NCC_KEY) -join "`n")) -and -not ([string](DeclTailRaw $convTab $NCC_KEY) -ceq [string](DeclTailRaw $CONV $NCC_KEY))
     Chk "F55: control - name extraction from a copy with a trailing tab on the declaration line equals the original" $(if ($tabSame) { 'same' } else { 'differ' }) 'same'
+    # (F60 / M96 `rf-125`) control -- in a conventions copy where one space at the HEAD of the tail (right after the key) or BETWEEN two
+    # tokens is a tab, the shared tail reader (`DeclTail`) and name extraction equal the original and the raw tail (`DeclTailRaw`)
+    # differs. The shared reader turns a blank run holding a tab into one space, so both runners' consumers get the same tokens -- the
+    # old version trimmed only the end, and a tab between tokens split the two runners' red sets (M95 round 1 review, recommended 1).
+    # The tab itself is reddened by F26 on the raw tail.
+    function NcInnerTab([string]$m) {
+        $w = [string][char]0x60 + $NCC_KEY + [string][char]0x60
+        $lines = foreach ($l in [System.IO.File]::ReadAllLines($CONV)) {
+            if ($l.TrimStart($tabWs).StartsWith($kcTab, [System.StringComparison]::Ordinal)) {
+                $i = $l.IndexOf($w, [System.StringComparison]::Ordinal) + $w.Length
+                $h = $l.Substring(0, $i); $r = $l.Substring($i)
+                if ($m -eq 'head') { $r = [string][char]0x09 + $r.Substring(1) }
+                else { $j = $r.IndexOf(' ', 1); if ($j -gt 0) { $r = $r.Substring(0, $j) + [string][char]0x09 + $r.Substring($j + 1) } }
+                $h + $r
+            } else { $l }
+        }
+        $fx = Join-Path $sbx ('conv-nc-' + $m + 'tab.md')
+        [System.IO.File]::WriteAllLines($fx, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
+        return $fx
+    }
+    function NcInnerSame([string]$m) {
+        $f = NcInnerTab $m
+        $ok = ([string](DeclTail $f $NCC_KEY) -ceq [string](DeclTail $CONV $NCC_KEY)) -and ((@(DnNames $NCC_KEY $f) -join "`n") -ceq (@(DnNames $NCC_KEY) -join "`n")) -and -not ([string](DeclTailRaw $f $NCC_KEY) -ceq [string](DeclTailRaw $CONV $NCC_KEY))
+        if ($ok) { return 'same' } else { return 'differ' }
+    }
+    Chk "F60: control - in a copy with a tab at the head of the tail / between two tokens, the tail reader and name extraction equal the original (the raw tail differs)" ((NcInnerSame 'head') + '|' + (NcInnerSame 'mid')) 'same|same'
     }
     # === Part G -- cross-reference integrity (M34; generalized to a FILE SET in M35) =====
     # (M34) Part F enforces what a document says ABOUT ITSELF; Part G enforces the REFERENCES BETWEEN
@@ -5892,10 +5926,12 @@ try {
     }
     # drop: the top row of the first open key of the previous section removed / dispose: that row moved to disposed /
     # dropdone: the top row of the first key that was done in the previous section removed.
-    function RtLostFixture([string]$mode, [string]$src = '') {
+    function RtLostFixture([string]$mode, [string]$src = '', [string]$key = '') {
         if ($src -eq '') { $src = $RETRO }
         $fx = Join-Path $sbx ('retro-lost-' + $mode + '.md')
-        $k = if ($mode -eq 'dropdone') { @(@(RtPrevRows $src) | Where-Object { $_.Split(' ')[1] -ceq $rFirst } | ForEach-Object { $_.Split(' ')[0] }) | Select-Object -First 1 } else { @(RtPrevOpen $src) | Select-Object -First 1 }
+        $k = if ($mode -eq 'dropdone') { RtDoneKey $src } else { @(RtPrevOpen $src) | Select-Object -First 1 }
+        if ($key -ne '') { $k = $key }   # (M96 review) a third argument names the key whose top row is handled (O128 fourth column)
+        if ($k -eq '') { $k = $null }
         $inb = $false
         $out = foreach ($l in [System.IO.File]::ReadAllLines($src)) {
             if ($l.Contains('<!-- ' + $rBlk + ':start -->')) { $inb = $true; $l; continue }
@@ -5943,30 +5979,72 @@ try {
             if ($l.Contains('<!-- ' + $rBlk + ':end -->')) { $inb = $false; continue }
             if ($inb -and $l.StartsWith('|', [System.StringComparison]::Ordinal)) {
                 $fl = $l -split '\|'
-                if ($fl.Count -ge 5) { $a = $fl[1].Split([char]96); if ($a.Count -ge 3 -and $a[1] -cmatch '^rf-[0-9]+$') { if ($mode -eq 'prev') { $rows.Add($l); continue }; $fl[3] = ' **' + $rFirst + '** '; $rows.Add($fl -join '|') } }
+                if ($fl.Count -ge 5) { $a = $fl[1].Split([char]96); if ($a.Count -ge 3 -and $a[1] -cmatch '^rf-[0-9]+$') { if ($mode -eq 'prev') { $rows.Add($l); continue }; if ($mode -eq 'nodone') { if (-not ($fl[3].Replace('*', '').Replace(' ', '') -ceq $rFirst)) { $rows.Add($l) }; continue }; $fl[3] = ' **' + $rFirst + '** '; $rows.Add($fl -join '|') } }
             }
         }
-        if ($mode -eq 'noopen' -or $mode -eq 'prev') { $out.Add('## zz-prev'); $out.Add(''); foreach ($r in $rows) { $out.Add($r) } }
+        if ($mode -eq 'noopen' -or $mode -eq 'prev' -or $mode -eq 'nodone') { $out.Add('## zz-prev'); $out.Add(''); foreach ($r in $rows) { $out.Add($r) } }
         [System.IO.File]::WriteAllLines($fx, [string[]]@($out), (New-Object System.Text.UTF8Encoding($false)))
         return $fx
     }
     # (M91 rf-117) THE VANISH CONTROL'S BASE -- the document itself with two or more sections, otherwise a copy with one previous section
     # holding the top table's rows unchanged (RtSecFixture prev), so a document whose past sections were split off still has an open row
     # and a done row for the control to remove. With two or more sections the output is the same as before this branch.
+    # (M96 rf-119) THE THIRD COLUMN MEANS SOMETHING ONLY WITH A DONE ROW TO REMOVE -- without a key that is done in the previous section
+    # and also in the top table, the third column removed nothing, gave 0 and matched the expected 0 (M91 review, recommended 4). A target
+    # repo that has just started writing retros normally has no done row in the previous table, so that state is not reddened: the base
+    # becomes a copy with ONE SYNTHETIC DONE ROW added to both the previous table and the top table (the way M91 added a section to a
+    # one-section document). If a key is still not found the third column gives `none` instead of 0, so it differs from the expected
+    # value -- a control with nothing to remove cannot hide as green again (control O128). The .sh twin does the same.
+    function RtDoneKey([string]$path = '') {
+        if ($path -eq '') { $path = $RETRO }
+        $top = OrdSet @(RetroKeys $path)
+        foreach ($p in @(RtPrevRows $path)) {
+            $q = $p.Split(' ')
+            if ($q[1] -ceq $rFirst -and $top.Contains($q[0])) { return $q[0] }
+        }
+        return ''
+    }
+    function RtDoneFixture([string]$src = '') {
+        if ($src -eq '') { $src = $RETRO }
+        $fx = Join-Path $sbx 'retro-done.md'
+        $row = '| `rf-0` **synthetic done row** | - | **' + $rFirst + '** | - |'
+        $s = 0; $added = $false; $top = $false
+        $out = New-Object System.Collections.Generic.List[string]
+        foreach ($l in [System.IO.File]::ReadAllLines($src)) {
+            if ($l.StartsWith('## ', [System.StringComparison]::Ordinal)) { $s++; if ($s -eq 3 -and -not $added) { $out.Add($row); $added = $true } }
+            if ($l.Contains('<!-- ' + $rBlk + ':end -->') -and -not $top) { $out.Add($row); $top = $true }
+            $out.Add($l)
+        }
+        if ($s -eq 2 -and -not $added) { $out.Add($row) }
+        [System.IO.File]::WriteAllLines($fx, [string[]]@($out), (New-Object System.Text.UTF8Encoding($false)))
+        return $fx
+    }
     function RtLostBase([string]$path = '') {
         if ($path -eq '') { $path = $RETRO }
-        if ((RtSecCount $path) -lt 2) { return (RtSecFixture 'prev' $path) }
-        return $path
+        $b = if ((RtSecCount $path) -lt 2) { RtSecFixture 'prev' $path } else { $path }
+        if ((RtDoneKey $b) -eq '') { return (RtDoneFixture $b) }
+        return $b
     }
-    function RtLostCtl([string]$path = '') {
-        $b = RtLostBase $path
+    function RtLostCtlOn([string]$b) {
         $z = [int](RtOpenLost $b)
-        return ([string]([int](RtOpenLost (RtLostFixture 'drop' $b)) - $z) + '|' + [string]([int](RtOpenLost (RtLostFixture 'dispose' $b)) - $z) + '|' + [string]([int](RtOpenLost (RtLostFixture 'dropdone' $b)) - $z))
+        $c3 = if ((RtDoneKey $b) -eq '') { 'none' } else { [string]([int](RtOpenLost (RtLostFixture 'dropdone' $b)) - $z) }
+        return ([string]([int](RtOpenLost (RtLostFixture 'drop' $b)) - $z) + '|' + [string]([int](RtOpenLost (RtLostFixture 'dispose' $b)) - $z) + '|' + $c3)
     }
+    function RtLostCtl([string]$path = '') { return (RtLostCtlOn (RtLostBase $path)) }
     Chk "O124: previous-section open-row extraction positive-control (>0; nothing to check when there is only one section)" (RtPrevVerdict) 'ok'
     Chk "O125: main check -- no open row of the previous section vanished from the top table" (RtOpenLost) '0'
     Chk "O126: vanish control -- an open row removed 1 / that row moved to disposed 0 / a row that was done before removed 0" (RtLostCtl) '1|0|0'
     Chk "O127: section-count control -- a one-section copy has nothing to check for O124, vanishes 0 for O125 and still holds the O126 control; a two-section copy whose previous table has no open key reddens O124" ((RtPrevVerdict (RtSecFixture 'one')) + '|' + (RtOpenLost (RtSecFixture 'one')) + '|' + (RtLostCtl (RtSecFixture 'one')) + '|' + (RtPrevVerdict (RtSecFixture 'noopen')) + '|' + [string](RtSecCount (RtSecFixture 'noopen'))) 'ok|0|1|0|0|no|2'
+    # (M96 review, recommended) fourth column -- on a copy where the top row of the previous section's FIRST done key (in the top table
+    # or not) is removed, the key RtDoneKey picks is in the top table (intop). Without the "also in the top table" condition it picks the
+    # removed key, the third column removes nothing and gives 0, so this reads gone and is red. No such key reads nokey.
+    $rtGb = RtLostBase
+    $rtGk = @(@(RtPrevRows $rtGb) | Where-Object { $_.Split(' ')[1] -ceq $rFirst } | ForEach-Object { $_.Split(' ')[0] }) | Select-Object -First 1
+    $rtGv = if ([string]::IsNullOrEmpty($rtGk)) { 'nokey' } else {
+        $rtGf = RtLostFixture 'drop' $rtGb $rtGk; $rtGc = RtDoneKey $rtGf
+        if ($rtGc -eq '' -or (OrdSet @(RetroKeys $rtGf)).Contains($rtGc)) { 'intop' } else { 'gone' } }
+    $rtNoDone = RtSecFixture 'nodone'
+    Chk "O128: done-row control -- on a two-section copy whose previous table has no done row, O126 fills the third column with a synthetic done row; taking that copy itself as the base, the third column is none (not a vacuous 0); on a copy with the previous first done key removed from the top, the picked key is in the top" ((RtLostCtl $rtNoDone) + '|' + (RtLostCtlOn $rtNoDone).Split('|')[2] + '|' + [string]@(@(RtPrevRows $rtNoDone) | Where-Object { $_.Split(' ')[1] -ceq $rFirst }).Count + '|' + $rtGv) '1|0|0|none|0|intop'
     }
 
     # === Part P -- completion-criteria cross-check (M55) ====================
