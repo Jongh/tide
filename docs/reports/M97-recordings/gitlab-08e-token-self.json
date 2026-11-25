@@ -1,0 +1,8 @@
+{
+  "path": "personal_access_tokens/self",
+  "method": "GET",
+  "body": {
+    "error": "404 Not Found"
+  },
+  "status": 404
+}

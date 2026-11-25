@@ -1,0 +1,18 @@
+{
+  "path": "projects/423/labels",
+  "method": "GET",
+  "body": [
+    {
+      "id": 558,
+      "name": "Doing",
+      "description": null,
+      "description_html": "",
+      "text_color": "#FFFFFF",
+      "color": "#00b140",
+      "subscribed": false,
+      "priority": null,
+      "is_project_label": true
+    }
+  ],
+  "status": 200
+}

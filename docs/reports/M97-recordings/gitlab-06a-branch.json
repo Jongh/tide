@@ -1,0 +1,31 @@
+{
+  "path": "projects/423/repository/branches",
+  "body": {
+    "name": "probe-close",
+    "commit": {
+      "id": "37d84ad1186ffb104d37c6c51e3f2c0e0ee4d34b",
+      "short_id": "37d84ad1",
+      "created_at": "2026-11-23T15:11:06+09:00",
+      "parent_ids": [],
+      "title": "Initial commit",
+      "message": "Initial commit",
+      "author_name": "author_name-placeholder",
+      "author_email": "user@example.invalid",
+      "authored_date": "2026-11-23T15:11:06+09:00",
+      "committer_name": "committer_name-placeholder",
+      "committer_email": "user@example.invalid",
+      "committed_date": "2026-11-23T15:11:06+09:00",
+      "trailers": {},
+      "web_url": "http://gitlab.example:7000/placeholder3/tide-test/-/commit/37d84ad1186ffb104d37c6c51e3f2c0e0ee4d34b"
+    },
+    "merged": false,
+    "protected": false,
+    "developers_can_push": false,
+    "developers_can_merge": false,
+    "can_push": true,
+    "default": false,
+    "web_url": "http://gitlab.example:7000/placeholder3/tide-test/-/tree/probe-close"
+  },
+  "status": 201,
+  "method": "POST"
+}

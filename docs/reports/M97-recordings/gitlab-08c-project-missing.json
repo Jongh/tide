@@ -1,0 +1,8 @@
+{
+  "path": "projects/placeholder3%2Fno-such-project-tide",
+  "method": "GET",
+  "body": {
+    "message": "404 Project Not Found"
+  },
+  "status": 404
+}

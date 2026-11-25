@@ -1,0 +1,8 @@
+{
+  "path": "projects/423/merge_requests/1/merge",
+  "body": {
+    "message": "Branch cannot be merged"
+  },
+  "status": 406,
+  "method": "PUT"
+}

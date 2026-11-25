@@ -1,0 +1,25 @@
+{
+  "path": "graphql",
+  "body": {
+    "data": {
+      "__type": {
+        "enumValues": [
+          {
+            "name": "ISSUE"
+          },
+          {
+            "name": "INCIDENT"
+          },
+          {
+            "name": "TEST_CASE"
+          },
+          {
+            "name": "REQUIREMENT"
+          }
+        ]
+      }
+    }
+  },
+  "method": "POST",
+  "status": 200
+}

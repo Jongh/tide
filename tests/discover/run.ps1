@@ -591,6 +591,28 @@ F|F40|dup|CONV|nc-asks:|main check - new-check checklist judgment names are uniq
 F|F41|def|CONV|nc-asks:|main check - exactly one definition item per judgment name
 F|F42|orphan|CONV|nc-asks:|main check - every judgment definition item has a declared name (0 orphans)
 F|F43|order|CONV|nc-asks:|main check - judgment definition items follow the declared name order
+F|F61|count|CONV_TRK|tracker-ops:|exactly one tracker-ops declaration line
+F|F62|seps|CONV_TRK|tracker-ops:|no forbidden separator in the tracker-ops declaration tail
+F|F63|dup|CONV_TRK|tracker-ops:|main check - tracker op names are unique
+F|F64|def|CONV_TRK|tracker-ops:|main check - exactly one definition item per tracker op name
+F|F65|orphan|CONV_TRK|tracker-ops:|main check - every tracker op definition item has a declared name (0 orphans)
+F|F66|order|CONV_TRK|tracker-ops:|main check - tracker op definition items follow the declared name order
+F|F67|count|CONV_TRK|tracker-detect-steps:|exactly one tracker-detect-steps declaration line
+F|F68|seps|CONV_TRK|tracker-detect-steps:|no forbidden separator in the tracker-detect-steps declaration tail
+F|F69|dup|CONV_TRK|tracker-detect-steps:|main check - detect step names are unique
+F|F70|def|CONV_TRK|tracker-detect-steps:|main check - exactly one definition item per detect step name
+F|F71|orphan|CONV_TRK|tracker-detect-steps:|main check - every detect step definition item has a declared name (0 orphans)
+F|F72|order|CONV_TRK|tracker-detect-steps:|main check - detect step definition items follow the declared name order
+F|F73|count|CONV_TRK|tracker-intake-verdicts:|exactly one tracker-intake-verdicts declaration line
+F|F74|seps|CONV_TRK|tracker-intake-verdicts:|no forbidden separator in the tracker-intake-verdicts declaration tail
+F|F75|dup|CONV_TRK|tracker-intake-verdicts:|main check - intake verdict names are unique
+F|F76|def|CONV_TRK|tracker-intake-verdicts:|main check - exactly one definition item per intake verdict name
+F|F77|orphan|CONV_TRK|tracker-intake-verdicts:|main check - every intake verdict definition item has a declared name (0 orphans)
+F|F78|order|CONV_TRK|tracker-intake-verdicts:|main check - intake verdict definition items follow the declared name order
+F|F79|count|CONV_TRK|tracker-labels:|exactly one tracker-labels declaration line
+F|F80|seps|CONV_TRK|tracker-labels:|no forbidden separator in the tracker-labels declaration tail
+F|F81|count|CONV_TRK|tracker-phase-writes:|exactly one tracker-phase-writes declaration line
+F|F82|seps|CONV_TRK|tracker-phase-writes:|no forbidden separator in the tracker-phase-writes declaration tail
 I|I7|count|CONV|state-neg:|exactly one state-neg declaration line in the convention
 I|I8|count|CONV|state-past:|exactly one state-past declaration line in the convention
 I|I10|seps|CONV|state-neg:|no forbidden separator in the state-neg declaration tail
@@ -976,6 +998,7 @@ try {
 
     $README    = Join-Path $ROOT 'README.md'
     $CONV      = Join-Path $ROOT 'docs\conventions.md'
+    $CONV_TRK  = Join-Path $ROOT 'docs\conventions-tracker.md'   # (M97) conventions FRAGMENT -- tracker contract; registry file column CONV_TRK
     $CANON_CMD = Join-Path $ROOT 'docs\commands.md'        # new canonical command catalog (single source)
     if (PartOn 'B') {
     $SITE_CMD  = Join-Path $ROOT 'site\docs\commands.md'   # site shell (snippet include)
@@ -9197,7 +9220,7 @@ try {
         $rg = $rgRow -split '\|', 6
         if ($rg[2] -eq 'cover') { continue }
         if (-not (PartOn $rg[0])) { continue }
-        $rgFile = if ($rg[3] -eq 'CONV_REL') { $CONV_REL } else { $CONV }
+        $rgFile = if ($rg[3] -eq 'CONV_REL') { $CONV_REL } elseif ($rg[3] -eq 'CONV_TRK') { $CONV_TRK } else { $CONV }
         $rgKeys = @($rg[4] -split ' ' | Where-Object { $_ -ne '' })
         $rgFn = @{ 'dup' = 'DnDup'; 'def' = 'DnDefBad'; 'orphan' = 'DnDefOrphan'; 'order' = 'DnDefOrder' }
         $rgBase = $rg[2] -replace '-sum$', ''

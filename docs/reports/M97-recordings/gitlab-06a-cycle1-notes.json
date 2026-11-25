@@ -1,0 +1,145 @@
+{
+  "status": 200,
+  "path": "projects/423/issues/1/notes?sort=asc",
+  "body": [
+    {
+      "id": 36826,
+      "type": null,
+      "body": "mentioned in issue #3",
+      "attachment": null,
+      "author": {
+        "id": 3,
+        "username": "placeholder3",
+        "name": "name-placeholder",
+        "state": "active",
+        "avatar_url": "https://avatars.example/u",
+        "web_url": "http://gitlab.example:7000/placeholder3"
+      },
+      "created_at": "2026-11-23T15:14:03.755+09:00",
+      "updated_at": "2026-11-23T15:14:03.76+09:00",
+      "system": true,
+      "noteable_id": 73,
+      "noteable_type": "Issue",
+      "resolvable": false,
+      "confidential": false,
+      "noteable_iid": 1,
+      "commands_changes": {}
+    },
+    {
+      "id": 36828,
+      "type": null,
+      "body": "marked this issue as related to #3",
+      "attachment": null,
+      "author": {
+        "id": 3,
+        "username": "placeholder3",
+        "name": "name-placeholder",
+        "state": "active",
+        "avatar_url": "https://avatars.example/u",
+        "web_url": "http://gitlab.example:7000/placeholder3"
+      },
+      "created_at": "2026-11-23T15:14:04.056+09:00",
+      "updated_at": "2026-11-23T15:14:04.063+09:00",
+      "system": true,
+      "noteable_id": 73,
+      "noteable_type": "Issue",
+      "resolvable": false,
+      "confidential": false,
+      "noteable_iid": 1,
+      "commands_changes": {}
+    },
+    {
+      "id": 36832,
+      "type": null,
+      "body": "marked this issue as related to #2",
+      "attachment": null,
+      "author": {
+        "id": 3,
+        "username": "placeholder3",
+        "name": "name-placeholder",
+        "state": "active",
+        "avatar_url": "https://avatars.example/u",
+        "web_url": "http://gitlab.example:7000/placeholder3"
+      },
+      "created_at": "2026-11-23T15:14:05.792+09:00",
+      "updated_at": "2026-11-23T15:14:05.799+09:00",
+      "system": true,
+      "noteable_id": 73,
+      "noteable_type": "Issue",
+      "resolvable": false,
+      "confidential": false,
+      "noteable_iid": 1,
+      "commands_changes": {}
+    },
+    {
+      "id": 36834,
+      "type": null,
+      "body": "marked the task **T01 first task** as completed",
+      "attachment": null,
+      "author": {
+        "id": 3,
+        "username": "placeholder3",
+        "name": "name-placeholder",
+        "state": "active",
+        "avatar_url": "https://avatars.example/u",
+        "web_url": "http://gitlab.example:7000/placeholder3"
+      },
+      "created_at": "2026-11-23T15:14:09.152+09:00",
+      "updated_at": "2026-11-23T15:14:09.157+09:00",
+      "system": true,
+      "noteable_id": 73,
+      "noteable_type": "Issue",
+      "resolvable": false,
+      "confidential": false,
+      "noteable_iid": 1,
+      "commands_changes": {}
+    },
+    {
+      "id": 36836,
+      "type": null,
+      "body": "mentioned in merge request !1",
+      "attachment": null,
+      "author": {
+        "id": 3,
+        "username": "placeholder3",
+        "name": "name-placeholder",
+        "state": "active",
+        "avatar_url": "https://avatars.example/u",
+        "web_url": "http://gitlab.example:7000/placeholder3"
+      },
+      "created_at": "2026-11-23T15:14:57.436+09:00",
+      "updated_at": "2026-11-23T15:14:57.441+09:00",
+      "system": true,
+      "noteable_id": 73,
+      "noteable_type": "Issue",
+      "resolvable": false,
+      "confidential": false,
+      "noteable_iid": 1,
+      "commands_changes": {}
+    },
+    {
+      "id": 36837,
+      "type": null,
+      "body": "mentioned in commit 39af97a67ab690f111d0b260922564faf1bce5fb",
+      "attachment": null,
+      "author": {
+        "id": 3,
+        "username": "placeholder3",
+        "name": "name-placeholder",
+        "state": "active",
+        "avatar_url": "https://avatars.example/u",
+        "web_url": "http://gitlab.example:7000/placeholder3"
+      },
+      "created_at": "2026-11-23T15:15:18.649+09:00",
+      "updated_at": "2026-11-23T15:15:18.654+09:00",
+      "system": true,
+      "noteable_id": 73,
+      "noteable_type": "Issue",
+      "resolvable": false,
+      "confidential": false,
+      "noteable_iid": 1,
+      "commands_changes": {}
+    }
+  ],
+  "method": "GET"
+}

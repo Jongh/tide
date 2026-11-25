@@ -1,0 +1,10 @@
+{
+  "headers": [
+    "X-Content-Type-Options",
+    "X-Request-ID",
+    "X-Runtime",
+    "Content-Type"
+  ],
+  "status": 401,
+  "note": "no GitLab-named header on unauthenticated /api/v4/version; body {\"message\":\"401 Unauthorized\"}"
+}

@@ -1,0 +1,16 @@
+{
+  "path": "projects/423/labels",
+  "method": "POST",
+  "body": {
+    "id": 561,
+    "name": "tide:backlog",
+    "description": null,
+    "description_html": "",
+    "text_color": "#333333",
+    "color": "#a8a8a8",
+    "subscribed": false,
+    "priority": null,
+    "is_project_label": true
+  },
+  "status": 201
+}

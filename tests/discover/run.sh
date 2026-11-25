@@ -503,6 +503,28 @@ F|F40|dup|CONV|nc-asks:|본 검사 - 새 검사 체크리스트 판정 이름이
 F|F41|def|CONV|nc-asks:|본 검사 - 판정 이름마다 정의 항목이 정확히 하나
 F|F42|orphan|CONV|nc-asks:|본 검사 - 판정 정의 항목마다 선언된 이름이 있다(고아 정의 0)
 F|F43|order|CONV|nc-asks:|본 검사 - 판정 정의 항목의 순서가 선언의 이름 순서와 같다
+F|F61|count|CONV_TRK|tracker-ops:|tracker-ops 선언 줄 정확히 1개
+F|F62|seps|CONV_TRK|tracker-ops:|tracker-ops 선언 줄 꼬리에 금지 구분자 0건
+F|F63|dup|CONV_TRK|tracker-ops:|본 검사 - 트래커 연산 이름이 유일하다
+F|F64|def|CONV_TRK|tracker-ops:|본 검사 - 트래커 연산 이름마다 정의 항목이 정확히 하나
+F|F65|orphan|CONV_TRK|tracker-ops:|본 검사 - 트래커 연산 정의 항목마다 선언된 이름이 있다(고아 정의 0)
+F|F66|order|CONV_TRK|tracker-ops:|본 검사 - 트래커 연산 정의 항목의 순서가 선언의 이름 순서와 같다
+F|F67|count|CONV_TRK|tracker-detect-steps:|tracker-detect-steps 선언 줄 정확히 1개
+F|F68|seps|CONV_TRK|tracker-detect-steps:|tracker-detect-steps 선언 줄 꼬리에 금지 구분자 0건
+F|F69|dup|CONV_TRK|tracker-detect-steps:|본 검사 - 판별 갈래 이름이 유일하다
+F|F70|def|CONV_TRK|tracker-detect-steps:|본 검사 - 판별 갈래 이름마다 정의 항목이 정확히 하나
+F|F71|orphan|CONV_TRK|tracker-detect-steps:|본 검사 - 판별 갈래 정의 항목마다 선언된 이름이 있다(고아 정의 0)
+F|F72|order|CONV_TRK|tracker-detect-steps:|본 검사 - 판별 갈래 정의 항목의 순서가 선언의 이름 순서와 같다
+F|F73|count|CONV_TRK|tracker-intake-verdicts:|tracker-intake-verdicts 선언 줄 정확히 1개
+F|F74|seps|CONV_TRK|tracker-intake-verdicts:|tracker-intake-verdicts 선언 줄 꼬리에 금지 구분자 0건
+F|F75|dup|CONV_TRK|tracker-intake-verdicts:|본 검사 - 유입 선별 갈래 이름이 유일하다
+F|F76|def|CONV_TRK|tracker-intake-verdicts:|본 검사 - 유입 선별 갈래 이름마다 정의 항목이 정확히 하나
+F|F77|orphan|CONV_TRK|tracker-intake-verdicts:|본 검사 - 유입 선별 갈래 정의 항목마다 선언된 이름이 있다(고아 정의 0)
+F|F78|order|CONV_TRK|tracker-intake-verdicts:|본 검사 - 유입 선별 갈래 정의 항목의 순서가 선언의 이름 순서와 같다
+F|F79|count|CONV_TRK|tracker-labels:|tracker-labels 선언 줄 정확히 1개
+F|F80|seps|CONV_TRK|tracker-labels:|tracker-labels 선언 줄 꼬리에 금지 구분자 0건
+F|F81|count|CONV_TRK|tracker-phase-writes:|tracker-phase-writes 선언 줄 정확히 1개
+F|F82|seps|CONV_TRK|tracker-phase-writes:|tracker-phase-writes 선언 줄 꼬리에 금지 구분자 0건
 R|R1|count|CONV|coverage-bookkeeping:|coverage-bookkeeping 선언 줄 정확히 1개
 S|S1|count|CONV_REL|push-availability:|push-availability 선언 줄 정확히 1개
 S|S2|count|CONV_REL|terminal-state:|terminal-state 선언 줄 정확히 1개
@@ -619,7 +641,7 @@ decl_reg_run() { # 등록표의 케이스 행을 파트 선택에 맞춰 낸다(
     while IFS='|' read -r _rgp _rgi _rgc _rgf _rgk _rgl; do
         [ "$_rgc" = cover ] && continue
         part_on "$_rgp" || continue
-        case $_rgf in CONV_REL) _rgff=$CONV_REL ;; *) _rgff=$CONV ;; esac
+        case $_rgf in CONV_REL) _rgff=$CONV_REL ;; CONV_TRK) _rgff=$CONV_TRK ;; *) _rgff=$CONV ;; esac
         case $_rgc in
             count) _rgg=$(decl_count "$_rgff" "$_rgk"); _rgw=1 ;;
             seps) _rgg=; _rgw=; for _rgx in $_rgk; do _rgg=$_rgg$(bad_seps "$_rgff" "$_rgx"); _rgw=${_rgw}0; done ;;
@@ -786,6 +808,7 @@ fi
 
 README="$ROOT/README.md"
 CONV="$ROOT/docs/conventions.md"
+CONV_TRK="$ROOT/docs/conventions-tracker.md"   # (M97) 규약 **조각** - 트래커 계약. 등록표 행의 규약 파일 칸 `CONV_TRK`가 가리킨다
 CANON_CMD="$ROOT/docs/commands.md"        # 새 캐노니컬 커맨드 카탈로그(단일 원본)
 if part_on B; then
 SITE_CMD="$ROOT/site/docs/commands.md"    # 사이트 셸(스니펫 인클루드)

@@ -1,0 +1,76 @@
+{
+  "body": [
+    {
+      "id": 36827,
+      "type": null,
+      "body": "mentioned in issue #3",
+      "attachment": null,
+      "author": {
+        "id": 3,
+        "username": "placeholder3",
+        "name": "name-placeholder",
+        "state": "active",
+        "avatar_url": "https://avatars.example/u",
+        "web_url": "http://gitlab.example:7000/placeholder3"
+      },
+      "created_at": "2026-11-23T15:14:04.056+09:00",
+      "updated_at": "2026-11-23T15:14:04.06+09:00",
+      "system": true,
+      "noteable_id": 74,
+      "noteable_type": "Issue",
+      "resolvable": false,
+      "confidential": false,
+      "noteable_iid": 2,
+      "commands_changes": {}
+    },
+    {
+      "id": 36830,
+      "type": null,
+      "body": "marked this issue as related to #3",
+      "attachment": null,
+      "author": {
+        "id": 3,
+        "username": "placeholder3",
+        "name": "name-placeholder",
+        "state": "active",
+        "avatar_url": "https://avatars.example/u",
+        "web_url": "http://gitlab.example:7000/placeholder3"
+      },
+      "created_at": "2026-11-23T15:14:04.809+09:00",
+      "updated_at": "2026-11-23T15:14:04.815+09:00",
+      "system": true,
+      "noteable_id": 74,
+      "noteable_type": "Issue",
+      "resolvable": false,
+      "confidential": false,
+      "noteable_iid": 2,
+      "commands_changes": {}
+    },
+    {
+      "id": 36833,
+      "type": null,
+      "body": "marked this issue as related to #1",
+      "attachment": null,
+      "author": {
+        "id": 3,
+        "username": "placeholder3",
+        "name": "name-placeholder",
+        "state": "active",
+        "avatar_url": "https://avatars.example/u",
+        "web_url": "http://gitlab.example:7000/placeholder3"
+      },
+      "created_at": "2026-11-23T15:14:06.103+09:00",
+      "updated_at": "2026-11-23T15:14:06.108+09:00",
+      "system": true,
+      "noteable_id": 74,
+      "noteable_type": "Issue",
+      "resolvable": false,
+      "confidential": false,
+      "noteable_iid": 2,
+      "commands_changes": {}
+    }
+  ],
+  "method": "GET",
+  "status": 200,
+  "path": "projects/423/issues/2/notes?sort=asc"
+}

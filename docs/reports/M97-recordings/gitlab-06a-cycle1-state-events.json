@@ -1,0 +1,22 @@
+{
+  "status": 200,
+  "body": [
+    {
+      "id": 22271,
+      "user": {
+        "id": 3,
+        "username": "placeholder3",
+        "name": "name-placeholder",
+        "state": "active",
+        "avatar_url": "https://avatars.example/u",
+        "web_url": "http://gitlab.example:7000/placeholder3"
+      },
+      "created_at": "2026-11-23T15:15:19.808+09:00",
+      "resource_type": "Issue",
+      "resource_id": 73,
+      "state": "closed"
+    }
+  ],
+  "method": "GET",
+  "path": "projects/423/issues/1/resource_state_events"
+}
