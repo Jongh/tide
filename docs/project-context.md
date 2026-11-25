@@ -22,7 +22,7 @@
 | `docs/reports/` | 완료보고서 `M{N}-impl.md`·리뷰보고서 `M{N}-review.md`·debug 보고서 `debug-{N}.md`(발견 우선 세션 산출물 — 번호는 마일스톤과 무관한 독립 수열)·회고 `retro.md`(최근) + `retro-archive.md`(과거 회고 분리·보존) |
 | `docs/conventions.md` | 단계별 규약 단일 원본 — **규약 문서 집합의 본체**(조각은 `docs/conventions-{주제}.md`, 발견 글롭 `docs/conventions*.md`) |
 | `docs/conventions-release.md` | 규약 조각 — 릴리즈 게시(gh) 모드. 사이트 `conventions-release.md`가 `pymdownx.snippets`로 본문(`[start:body]`) 인클루드 |
-| `docs/conventions-tracker.md` | 규약 조각 — 트래커 계약의 이름 선언(M97 · 아직 소비하는 스킬 없음). 사이트 `conventions-tracker.md`가 `pymdownx.snippets`로 본문(`[start:body]`) 인클루드 |
+| `docs/conventions-tracker.md` | 규약 조각 — 트래커 계약의 이름 선언(M97)과 읽기 항목 · 로컬 문서 어댑터 표(M98 — 스킬에서 계획 문서의 경로를 적어 읽던 자리가 이 이름으로 가리킨다. 경로 없이 읽는 자리는 그대로다). 사이트 `conventions-tracker.md`가 `pymdownx.snippets`로 본문(`[start:body]`) 인클루드 |
 | `docs/commands.md` | 커맨드 카탈로그 단일 원본 — 커맨드 **수·역할·인자·산출물·금지**의 선언처. 사이트 `commands.md`가 `pymdownx.snippets`로 본문(`[start:body]`) 인클루드 — `tests/discover` 가드가 카운트·셸·이름 완전성을 집행 |
 | `tests/` | 라이브 실증 하니스 (`multi-repo/`·`site-includes/` 등 — `run.sh`·`run.ps1`, 자동 러너 없는 도그푸딩 검증 수단). 발견·위상정렬·deps 파싱·BOM 제거 참조 구현은 `tests/lib/{encoding,discover,deps,toposort}.{sh,ps1}` 공유 단일 원본을 하니스가 source(트리 내 자기완결; source 순서 encoding→discover→deps→toposort) |
 | `site/` | MkDocs 사이트 (`mkdocs.yml`·`docs/` — 문서 사이트 빌드 입력). `conventions`·`conventions-release`·`conventions-tracker`·`orchestration`·`changelog`·`commands`는 저장소 원본을 `pymdownx.snippets`로 인클루드하는 **스니펫 셸**(수기 복제 아님) — `tests/site-includes`가 셸을 **발견**하므로 셸이 늘어도 러너를 고치지 않는다 |

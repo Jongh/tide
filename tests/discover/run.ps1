@@ -439,6 +439,209 @@ function GitInit($d) { New-Item -ItemType Directory -Force -Path $d | Out-Null; 
         [System.IO.File]::WriteAllLines($f, [string[]]@($ln), (New-Object System.Text.UTF8Encoding($false)))
         return $f
     }
+    # --- READ ITEMS (M98 / E5 cycle allocation "gather the read paths") --------------------------------------------------
+    # The tracker contract fragment (`docs/conventions-tracker.md`) declares in `tracker-read-items:` the names skills use when
+    # they read the plan, and its "local document adapter" table says how each name is read. Four things are asked: table rows
+    # are one-to-one with the declaration (RdTableBad); every backticked `rd-` token in the consumers (skill documents and the
+    # conventions body) is a declared name and every declared name has a consumer (RdStray / RdUnused); the skills that spell a
+    # plan document path are the same set as the skills in `tracker-path-sites:` (RdSiteBad); the op tokens of
+    # `tracker-phase-writes:` are names of `tracker-ops:` and its phase names are `skills/` directory names (RdPhaseBad).
+    # TARGET SET: skill documents are `skills/{name}/*.md` (one level deep, lowercase extension `.md`, names starting with a dot
+    # excluded). Consumers are those files plus `docs/conventions.md` alone (the fragment is the declaring place, not a consumer).
+    # The path check only asks whether a line holds `docs/milestones` or `docs/epics` literally -- per skill, lines are not
+    # counted. Helpers live OUTSIDE the part guard (rf-60).
+    $RDI_KEY = 'tracker-read-items:'
+    $RDS_KEY = 'tracker-path-sites:'
+    $RDO_KEY = 'tracker-ops:'
+    $RDP_KEY = 'tracker-phase-writes:'
+    function RdTrk([string]$f) { if ($f -eq '') { return $CONV_TRK } else { return $f } }
+    function RdRows([string]$f = '') {
+        # -> item names of table rows. A row is a line that starts with `|` once leading spaces and tabs are trimmed; the name is
+        #    the first cell with spaces, tabs and backticks removed, kept when it starts with `rd-` (the whole fragment is read).
+        $bt = [string][char]0x60
+        $ws = [char[]]@([char]0x20, [char]0x09)
+        $out = New-Object System.Collections.Generic.List[string]
+        $path = RdTrk $f
+        if (-not (Test-Path -LiteralPath $path)) { return @() }
+        foreach ($l in [System.IO.File]::ReadAllLines($path)) {
+            $t = $l.TrimStart($ws)
+            if (-not $t.StartsWith('|', [System.StringComparison]::Ordinal)) { continue }
+            $t = $t.Substring(1)
+            $j = $t.IndexOf('|', [System.StringComparison]::Ordinal)
+            if ($j -lt 0) { continue }
+            $c = $t.Substring(0, $j).Replace(' ', '').Replace([string][char]0x09, '').Replace($bt, '')
+            if ($c.StartsWith('rd-', [System.StringComparison]::Ordinal)) { [void]$out.Add($c) }
+        }
+        return @($out)
+    }
+    function RdTableBad([string]$f = '') {
+        # -> declared names without exactly one table row + rows carrying a name that is not declared.
+        $names = @(DnNames $RDI_KEY (RdTrk $f))
+        $rows = @(RdRows $f)
+        $bad = 0
+        $ns = OrdSet $names
+        foreach ($n in $ns) { if (@($rows | Where-Object { $_ -ceq $n }).Count -ne 1) { $bad++ } }
+        foreach ($r in $rows) { if (-not $ns.Contains($r)) { $bad++ } }
+        return [string]$bad
+    }
+    function RdSkillFiles([string]$skBase = '') {
+        if ($skBase -eq '') { $skBase = $ROOT }
+        $out = New-Object System.Collections.Generic.List[string]
+        $sk = Join-Path $skBase 'skills'
+        if (-not (Test-Path -LiteralPath $sk)) { return @() }
+        foreach ($d in @(Get-ChildItem -LiteralPath $sk -Directory -Force -ErrorAction SilentlyContinue)) {
+            if ($d.Name.StartsWith('.', [System.StringComparison]::Ordinal)) { continue }
+            foreach ($x in @(Get-ChildItem -LiteralPath $d.FullName -File -Force -ErrorAction SilentlyContinue)) {
+                if ($x.Name.StartsWith('.', [System.StringComparison]::Ordinal)) { continue }
+                if ($x.Name.EndsWith('.md', [System.StringComparison]::Ordinal)) { [void]$out.Add($x.FullName) }
+            }
+        }
+        return @($out)
+    }
+    function RdTokens([string]$skBase = '') {
+        # -> distinct backticked `rd-...` tokens in the consumers.
+        if ($skBase -eq '') { $skBase = $ROOT }
+        $files = New-Object System.Collections.Generic.List[string]
+        foreach ($p in @(RdSkillFiles $skBase)) { [void]$files.Add($p) }
+        [void]$files.Add((Join-Path $skBase 'docs/conventions.md'))
+        $bt = [string][char]0x60
+        $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($p in $files) {
+            if (-not (Test-Path -LiteralPath $p)) { continue }
+            foreach ($ln in [System.IO.File]::ReadAllLines($p)) {
+                $s = $ln
+                while (($i = $s.IndexOf($bt + 'rd-', [System.StringComparison]::Ordinal)) -ge 0) {
+                    $s = $s.Substring($i + 1)
+                    $j = $s.IndexOf($bt, [System.StringComparison]::Ordinal)
+                    if ($j -lt 0) { break }
+                    [void]$seen.Add($s.Substring(0, $j))
+                    $s = $s.Substring($j + 1)
+                }
+            }
+        }
+        return @($seen)
+    }
+    function RdStray([string]$f = '', [string]$skBase = '') {
+        # -> consumer `rd-` tokens that are not declared.
+        $ns = OrdSet @(DnNames $RDI_KEY (RdTrk $f))
+        $bad = 0
+        foreach ($t in @(RdTokens $skBase)) { if ($t -ne '' -and -not $ns.Contains($t)) { $bad++ } }
+        return [string]$bad
+    }
+    function RdUnused([string]$f = '', [string]$skBase = '') {
+        # -> declared names with no token in the consumers.
+        $ts = OrdSet @(RdTokens $skBase)
+        $bad = 0
+        foreach ($n in @(DnNames $RDI_KEY (RdTrk $f))) { if (-not $ts.Contains($n)) { $bad++ } }
+        return [string]$bad
+    }
+    function RdPathSkills([string]$skBase = '') {
+        # -> distinct skill names that have a skill document spelling a plan document path.
+        $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($p in @(RdSkillFiles $skBase)) {
+            $txt = [System.IO.File]::ReadAllText($p)
+            if ($txt.Contains('docs/milestones') -or $txt.Contains('docs/epics')) { [void]$seen.Add((Split-Path (Split-Path $p -Parent) -Leaf)) }
+        }
+        return @($seen)
+    }
+    function RdSiteBad([string]$f = '', [string]$skBase = '') {
+        # -> symmetric difference of (skills spelling a path) and (skills in the declaration) + tokens naming a skill twice
+        #    + tokens that are not `{skill}={class,...}` or carry a class outside the three (write signal cite).
+        $ps = OrdSet @(RdPathSkills $skBase)
+        $toks = @(DnNames $RDS_KEY (RdTrk $f))
+        $pn = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        $cls = 0
+        foreach ($t in $toks) {
+            $i = $t.IndexOf('=', [System.StringComparison]::Ordinal)
+            if ($i -ge 0) { [void]$pn.Add($t.Substring(0, $i)) } else { [void]$pn.Add($t) }
+            if ($i -lt 1 -or $i -eq ($t.Length - 1)) { $cls++; continue }
+            foreach ($c in $t.Substring($i + 1).Split(',')) { if (-not ($c -ceq 'write' -or $c -ceq 'signal' -or $c -ceq 'cite')) { $cls++; break } }
+        }
+        $sym = 0
+        foreach ($s in $ps) { if (-not $pn.Contains($s)) { $sym++ } }
+        foreach ($s in $pn) { if (-not $ps.Contains($s)) { $sym++ } }
+        return [string]($sym + ($toks.Count - $pn.Count) + $cls)
+    }
+    function RdSkillNames([string]$skBase = '') {
+        # -> names of the directories directly under `skills/` (names starting with a dot excluded, like the .sh glob).
+        if ($skBase -eq '') { $skBase = $ROOT }
+        $out = New-Object System.Collections.Generic.List[string]
+        $sk = Join-Path $skBase 'skills'
+        if (-not (Test-Path -LiteralPath $sk)) { return @() }
+        foreach ($d in @(Get-ChildItem -LiteralPath $sk -Directory -Force -ErrorAction SilentlyContinue)) {
+            if ($d.Name.StartsWith('.', [System.StringComparison]::Ordinal)) { continue }
+            [void]$out.Add($d.Name)
+        }
+        return @($out)
+    }
+    function RdPhaseBad([string]$f = '', [string]$skBase = '') {
+        # -> `tracker-phase-writes:` tokens without `=`, or whose op (after `=`, before the first `:`) is not a `tracker-ops:` name,
+        #    or whose name before `=` is not a `skills/` directory name (a token is counted once).
+        $ops = OrdSet @(DnNames $RDO_KEY (RdTrk $f))
+        $sn = OrdSet @(RdSkillNames $skBase)
+        $bad = 0
+        foreach ($t in @(DnNames $RDP_KEY (RdTrk $f))) {
+            $i = $t.IndexOf('=', [System.StringComparison]::Ordinal)
+            if ($i -lt 0) { $bad++; continue }
+            $op = $t.Substring($i + 1)
+            $j = $op.IndexOf(':', [System.StringComparison]::Ordinal)
+            if ($j -ge 0) { $op = $op.Substring(0, $j) }
+            if (-not $ops.Contains($op)) { $bad++; continue }
+            if (-not $sn.Contains($t.Substring(0, $i))) { $bad++ }
+        }
+        return [string]$bad
+    }
+    function RdConvFixture([string]$mode) {
+        # <droprow|addrow|rowtight|rowindent|rowbare|addname|dropsite|badop|badphase> -> a fragment copy (the real file is not touched).
+        $bt = [string][char]0x60
+        $ws = [char[]]@([char]0x20, [char]0x09)
+        $fx = Join-Path $sbx ('conv-trk-' + $mode + '.md')
+        $src = [System.IO.File]::ReadAllLines($CONV_TRK)
+        $out = New-Object System.Collections.Generic.List[string]
+        $first = ''
+        if ($mode -eq 'droprow') { $first = [string](@(DnNames $RDI_KEY $CONV_TRK) | Select-Object -First 1) }
+        if ($mode -eq 'dropsite') { $first = [string](@(DnNames $RDS_KEY $CONV_TRK) | Select-Object -First 1) }
+        if ($mode -eq 'badop' -or $mode -eq 'badphase') { $first = [string](@(DnNames $RDP_KEY $CONV_TRK) | Select-Object -First 1) }
+        $key = if ($mode -eq 'addname') { $RDI_KEY } elseif ($mode -eq 'dropsite') { $RDS_KEY } elseif ($mode -eq 'badop' -or $mode -eq 'badphase') { $RDP_KEY } else { '' }
+        $kc = '- ' + $bt + $key + $bt
+        foreach ($l in $src) {
+            $isDecl = ($key -ne '') -and $l.TrimStart($ws).StartsWith($kc, [System.StringComparison]::Ordinal)
+            if ($mode -eq 'droprow' -and $first -ne '' -and $l.StartsWith('| ' + $bt + $first + $bt + ' ', [System.StringComparison]::Ordinal)) { continue }
+            if ($isDecl -and $mode -eq 'addname') { [void]$out.Add($l + ' rd-zz-fixture'); continue }
+            if ($isDecl -and $first -ne '' -and ($mode -eq 'dropsite' -or $mode -eq 'badop' -or $mode -eq 'badphase')) {
+                $o = ' ' + $first
+                $i = $l.IndexOf($o, [System.StringComparison]::Ordinal)
+                if ($i -ge 0) {
+                    $rep = ''
+                    if ($mode -eq 'badop') { $e = $first.IndexOf('=', [System.StringComparison]::Ordinal); $nm = if ($e -ge 0) { $first.Substring(0, $e) } else { $first }; $rep = ' ' + $nm + '=zz-op' }
+                    if ($mode -eq 'badphase') { $e = $first.IndexOf('=', [System.StringComparison]::Ordinal); $rep = ' zz-phase' + $(if ($e -ge 0) { $first.Substring($e) } else { '' }) }
+                    [void]$out.Add($l.Substring(0, $i) + $rep + $l.Substring($i + $o.Length)); continue
+                }
+            }
+            [void]$out.Add($l)
+        }
+        if ($mode -eq 'addrow') { [void]$out.Add('| ' + $bt + 'rd-zz-fixture' + $bt + ' | x |') }
+        if ($mode -eq 'rowtight') { [void]$out.Add('|' + $bt + 'rd-zz-fixture' + $bt + '| x |') }
+        if ($mode -eq 'rowindent') { [void]$out.Add('  | ' + $bt + 'rd-zz-fixture' + $bt + ' | x |') }
+        if ($mode -eq 'rowbare') { [void]$out.Add('| rd-zz-fixture | x |') }
+        [System.IO.File]::WriteAllLines($fx, [string[]]$out, (New-Object System.Text.UTF8Encoding($false)))
+        return $fx
+    }
+    function RdRootFixture([string]$mode) {
+        # <stray|path> -> a root copy of the skills directory and the conventions body with one skill document added
+        #    (stray: an undeclared `rd-` token; path: one plan document path line).
+        $bt = [string][char]0x60
+        $fx = Join-Path $sbx ('rdroot-' + $mode)
+        if (Test-Path -LiteralPath $fx) { Remove-Item -LiteralPath $fx -Recurse -Force }
+        New-Item -ItemType Directory -Force -Path (Join-Path $fx 'docs') | Out-Null
+        Copy-Item -LiteralPath (Join-Path $ROOT 'skills') -Destination $fx -Recurse -Force
+        Copy-Item -LiteralPath $CONV -Destination (Join-Path $fx 'docs/conventions.md') -Force
+        $zd = Join-Path $fx 'skills/zz-fixture'
+        New-Item -ItemType Directory -Force -Path $zd | Out-Null
+        $line = if ($mode -eq 'stray') { 'x ' + $bt + 'rd-zz-stray' + $bt + ' x' } else { 'x docs/milestones/M1.md x' }
+        [System.IO.File]::WriteAllLines((Join-Path $zd 'template.md'), [string[]]@($line), (New-Object System.Text.UTF8Encoding($false)))
+        return $fx
+    }
     # (M90) NAME DECLARATION + SITE PAIRS: CO-PRESENCE AND STRAY CHECKS -- `retro-flow:` / `retro-flow-sites:` (Part O, O90 / O92) and
     # `epic-flow:` / `epic-flow-sites:` (Part M, M24 / M26) share one body. It takes the keys and the token prefix as arguments; Part O's
     # RtSiteBad / RtStray are thin wrappers pinning their keys. Part O output of both runners was byte-identical before and after the move
@@ -613,6 +816,14 @@ F|F79|count|CONV_TRK|tracker-labels:|exactly one tracker-labels declaration line
 F|F80|seps|CONV_TRK|tracker-labels:|no forbidden separator in the tracker-labels declaration tail
 F|F81|count|CONV_TRK|tracker-phase-writes:|exactly one tracker-phase-writes declaration line
 F|F82|seps|CONV_TRK|tracker-phase-writes:|no forbidden separator in the tracker-phase-writes declaration tail
+F|F83|count|CONV_TRK|tracker-read-items:|exactly one tracker-read-items declaration line
+F|F84|seps|CONV_TRK|tracker-read-items:|no forbidden separator in the tracker-read-items declaration tail
+F|F85|dup|CONV_TRK|tracker-read-items:|main check - read-item names are unique
+F|F86|def|CONV_TRK|tracker-read-items:|main check - exactly one definition item per read-item name
+F|F87|orphan|CONV_TRK|tracker-read-items:|main check - every read-item definition item has a declared name (0 orphans)
+F|F88|order|CONV_TRK|tracker-read-items:|main check - read-item definition items follow the declared name order
+F|F89|count|CONV_TRK|tracker-path-sites:|exactly one tracker-path-sites declaration line
+F|F90|seps|CONV_TRK|tracker-path-sites:|no forbidden separator in the tracker-path-sites declaration tail
 I|I7|count|CONV|state-neg:|exactly one state-neg declaration line in the convention
 I|I8|count|CONV|state-past:|exactly one state-past declaration line in the convention
 I|I10|seps|CONV|state-neg:|no forbidden separator in the state-neg declaration tail
@@ -2369,6 +2580,25 @@ try {
         if ($ok) { return 'same' } else { return 'differ' }
     }
     Chk "F60: control - in a copy with a tab at the head of the tail / between two tokens, the tail reader and name extraction equal the original (the raw tail differs)" ((NcInnerSame 'head') + '|' + (NcInnerSame 'mid')) 'same|same'
+    # (F91~F100 / M98) READ ITEMS -- the places where skills read the plan are gathered under the read-item names of the tracker
+    # contract (E5 cycle allocation "gather the read paths"). Declaration hygiene comes from the registry rows (F83~F90); here are
+    # one extraction positive control, five main checks (table mapping, consumption both ways, baked-in paths, op membership) and
+    # four controls. Controls ask a difference (`control-reads-delta`): one change in a fragment copy or a skills-root copy must
+    # raise the verdict value by one.
+    $rdPc = (@(DnNames $RDI_KEY $CONV_TRK).Count -ge 1) -and (@(RdRows).Count -ge 1) -and (@(RdTokens).Count -ge 1) -and (@(RdPathSkills).Count -ge 1) -and (@(DnNames $RDS_KEY $CONV_TRK).Count -ge 1) -and (@(DnNames $RDP_KEY $CONV_TRK).Count -ge 1) -and (@(DnNames $RDO_KEY $CONV_TRK).Count -ge 1)
+    Chk "F91: read-item extraction positive control (names / table rows / consumer tokens / path skills / path declaration / phase tokens / op names each at least 1)" $(if ($rdPc) { 'ok' } else { 'no' }) 'ok'
+    Chk "F92: main check - every read-item name has exactly one row in the local document adapter table and no row carries an undeclared name" (RdTableBad) '0'
+    Chk "F93: main check - every rd- token in the skill documents and the conventions body is a declared read item" (RdStray) '0'
+    Chk "F94: main check - every read-item name has at least one consumer" (RdUnused) '0'
+    Chk "F95: main check - the skills spelling a plan document path are the same set as the skills in tracker-path-sites and the classes are within the three" (RdSiteBad) '0'
+    Chk "F96: main check - every op token of tracker-phase-writes is a tracker-ops name and every phase name is a skills directory name" (RdPhaseBad) '0'
+    $rdB92 = [int](RdTableBad)
+    Chk "F97: control - a fragment copy with one adapter table row dropped / with a row of an undeclared name added each add one mismatch" ([string]([int](RdTableBad (RdConvFixture 'droprow')) - $rdB92) + '|' + [string]([int](RdTableBad (RdConvFixture 'addrow')) - $rdB92)) '1|1'
+    Chk "F98: control - a root copy with a skill document carrying an undeclared rd- token adds one stray, and a fragment copy with one more name adds one name without a consumer" ([string]([int](RdStray '' (RdRootFixture 'stray')) - [int](RdStray)) + '|' + [string]([int](RdUnused (RdConvFixture 'addname')) - [int](RdUnused))) '1|1'
+    $rdB95 = [int](RdSiteBad)
+    Chk "F99: control - a root copy with one plan document path line in an undeclared skill / a fragment copy with one skill dropped from the path declaration each add one mismatch" ([string]([int](RdSiteBad '' (RdRootFixture 'path')) - $rdB95) + '|' + [string]([int](RdSiteBad (RdConvFixture 'dropsite')) - $rdB95)) '1|1'
+    Chk "F100: control - a fragment copy with one op of the phase-writes declaration renamed to an undeclared name / with one phase name renamed to a non-skill name each add one mismatch" ([string]([int](RdPhaseBad (RdConvFixture 'badop')) - [int](RdPhaseBad)) + '|' + [string]([int](RdPhaseBad (RdConvFixture 'badphase')) - [int](RdPhaseBad))) '1|1'
+    Chk "F101: control - a fragment copy with a row of an undeclared name added in each of three other shapes (no space after the first pipe / leading spaces / no backticks) adds one mismatch each" ([string]([int](RdTableBad (RdConvFixture 'rowtight')) - $rdB92) + '|' + [string]([int](RdTableBad (RdConvFixture 'rowindent')) - $rdB92) + '|' + [string]([int](RdTableBad (RdConvFixture 'rowbare')) - $rdB92)) '1|1|1'
     }
     # === Part G -- cross-reference integrity (M34; generalized to a FILE SET in M35) =====
     # (M34) Part F enforces what a document says ABOUT ITSELF; Part G enforces the REFERENCES BETWEEN

@@ -5,7 +5,7 @@ description: "[tide] 최근 구현 비판적 리뷰 + 리뷰보고서 + 릴리�
 
 **대상 레포**: 산출물·`.tide/phase`·테스트는 대상 레포 루트 기준/cwd다. 규약은 `docs/conventions.md`의 "멀티 레포 / 대상 레포" 절.
 
-시작 전 검사: 대상 마일스톤(docs/milestones/M*.md 중 최대 번호 M{N})의 완료보고서
+시작 전 검사: 대상 마일스톤(최대 번호 M{N} — 어디서 읽는지는 `docs/conventions-tracker.md`의 "트래커 계약" 절 읽기 항목 `rd-cycle-latest`가 정하고, 대상 레포에 그 파일이 없으면 플러그인 설치본을 읽는다)의 완료보고서
 docs/reports/M{N}-impl.md가 존재하는지 확인해줘.
 없으면 리뷰하지 말고, /tide:impl 을 먼저 실행하라고 안내한 뒤 중단해줘.
 
