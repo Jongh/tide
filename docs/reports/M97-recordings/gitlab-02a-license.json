@@ -1,0 +1,8 @@
+{
+  "path": "license",
+  "method": "GET",
+  "body": {
+    "error": "404 Not Found"
+  },
+  "status": 404
+}

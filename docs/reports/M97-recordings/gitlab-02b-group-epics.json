@@ -1,0 +1,8 @@
+{
+  "status": 404,
+  "path": "groups/397/epics",
+  "body": {
+    "error": "404 Not Found"
+  },
+  "method": "GET"
+}

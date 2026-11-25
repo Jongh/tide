@@ -1,0 +1,10 @@
+{
+  "path": "graphql",
+  "body": {
+    "data": {
+      "__type": null
+    }
+  },
+  "method": "POST",
+  "status": 200
+}

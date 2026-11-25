@@ -1,0 +1,8 @@
+{
+  "method": "GET",
+  "status": 404,
+  "body": {
+    "message": "404 Project Not Found"
+  },
+  "path": "projects/423"
+}

@@ -1,0 +1,2353 @@
+{
+  "method": "POST",
+  "status": 200,
+  "path": "graphql",
+  "body": {
+    "data": {
+      "__schema": {
+        "types": [
+          {
+            "name": "AccessLevel"
+          },
+          {
+            "name": "AccessLevelEnum"
+          },
+          {
+            "name": "AdminSidekiqQueuesDeleteJobsInput"
+          },
+          {
+            "name": "AdminSidekiqQueuesDeleteJobsPayload"
+          },
+          {
+            "name": "AgentConfiguration"
+          },
+          {
+            "name": "AgentConfigurationConnection"
+          },
+          {
+            "name": "AgentConfigurationEdge"
+          },
+          {
+            "name": "AgentMetadata"
+          },
+          {
+            "name": "AgentTokenStatus"
+          },
+          {
+            "name": "AlertManagementAlert"
+          },
+          {
+            "name": "AlertManagementAlertConnection"
+          },
+          {
+            "name": "AlertManagementAlertEdge"
+          },
+          {
+            "name": "AlertManagementAlertSort"
+          },
+          {
+            "name": "AlertManagementAlertStatusCountsType"
+          },
+          {
+            "name": "AlertManagementDomainFilter"
+          },
+          {
+            "name": "AlertManagementHttpIntegration"
+          },
+          {
+            "name": "AlertManagementHttpIntegrationConnection"
+          },
+          {
+            "name": "AlertManagementHttpIntegrationEdge"
+          },
+          {
+            "name": "AlertManagementHttpIntegrationID"
+          },
+          {
+            "name": "AlertManagementIntegration"
+          },
+          {
+            "name": "AlertManagementIntegrationConnection"
+          },
+          {
+            "name": "AlertManagementIntegrationEdge"
+          },
+          {
+            "name": "AlertManagementIntegrationType"
+          },
+          {
+            "name": "AlertManagementPrometheusIntegration"
+          },
+          {
+            "name": "AlertManagementSeverity"
+          },
+          {
+            "name": "AlertManagementStatus"
+          },
+          {
+            "name": "AlertSetAssigneesInput"
+          },
+          {
+            "name": "AlertSetAssigneesPayload"
+          },
+          {
+            "name": "AlertTodoCreateInput"
+          },
+          {
+            "name": "AlertTodoCreatePayload"
+          },
+          {
+            "name": "AssigneeWildcardId"
+          },
+          {
+            "name": "AvailabilityEnum"
+          },
+          {
+            "name": "AwardEmoji"
+          },
+          {
+            "name": "AwardEmojiAddInput"
+          },
+          {
+            "name": "AwardEmojiAddPayload"
+          },
+          {
+            "name": "AwardEmojiRemoveInput"
+          },
+          {
+            "name": "AwardEmojiRemovePayload"
+          },
+          {
+            "name": "AwardEmojiToggleInput"
+          },
+          {
+            "name": "AwardEmojiTogglePayload"
+          },
+          {
+            "name": "AwardableID"
+          },
+          {
+            "name": "BaseService"
+          },
+          {
+            "name": "BigInt"
+          },
+          {
+            "name": "Blob"
+          },
+          {
+            "name": "BlobConnection"
+          },
+          {
+            "name": "BlobEdge"
+          },
+          {
+            "name": "BlobViewer"
+          },
+          {
+            "name": "BlobViewersType"
+          },
+          {
+            "name": "Board"
+          },
+          {
+            "name": "BoardConnection"
+          },
+          {
+            "name": "BoardEdge"
+          },
+          {
+            "name": "BoardID"
+          },
+          {
+            "name": "BoardIssueInput"
+          },
+          {
+            "name": "BoardList"
+          },
+          {
+            "name": "BoardListConnection"
+          },
+          {
+            "name": "BoardListCreateInput"
+          },
+          {
+            "name": "BoardListCreatePayload"
+          },
+          {
+            "name": "BoardListEdge"
+          },
+          {
+            "name": "Boolean"
+          },
+          {
+            "name": "Branch"
+          },
+          {
+            "name": "CiApplicationSettings"
+          },
+          {
+            "name": "CiBuildID"
+          },
+          {
+            "name": "CiBuildNeed"
+          },
+          {
+            "name": "CiBuildNeedConnection"
+          },
+          {
+            "name": "CiBuildNeedEdge"
+          },
+          {
+            "name": "CiCdSettingsUpdateInput"
+          },
+          {
+            "name": "CiCdSettingsUpdatePayload"
+          },
+          {
+            "name": "CiConfig"
+          },
+          {
+            "name": "CiConfigGroup"
+          },
+          {
+            "name": "CiConfigGroupConnection"
+          },
+          {
+            "name": "CiConfigGroupEdge"
+          },
+          {
+            "name": "CiConfigJob"
+          },
+          {
+            "name": "CiConfigJobConnection"
+          },
+          {
+            "name": "CiConfigJobEdge"
+          },
+          {
+            "name": "CiConfigJobRestriction"
+          },
+          {
+            "name": "CiConfigNeed"
+          },
+          {
+            "name": "CiConfigNeedConnection"
+          },
+          {
+            "name": "CiConfigNeedEdge"
+          },
+          {
+            "name": "CiConfigStage"
+          },
+          {
+            "name": "CiConfigStageConnection"
+          },
+          {
+            "name": "CiConfigStageEdge"
+          },
+          {
+            "name": "CiConfigStatus"
+          },
+          {
+            "name": "CiGroup"
+          },
+          {
+            "name": "CiGroupConnection"
+          },
+          {
+            "name": "CiGroupEdge"
+          },
+          {
+            "name": "CiJob"
+          },
+          {
+            "name": "CiJobArtifact"
+          },
+          {
+            "name": "CiJobArtifactConnection"
+          },
+          {
+            "name": "CiJobArtifactEdge"
+          },
+          {
+            "name": "CiJobConnection"
+          },
+          {
+            "name": "CiJobEdge"
+          },
+          {
+            "name": "CiJobStatus"
+          },
+          {
+            "name": "CiJobTokenScopeAddProjectInput"
+          },
+          {
+            "name": "CiJobTokenScopeAddProjectPayload"
+          },
+          {
+            "name": "CiJobTokenScopeRemoveProjectInput"
+          },
+          {
+            "name": "CiJobTokenScopeRemoveProjectPayload"
+          },
+          {
+            "name": "CiJobTokenScopeType"
+          },
+          {
+            "name": "CiPipelineID"
+          },
+          {
+            "name": "CiRunner"
+          },
+          {
+            "name": "CiRunnerAccessLevel"
+          },
+          {
+            "name": "CiRunnerConnection"
+          },
+          {
+            "name": "CiRunnerEdge"
+          },
+          {
+            "name": "CiRunnerID"
+          },
+          {
+            "name": "CiRunnerSort"
+          },
+          {
+            "name": "CiRunnerStatus"
+          },
+          {
+            "name": "CiRunnerType"
+          },
+          {
+            "name": "CiStage"
+          },
+          {
+            "name": "CiStageConnection"
+          },
+          {
+            "name": "CiStageEdge"
+          },
+          {
+            "name": "CiTemplate"
+          },
+          {
+            "name": "ClusterAgent"
+          },
+          {
+            "name": "ClusterAgentActivityEvent"
+          },
+          {
+            "name": "ClusterAgentActivityEventConnection"
+          },
+          {
+            "name": "ClusterAgentActivityEventEdge"
+          },
+          {
+            "name": "ClusterAgentConnection"
+          },
+          {
+            "name": "ClusterAgentDeleteInput"
+          },
+          {
+            "name": "ClusterAgentDeletePayload"
+          },
+          {
+            "name": "ClusterAgentEdge"
+          },
+          {
+            "name": "ClusterAgentToken"
+          },
+          {
+            "name": "ClusterAgentTokenConnection"
+          },
+          {
+            "name": "ClusterAgentTokenCreateInput"
+          },
+          {
+            "name": "ClusterAgentTokenCreatePayload"
+          },
+          {
+            "name": "ClusterAgentTokenDeleteInput"
+          },
+          {
+            "name": "ClusterAgentTokenDeletePayload"
+          },
+          {
+            "name": "ClusterAgentTokenEdge"
+          },
+          {
+            "name": "ClusterAgentTokenRevokeInput"
+          },
+          {
+            "name": "ClusterAgentTokenRevokePayload"
+          },
+          {
+            "name": "ClustersAgentID"
+          },
+          {
+            "name": "ClustersAgentTokenID"
+          },
+          {
+            "name": "ClustersClusterID"
+          },
+          {
+            "name": "Commit"
+          },
+          {
+            "name": "CommitAction"
+          },
+          {
+            "name": "CommitActionMode"
+          },
+          {
+            "name": "CommitConnection"
+          },
+          {
+            "name": "CommitCreateInput"
+          },
+          {
+            "name": "CommitCreatePayload"
+          },
+          {
+            "name": "CommitEdge"
+          },
+          {
+            "name": "CommitEncoding"
+          },
+          {
+            "name": "ComposerMetadata"
+          },
+          {
+            "name": "ConanFileMetadata"
+          },
+          {
+            "name": "ConanMetadata"
+          },
+          {
+            "name": "ConanMetadatumFileTypeEnum"
+          },
+          {
+            "name": "ConfigureSastIacInput"
+          },
+          {
+            "name": "ConfigureSastIacPayload"
+          },
+          {
+            "name": "ConfigureSastInput"
+          },
+          {
+            "name": "ConfigureSastPayload"
+          },
+          {
+            "name": "ConfigureSecretDetectionInput"
+          },
+          {
+            "name": "ConfigureSecretDetectionPayload"
+          },
+          {
+            "name": "ConnectedAgent"
+          },
+          {
+            "name": "ConnectedAgentConnection"
+          },
+          {
+            "name": "ConnectedAgentEdge"
+          },
+          {
+            "name": "ContainerExpirationPolicy"
+          },
+          {
+            "name": "ContainerExpirationPolicyCadenceEnum"
+          },
+          {
+            "name": "ContainerExpirationPolicyKeepEnum"
+          },
+          {
+            "name": "ContainerExpirationPolicyOlderThanEnum"
+          },
+          {
+            "name": "ContainerRepository"
+          },
+          {
+            "name": "ContainerRepositoryCleanupStatus"
+          },
+          {
+            "name": "ContainerRepositoryConnection"
+          },
+          {
+            "name": "ContainerRepositoryDetails"
+          },
+          {
+            "name": "ContainerRepositoryEdge"
+          },
+          {
+            "name": "ContainerRepositoryID"
+          },
+          {
+            "name": "ContainerRepositorySort"
+          },
+          {
+            "name": "ContainerRepositoryStatus"
+          },
+          {
+            "name": "ContainerRepositoryTag"
+          },
+          {
+            "name": "ContainerRepositoryTagConnection"
+          },
+          {
+            "name": "ContainerRepositoryTagEdge"
+          },
+          {
+            "name": "ContainerRepositoryTagSort"
+          },
+          {
+            "name": "CreateAlertIssueInput"
+          },
+          {
+            "name": "CreateAlertIssuePayload"
+          },
+          {
+            "name": "CreateAnnotationInput"
+          },
+          {
+            "name": "CreateAnnotationPayload"
+          },
+          {
+            "name": "CreateBoardInput"
+          },
+          {
+            "name": "CreateBoardPayload"
+          },
+          {
+            "name": "CreateBranchInput"
+          },
+          {
+            "name": "CreateBranchPayload"
+          },
+          {
+            "name": "CreateClusterAgentInput"
+          },
+          {
+            "name": "CreateClusterAgentPayload"
+          },
+          {
+            "name": "CreateDiffNoteInput"
+          },
+          {
+            "name": "CreateDiffNotePayload"
+          },
+          {
+            "name": "CreateImageDiffNoteInput"
+          },
+          {
+            "name": "CreateImageDiffNotePayload"
+          },
+          {
+            "name": "CreateIssueInput"
+          },
+          {
+            "name": "CreateIssuePayload"
+          },
+          {
+            "name": "CreateNoteInput"
+          },
+          {
+            "name": "CreateNotePayload"
+          },
+          {
+            "name": "CreateSnippetInput"
+          },
+          {
+            "name": "CreateSnippetPayload"
+          },
+          {
+            "name": "CurrentUserTodos"
+          },
+          {
+            "name": "CustomerRelationsContact"
+          },
+          {
+            "name": "CustomerRelationsContactConnection"
+          },
+          {
+            "name": "CustomerRelationsContactCreateInput"
+          },
+          {
+            "name": "CustomerRelationsContactCreatePayload"
+          },
+          {
+            "name": "CustomerRelationsContactEdge"
+          },
+          {
+            "name": "CustomerRelationsContactID"
+          },
+          {
+            "name": "CustomerRelationsContactUpdateInput"
+          },
+          {
+            "name": "CustomerRelationsContactUpdatePayload"
+          },
+          {
+            "name": "CustomerRelationsOrganization"
+          },
+          {
+            "name": "CustomerRelationsOrganizationConnection"
+          },
+          {
+            "name": "CustomerRelationsOrganizationCreateInput"
+          },
+          {
+            "name": "CustomerRelationsOrganizationCreatePayload"
+          },
+          {
+            "name": "CustomerRelationsOrganizationEdge"
+          },
+          {
+            "name": "CustomerRelationsOrganizationID"
+          },
+          {
+            "name": "CustomerRelationsOrganizationUpdateInput"
+          },
+          {
+            "name": "CustomerRelationsOrganizationUpdatePayload"
+          },
+          {
+            "name": "Date"
+          },
+          {
+            "name": "DeleteAnnotationInput"
+          },
+          {
+            "name": "DeleteAnnotationPayload"
+          },
+          {
+            "name": "DeleteJobsResponse"
+          },
+          {
+            "name": "DependencyLinkMetadata"
+          },
+          {
+            "name": "DependencyProxyBlob"
+          },
+          {
+            "name": "DependencyProxyBlobConnection"
+          },
+          {
+            "name": "DependencyProxyBlobEdge"
+          },
+          {
+            "name": "DependencyProxyImageTtlGroupPolicy"
+          },
+          {
+            "name": "DependencyProxyManifest"
+          },
+          {
+            "name": "DependencyProxyManifestConnection"
+          },
+          {
+            "name": "DependencyProxyManifestEdge"
+          },
+          {
+            "name": "DependencyProxyManifestID"
+          },
+          {
+            "name": "DependencyProxySetting"
+          },
+          {
+            "name": "Design"
+          },
+          {
+            "name": "DesignAtVersion"
+          },
+          {
+            "name": "DesignAtVersionConnection"
+          },
+          {
+            "name": "DesignAtVersionEdge"
+          },
+          {
+            "name": "DesignCollection"
+          },
+          {
+            "name": "DesignCollectionCopyState"
+          },
+          {
+            "name": "DesignConnection"
+          },
+          {
+            "name": "DesignEdge"
+          },
+          {
+            "name": "DesignFields"
+          },
+          {
+            "name": "DesignManagement"
+          },
+          {
+            "name": "DesignManagementDeleteInput"
+          },
+          {
+            "name": "DesignManagementDeletePayload"
+          },
+          {
+            "name": "DesignManagementDesignAtVersionID"
+          },
+          {
+            "name": "DesignManagementDesignID"
+          },
+          {
+            "name": "DesignManagementMoveInput"
+          },
+          {
+            "name": "DesignManagementMovePayload"
+          },
+          {
+            "name": "DesignManagementUploadInput"
+          },
+          {
+            "name": "DesignManagementUploadPayload"
+          },
+          {
+            "name": "DesignManagementVersionID"
+          },
+          {
+            "name": "DesignVersion"
+          },
+          {
+            "name": "DesignVersionConnection"
+          },
+          {
+            "name": "DesignVersionEdge"
+          },
+          {
+            "name": "DesignVersionEvent"
+          },
+          {
+            "name": "DestroyBoardInput"
+          },
+          {
+            "name": "DestroyBoardListInput"
+          },
+          {
+            "name": "DestroyBoardListPayload"
+          },
+          {
+            "name": "DestroyBoardPayload"
+          },
+          {
+            "name": "DestroyContainerRepositoryInput"
+          },
+          {
+            "name": "DestroyContainerRepositoryPayload"
+          },
+          {
+            "name": "DestroyContainerRepositoryTagsInput"
+          },
+          {
+            "name": "DestroyContainerRepositoryTagsPayload"
+          },
+          {
+            "name": "DestroyNoteInput"
+          },
+          {
+            "name": "DestroyNotePayload"
+          },
+          {
+            "name": "DestroyPackageFileInput"
+          },
+          {
+            "name": "DestroyPackageFilePayload"
+          },
+          {
+            "name": "DestroyPackageInput"
+          },
+          {
+            "name": "DestroyPackagePayload"
+          },
+          {
+            "name": "DestroySnippetInput"
+          },
+          {
+            "name": "DestroySnippetPayload"
+          },
+          {
+            "name": "DetailedStatus"
+          },
+          {
+            "name": "DiffImagePositionInput"
+          },
+          {
+            "name": "DiffNoteID"
+          },
+          {
+            "name": "DiffPathsInput"
+          },
+          {
+            "name": "DiffPosition"
+          },
+          {
+            "name": "DiffPositionInput"
+          },
+          {
+            "name": "DiffPositionType"
+          },
+          {
+            "name": "DiffRefs"
+          },
+          {
+            "name": "DiffStats"
+          },
+          {
+            "name": "DiffStatsSummary"
+          },
+          {
+            "name": "Discussion"
+          },
+          {
+            "name": "DiscussionConnection"
+          },
+          {
+            "name": "DiscussionEdge"
+          },
+          {
+            "name": "DiscussionID"
+          },
+          {
+            "name": "DiscussionToggleResolveInput"
+          },
+          {
+            "name": "DiscussionToggleResolvePayload"
+          },
+          {
+            "name": "Duration"
+          },
+          {
+            "name": "EchoCreateInput"
+          },
+          {
+            "name": "EchoCreatePayload"
+          },
+          {
+            "name": "Entry"
+          },
+          {
+            "name": "EntryType"
+          },
+          {
+            "name": "Environment"
+          },
+          {
+            "name": "EnvironmentConnection"
+          },
+          {
+            "name": "EnvironmentEdge"
+          },
+          {
+            "name": "EnvironmentID"
+          },
+          {
+            "name": "EnvironmentsCanaryIngressUpdateInput"
+          },
+          {
+            "name": "EnvironmentsCanaryIngressUpdatePayload"
+          },
+          {
+            "name": "Float"
+          },
+          {
+            "name": "GitlabErrorTrackingDetailedErrorID"
+          },
+          {
+            "name": "GlobalID"
+          },
+          {
+            "name": "GrafanaIntegration"
+          },
+          {
+            "name": "Group"
+          },
+          {
+            "name": "GroupConnection"
+          },
+          {
+            "name": "GroupEdge"
+          },
+          {
+            "name": "GroupID"
+          },
+          {
+            "name": "GroupMember"
+          },
+          {
+            "name": "GroupMemberConnection"
+          },
+          {
+            "name": "GroupMemberEdge"
+          },
+          {
+            "name": "GroupMemberRelation"
+          },
+          {
+            "name": "GroupPermission"
+          },
+          {
+            "name": "GroupPermissions"
+          },
+          {
+            "name": "GroupUpdateInput"
+          },
+          {
+            "name": "GroupUpdatePayload"
+          },
+          {
+            "name": "HelmFileMetadata"
+          },
+          {
+            "name": "HttpIntegrationCreateInput"
+          },
+          {
+            "name": "HttpIntegrationCreatePayload"
+          },
+          {
+            "name": "HttpIntegrationDestroyInput"
+          },
+          {
+            "name": "HttpIntegrationDestroyPayload"
+          },
+          {
+            "name": "HttpIntegrationResetTokenInput"
+          },
+          {
+            "name": "HttpIntegrationResetTokenPayload"
+          },
+          {
+            "name": "HttpIntegrationUpdateInput"
+          },
+          {
+            "name": "HttpIntegrationUpdatePayload"
+          },
+          {
+            "name": "ID"
+          },
+          {
+            "name": "ISO8601Date"
+          },
+          {
+            "name": "Int"
+          },
+          {
+            "name": "IntegrationsPrometheusID"
+          },
+          {
+            "name": "Issuable"
+          },
+          {
+            "name": "IssuableID"
+          },
+          {
+            "name": "IssuableSeverity"
+          },
+          {
+            "name": "IssuableState"
+          },
+          {
+            "name": "Issue"
+          },
+          {
+            "name": "IssueConnection"
+          },
+          {
+            "name": "IssueEdge"
+          },
+          {
+            "name": "IssueEscalationStatus"
+          },
+          {
+            "name": "IssueID"
+          },
+          {
+            "name": "IssueMoveInput"
+          },
+          {
+            "name": "IssueMoveListInput"
+          },
+          {
+            "name": "IssueMoveListPayload"
+          },
+          {
+            "name": "IssueMovePayload"
+          },
+          {
+            "name": "IssuePermissions"
+          },
+          {
+            "name": "IssueSetAssigneesInput"
+          },
+          {
+            "name": "IssueSetAssigneesPayload"
+          },
+          {
+            "name": "IssueSetConfidentialInput"
+          },
+          {
+            "name": "IssueSetConfidentialPayload"
+          },
+          {
+            "name": "IssueSetCrmContactsInput"
+          },
+          {
+            "name": "IssueSetCrmContactsPayload"
+          },
+          {
+            "name": "IssueSetDueDateInput"
+          },
+          {
+            "name": "IssueSetDueDatePayload"
+          },
+          {
+            "name": "IssueSetEscalationStatusInput"
+          },
+          {
+            "name": "IssueSetEscalationStatusPayload"
+          },
+          {
+            "name": "IssueSetLockedInput"
+          },
+          {
+            "name": "IssueSetLockedPayload"
+          },
+          {
+            "name": "IssueSetSeverityInput"
+          },
+          {
+            "name": "IssueSetSeverityPayload"
+          },
+          {
+            "name": "IssueSetSubscriptionInput"
+          },
+          {
+            "name": "IssueSetSubscriptionPayload"
+          },
+          {
+            "name": "IssueSort"
+          },
+          {
+            "name": "IssueState"
+          },
+          {
+            "name": "IssueStateEvent"
+          },
+          {
+            "name": "IssueStatusCountsType"
+          },
+          {
+            "name": "IssueType"
+          },
+          {
+            "name": "JSON"
+          },
+          {
+            "name": "JiraImport"
+          },
+          {
+            "name": "JiraImportConnection"
+          },
+          {
+            "name": "JiraImportEdge"
+          },
+          {
+            "name": "JiraImportStartInput"
+          },
+          {
+            "name": "JiraImportStartPayload"
+          },
+          {
+            "name": "JiraImportUsersInput"
+          },
+          {
+            "name": "JiraImportUsersPayload"
+          },
+          {
+            "name": "JiraProject"
+          },
+          {
+            "name": "JiraProjectConnection"
+          },
+          {
+            "name": "JiraProjectEdge"
+          },
+          {
+            "name": "JiraService"
+          },
+          {
+            "name": "JiraUser"
+          },
+          {
+            "name": "JiraUsersMappingInputType"
+          },
+          {
+            "name": "JobArtifactFileType"
+          },
+          {
+            "name": "JobCancelInput"
+          },
+          {
+            "name": "JobCancelPayload"
+          },
+          {
+            "name": "JobID"
+          },
+          {
+            "name": "JobNeedUnion"
+          },
+          {
+            "name": "JobNeedUnionConnection"
+          },
+          {
+            "name": "JobNeedUnionEdge"
+          },
+          {
+            "name": "JobPermissions"
+          },
+          {
+            "name": "JobPlayInput"
+          },
+          {
+            "name": "JobPlayPayload"
+          },
+          {
+            "name": "JobRetryInput"
+          },
+          {
+            "name": "JobRetryPayload"
+          },
+          {
+            "name": "JobUnscheduleInput"
+          },
+          {
+            "name": "JobUnschedulePayload"
+          },
+          {
+            "name": "Kas"
+          },
+          {
+            "name": "Label"
+          },
+          {
+            "name": "LabelConnection"
+          },
+          {
+            "name": "LabelCreateInput"
+          },
+          {
+            "name": "LabelCreatePayload"
+          },
+          {
+            "name": "LabelEdge"
+          },
+          {
+            "name": "LabelID"
+          },
+          {
+            "name": "ListID"
+          },
+          {
+            "name": "MarkAsSpamSnippetInput"
+          },
+          {
+            "name": "MarkAsSpamSnippetPayload"
+          },
+          {
+            "name": "MavenMetadata"
+          },
+          {
+            "name": "MeasurementIdentifier"
+          },
+          {
+            "name": "MemberInterface"
+          },
+          {
+            "name": "MemberInterfaceConnection"
+          },
+          {
+            "name": "MemberInterfaceEdge"
+          },
+          {
+            "name": "MergeRequest"
+          },
+          {
+            "name": "MergeRequestAcceptInput"
+          },
+          {
+            "name": "MergeRequestAcceptPayload"
+          },
+          {
+            "name": "MergeRequestAssignee"
+          },
+          {
+            "name": "MergeRequestAssigneeConnection"
+          },
+          {
+            "name": "MergeRequestAssigneeEdge"
+          },
+          {
+            "name": "MergeRequestAuthor"
+          },
+          {
+            "name": "MergeRequestConnection"
+          },
+          {
+            "name": "MergeRequestCreateInput"
+          },
+          {
+            "name": "MergeRequestCreatePayload"
+          },
+          {
+            "name": "MergeRequestEdge"
+          },
+          {
+            "name": "MergeRequestID"
+          },
+          {
+            "name": "MergeRequestNewState"
+          },
+          {
+            "name": "MergeRequestParticipant"
+          },
+          {
+            "name": "MergeRequestParticipantConnection"
+          },
+          {
+            "name": "MergeRequestParticipantEdge"
+          },
+          {
+            "name": "MergeRequestPermissions"
+          },
+          {
+            "name": "MergeRequestReviewState"
+          },
+          {
+            "name": "MergeRequestReviewer"
+          },
+          {
+            "name": "MergeRequestReviewerConnection"
+          },
+          {
+            "name": "MergeRequestReviewerEdge"
+          },
+          {
+            "name": "MergeRequestReviewerRereviewInput"
+          },
+          {
+            "name": "MergeRequestReviewerRereviewPayload"
+          },
+          {
+            "name": "MergeRequestSetAssigneesInput"
+          },
+          {
+            "name": "MergeRequestSetAssigneesPayload"
+          },
+          {
+            "name": "MergeRequestSetDraftInput"
+          },
+          {
+            "name": "MergeRequestSetDraftPayload"
+          },
+          {
+            "name": "MergeRequestSetLabelsInput"
+          },
+          {
+            "name": "MergeRequestSetLabelsPayload"
+          },
+          {
+            "name": "MergeRequestSetLockedInput"
+          },
+          {
+            "name": "MergeRequestSetLockedPayload"
+          },
+          {
+            "name": "MergeRequestSetMilestoneInput"
+          },
+          {
+            "name": "MergeRequestSetMilestonePayload"
+          },
+          {
+            "name": "MergeRequestSetSubscriptionInput"
+          },
+          {
+            "name": "MergeRequestSetSubscriptionPayload"
+          },
+          {
+            "name": "MergeRequestSort"
+          },
+          {
+            "name": "MergeRequestState"
+          },
+          {
+            "name": "MergeRequestUpdateInput"
+          },
+          {
+            "name": "MergeRequestUpdatePayload"
+          },
+          {
+            "name": "MergeRequestsResolverNegatedParams"
+          },
+          {
+            "name": "MergeStatus"
+          },
+          {
+            "name": "MergeStrategyEnum"
+          },
+          {
+            "name": "Metadata"
+          },
+          {
+            "name": "MetricsDashboard"
+          },
+          {
+            "name": "MetricsDashboardAnnotation"
+          },
+          {
+            "name": "MetricsDashboardAnnotationConnection"
+          },
+          {
+            "name": "MetricsDashboardAnnotationEdge"
+          },
+          {
+            "name": "MetricsDashboardAnnotationID"
+          },
+          {
+            "name": "Milestone"
+          },
+          {
+            "name": "MilestoneConnection"
+          },
+          {
+            "name": "MilestoneEdge"
+          },
+          {
+            "name": "MilestoneID"
+          },
+          {
+            "name": "MilestoneSort"
+          },
+          {
+            "name": "MilestoneStateEnum"
+          },
+          {
+            "name": "MilestoneStats"
+          },
+          {
+            "name": "MilestoneWildcardId"
+          },
+          {
+            "name": "Mutation"
+          },
+          {
+            "name": "MutationOperationMode"
+          },
+          {
+            "name": "Namespace"
+          },
+          {
+            "name": "NamespaceProjectSort"
+          },
+          {
+            "name": "NegatedBoardIssueInput"
+          },
+          {
+            "name": "NegatedIssueFilterInput"
+          },
+          {
+            "name": "NegatedMilestoneWildcardId"
+          },
+          {
+            "name": "Note"
+          },
+          {
+            "name": "NoteConnection"
+          },
+          {
+            "name": "NoteEdge"
+          },
+          {
+            "name": "NoteID"
+          },
+          {
+            "name": "NotePermissions"
+          },
+          {
+            "name": "NoteableID"
+          },
+          {
+            "name": "NoteableInterface"
+          },
+          {
+            "name": "NoteableType"
+          },
+          {
+            "name": "NugetDependencyLinkMetadata"
+          },
+          {
+            "name": "NugetMetadata"
+          },
+          {
+            "name": "Package"
+          },
+          {
+            "name": "PackageComposerJsonType"
+          },
+          {
+            "name": "PackageConnection"
+          },
+          {
+            "name": "PackageDependency"
+          },
+          {
+            "name": "PackageDependencyLink"
+          },
+          {
+            "name": "PackageDependencyLinkConnection"
+          },
+          {
+            "name": "PackageDependencyLinkEdge"
+          },
+          {
+            "name": "PackageDependencyType"
+          },
+          {
+            "name": "PackageDetailsType"
+          },
+          {
+            "name": "PackageEdge"
+          },
+          {
+            "name": "PackageFile"
+          },
+          {
+            "name": "PackageFileConnection"
+          },
+          {
+            "name": "PackageFileEdge"
+          },
+          {
+            "name": "PackageFileMetadata"
+          },
+          {
+            "name": "PackageGroupSort"
+          },
+          {
+            "name": "PackageHelmDependencyType"
+          },
+          {
+            "name": "PackageHelmMaintainerType"
+          },
+          {
+            "name": "PackageHelmMetadataType"
+          },
+          {
+            "name": "PackageMetadata"
+          },
+          {
+            "name": "PackageSettings"
+          },
+          {
+            "name": "PackageSort"
+          },
+          {
+            "name": "PackageStatus"
+          },
+          {
+            "name": "PackageTag"
+          },
+          {
+            "name": "PackageTagConnection"
+          },
+          {
+            "name": "PackageTagEdge"
+          },
+          {
+            "name": "PackageTypeEnum"
+          },
+          {
+            "name": "PackagesConanFileMetadatumID"
+          },
+          {
+            "name": "PackagesConanMetadatumID"
+          },
+          {
+            "name": "PackagesDependencyID"
+          },
+          {
+            "name": "PackagesDependencyLinkID"
+          },
+          {
+            "name": "PackagesMavenMetadatumID"
+          },
+          {
+            "name": "PackagesNugetDependencyLinkMetadatumID"
+          },
+          {
+            "name": "PackagesNugetMetadatumID"
+          },
+          {
+            "name": "PackagesPackageFileID"
+          },
+          {
+            "name": "PackagesPackageID"
+          },
+          {
+            "name": "PackagesPypiMetadatumID"
+          },
+          {
+            "name": "PageInfo"
+          },
+          {
+            "name": "Pipeline"
+          },
+          {
+            "name": "PipelineAnalytics"
+          },
+          {
+            "name": "PipelineCancelInput"
+          },
+          {
+            "name": "PipelineCancelPayload"
+          },
+          {
+            "name": "PipelineConfigSourceEnum"
+          },
+          {
+            "name": "PipelineConnection"
+          },
+          {
+            "name": "PipelineCounts"
+          },
+          {
+            "name": "PipelineDestroyInput"
+          },
+          {
+            "name": "PipelineDestroyPayload"
+          },
+          {
+            "name": "PipelineEdge"
+          },
+          {
+            "name": "PipelineMessage"
+          },
+          {
+            "name": "PipelinePermissions"
+          },
+          {
+            "name": "PipelineRetryInput"
+          },
+          {
+            "name": "PipelineRetryPayload"
+          },
+          {
+            "name": "PipelineScopeEnum"
+          },
+          {
+            "name": "PipelineStatusEnum"
+          },
+          {
+            "name": "Project"
+          },
+          {
+            "name": "ProjectCiCdSetting"
+          },
+          {
+            "name": "ProjectConnection"
+          },
+          {
+            "name": "ProjectEdge"
+          },
+          {
+            "name": "ProjectID"
+          },
+          {
+            "name": "ProjectMember"
+          },
+          {
+            "name": "ProjectMemberConnection"
+          },
+          {
+            "name": "ProjectMemberEdge"
+          },
+          {
+            "name": "ProjectMemberRelation"
+          },
+          {
+            "name": "ProjectPermissions"
+          },
+          {
+            "name": "ProjectStatistics"
+          },
+          {
+            "name": "PrometheusAlert"
+          },
+          {
+            "name": "PrometheusIntegrationCreateInput"
+          },
+          {
+            "name": "PrometheusIntegrationCreatePayload"
+          },
+          {
+            "name": "PrometheusIntegrationResetTokenInput"
+          },
+          {
+            "name": "PrometheusIntegrationResetTokenPayload"
+          },
+          {
+            "name": "PrometheusIntegrationUpdateInput"
+          },
+          {
+            "name": "PrometheusIntegrationUpdatePayload"
+          },
+          {
+            "name": "PypiMetadata"
+          },
+          {
+            "name": "Query"
+          },
+          {
+            "name": "QueryComplexity"
+          },
+          {
+            "name": "RecentFailures"
+          },
+          {
+            "name": "Release"
+          },
+          {
+            "name": "ReleaseAssetLink"
+          },
+          {
+            "name": "ReleaseAssetLinkConnection"
+          },
+          {
+            "name": "ReleaseAssetLinkCreateInput"
+          },
+          {
+            "name": "ReleaseAssetLinkCreatePayload"
+          },
+          {
+            "name": "ReleaseAssetLinkDeleteInput"
+          },
+          {
+            "name": "ReleaseAssetLinkDeletePayload"
+          },
+          {
+            "name": "ReleaseAssetLinkEdge"
+          },
+          {
+            "name": "ReleaseAssetLinkInput"
+          },
+          {
+            "name": "ReleaseAssetLinkType"
+          },
+          {
+            "name": "ReleaseAssetLinkUpdateInput"
+          },
+          {
+            "name": "ReleaseAssetLinkUpdatePayload"
+          },
+          {
+            "name": "ReleaseAssets"
+          },
+          {
+            "name": "ReleaseAssetsInput"
+          },
+          {
+            "name": "ReleaseConnection"
+          },
+          {
+            "name": "ReleaseCreateInput"
+          },
+          {
+            "name": "ReleaseCreatePayload"
+          },
+          {
+            "name": "ReleaseDeleteInput"
+          },
+          {
+            "name": "ReleaseDeletePayload"
+          },
+          {
+            "name": "ReleaseEdge"
+          },
+          {
+            "name": "ReleaseEvidence"
+          },
+          {
+            "name": "ReleaseEvidenceConnection"
+          },
+          {
+            "name": "ReleaseEvidenceEdge"
+          },
+          {
+            "name": "ReleaseLinks"
+          },
+          {
+            "name": "ReleaseSort"
+          },
+          {
+            "name": "ReleaseSource"
+          },
+          {
+            "name": "ReleaseSourceConnection"
+          },
+          {
+            "name": "ReleaseSourceEdge"
+          },
+          {
+            "name": "ReleaseTagWildcardId"
+          },
+          {
+            "name": "ReleaseUpdateInput"
+          },
+          {
+            "name": "ReleaseUpdatePayload"
+          },
+          {
+            "name": "ReleasesLinkID"
+          },
+          {
+            "name": "RepositionImageDiffNoteInput"
+          },
+          {
+            "name": "RepositionImageDiffNotePayload"
+          },
+          {
+            "name": "Repository"
+          },
+          {
+            "name": "RepositoryBlob"
+          },
+          {
+            "name": "RepositoryBlobConnection"
+          },
+          {
+            "name": "RepositoryBlobEdge"
+          },
+          {
+            "name": "ResolvableInterface"
+          },
+          {
+            "name": "RootStorageStatistics"
+          },
+          {
+            "name": "RunnerArchitecture"
+          },
+          {
+            "name": "RunnerArchitectureConnection"
+          },
+          {
+            "name": "RunnerArchitectureEdge"
+          },
+          {
+            "name": "RunnerDeleteInput"
+          },
+          {
+            "name": "RunnerDeletePayload"
+          },
+          {
+            "name": "RunnerMembershipFilter"
+          },
+          {
+            "name": "RunnerPermissions"
+          },
+          {
+            "name": "RunnerPlatform"
+          },
+          {
+            "name": "RunnerPlatformConnection"
+          },
+          {
+            "name": "RunnerPlatformEdge"
+          },
+          {
+            "name": "RunnerSetup"
+          },
+          {
+            "name": "RunnerUpdateInput"
+          },
+          {
+            "name": "RunnerUpdatePayload"
+          },
+          {
+            "name": "RunnersRegistrationTokenResetInput"
+          },
+          {
+            "name": "RunnersRegistrationTokenResetPayload"
+          },
+          {
+            "name": "SastCiConfiguration"
+          },
+          {
+            "name": "SastCiConfigurationAnalyzersEntity"
+          },
+          {
+            "name": "SastCiConfigurationAnalyzersEntityConnection"
+          },
+          {
+            "name": "SastCiConfigurationAnalyzersEntityEdge"
+          },
+          {
+            "name": "SastCiConfigurationAnalyzersEntityInput"
+          },
+          {
+            "name": "SastCiConfigurationEntity"
+          },
+          {
+            "name": "SastCiConfigurationEntityConnection"
+          },
+          {
+            "name": "SastCiConfigurationEntityEdge"
+          },
+          {
+            "name": "SastCiConfigurationEntityInput"
+          },
+          {
+            "name": "SastCiConfigurationInput"
+          },
+          {
+            "name": "SastCiConfigurationOptionsEntity"
+          },
+          {
+            "name": "SastCiConfigurationOptionsEntityConnection"
+          },
+          {
+            "name": "SastCiConfigurationOptionsEntityEdge"
+          },
+          {
+            "name": "SastUiComponentSize"
+          },
+          {
+            "name": "SavedReply"
+          },
+          {
+            "name": "SavedReplyConnection"
+          },
+          {
+            "name": "SavedReplyCreateInput"
+          },
+          {
+            "name": "SavedReplyCreatePayload"
+          },
+          {
+            "name": "SavedReplyEdge"
+          },
+          {
+            "name": "SavedReplyUpdateInput"
+          },
+          {
+            "name": "SavedReplyUpdatePayload"
+          },
+          {
+            "name": "SecurityReportTypeEnum"
+          },
+          {
+            "name": "SentryDetailedError"
+          },
+          {
+            "name": "SentryError"
+          },
+          {
+            "name": "SentryErrorCollection"
+          },
+          {
+            "name": "SentryErrorConnection"
+          },
+          {
+            "name": "SentryErrorEdge"
+          },
+          {
+            "name": "SentryErrorFrequency"
+          },
+          {
+            "name": "SentryErrorStackTrace"
+          },
+          {
+            "name": "SentryErrorStackTraceContext"
+          },
+          {
+            "name": "SentryErrorStackTraceEntry"
+          },
+          {
+            "name": "SentryErrorStatus"
+          },
+          {
+            "name": "SentryErrorTags"
+          },
+          {
+            "name": "Service"
+          },
+          {
+            "name": "ServiceConnection"
+          },
+          {
+            "name": "ServiceEdge"
+          },
+          {
+            "name": "ServiceType"
+          },
+          {
+            "name": "ShaFormat"
+          },
+          {
+            "name": "SharedRunnersSetting"
+          },
+          {
+            "name": "Snippet"
+          },
+          {
+            "name": "SnippetBlob"
+          },
+          {
+            "name": "SnippetBlobActionEnum"
+          },
+          {
+            "name": "SnippetBlobActionInputType"
+          },
+          {
+            "name": "SnippetBlobConnection"
+          },
+          {
+            "name": "SnippetBlobEdge"
+          },
+          {
+            "name": "SnippetBlobViewer"
+          },
+          {
+            "name": "SnippetConnection"
+          },
+          {
+            "name": "SnippetEdge"
+          },
+          {
+            "name": "SnippetID"
+          },
+          {
+            "name": "SnippetPermissions"
+          },
+          {
+            "name": "Sort"
+          },
+          {
+            "name": "StatusAction"
+          },
+          {
+            "name": "String"
+          },
+          {
+            "name": "Submodule"
+          },
+          {
+            "name": "SubmoduleConnection"
+          },
+          {
+            "name": "SubmoduleEdge"
+          },
+          {
+            "name": "Subscription"
+          },
+          {
+            "name": "TaskCompletionStatus"
+          },
+          {
+            "name": "TerraformState"
+          },
+          {
+            "name": "TerraformStateConnection"
+          },
+          {
+            "name": "TerraformStateDeleteInput"
+          },
+          {
+            "name": "TerraformStateDeletePayload"
+          },
+          {
+            "name": "TerraformStateEdge"
+          },
+          {
+            "name": "TerraformStateID"
+          },
+          {
+            "name": "TerraformStateLockInput"
+          },
+          {
+            "name": "TerraformStateLockPayload"
+          },
+          {
+            "name": "TerraformStateUnlockInput"
+          },
+          {
+            "name": "TerraformStateUnlockPayload"
+          },
+          {
+            "name": "TerraformStateVersion"
+          },
+          {
+            "name": "TestCase"
+          },
+          {
+            "name": "TestCaseConnection"
+          },
+          {
+            "name": "TestCaseEdge"
+          },
+          {
+            "name": "TestCaseStatus"
+          },
+          {
+            "name": "TestReportSummary"
+          },
+          {
+            "name": "TestReportTotal"
+          },
+          {
+            "name": "TestSuite"
+          },
+          {
+            "name": "TestSuiteSummary"
+          },
+          {
+            "name": "TestSuiteSummaryConnection"
+          },
+          {
+            "name": "TestSuiteSummaryEdge"
+          },
+          {
+            "name": "Time"
+          },
+          {
+            "name": "Timeframe"
+          },
+          {
+            "name": "Timelog"
+          },
+          {
+            "name": "TimelogConnection"
+          },
+          {
+            "name": "TimelogEdge"
+          },
+          {
+            "name": "Todo"
+          },
+          {
+            "name": "TodoActionEnum"
+          },
+          {
+            "name": "TodoConnection"
+          },
+          {
+            "name": "TodoCreateInput"
+          },
+          {
+            "name": "TodoCreatePayload"
+          },
+          {
+            "name": "TodoEdge"
+          },
+          {
+            "name": "TodoID"
+          },
+          {
+            "name": "TodoMarkDoneInput"
+          },
+          {
+            "name": "TodoMarkDonePayload"
+          },
+          {
+            "name": "TodoRestoreInput"
+          },
+          {
+            "name": "TodoRestoreManyInput"
+          },
+          {
+            "name": "TodoRestoreManyPayload"
+          },
+          {
+            "name": "TodoRestorePayload"
+          },
+          {
+            "name": "TodoStateEnum"
+          },
+          {
+            "name": "TodoTargetEnum"
+          },
+          {
+            "name": "Todoable"
+          },
+          {
+            "name": "TodoableID"
+          },
+          {
+            "name": "TodosMarkAllDoneInput"
+          },
+          {
+            "name": "TodosMarkAllDonePayload"
+          },
+          {
+            "name": "Topic"
+          },
+          {
+            "name": "TopicConnection"
+          },
+          {
+            "name": "TopicEdge"
+          },
+          {
+            "name": "Tree"
+          },
+          {
+            "name": "TreeConnection"
+          },
+          {
+            "name": "TreeEdge"
+          },
+          {
+            "name": "TreeEntry"
+          },
+          {
+            "name": "TreeEntryConnection"
+          },
+          {
+            "name": "TreeEntryEdge"
+          },
+          {
+            "name": "TypeEnum"
+          },
+          {
+            "name": "UntrustedRegexp"
+          },
+          {
+            "name": "UpdateAlertStatusInput"
+          },
+          {
+            "name": "UpdateAlertStatusPayload"
+          },
+          {
+            "name": "UpdateBoardInput"
+          },
+          {
+            "name": "UpdateBoardListInput"
+          },
+          {
+            "name": "UpdateBoardListPayload"
+          },
+          {
+            "name": "UpdateBoardPayload"
+          },
+          {
+            "name": "UpdateContainerExpirationPolicyInput"
+          },
+          {
+            "name": "UpdateContainerExpirationPolicyPayload"
+          },
+          {
+            "name": "UpdateDependencyProxyImageTtlGroupPolicyInput"
+          },
+          {
+            "name": "UpdateDependencyProxyImageTtlGroupPolicyPayload"
+          },
+          {
+            "name": "UpdateDependencyProxySettingsInput"
+          },
+          {
+            "name": "UpdateDependencyProxySettingsPayload"
+          },
+          {
+            "name": "UpdateDiffImagePositionInput"
+          },
+          {
+            "name": "UpdateImageDiffNoteInput"
+          },
+          {
+            "name": "UpdateImageDiffNotePayload"
+          },
+          {
+            "name": "UpdateIssueInput"
+          },
+          {
+            "name": "UpdateIssuePayload"
+          },
+          {
+            "name": "UpdateNamespacePackageSettingsInput"
+          },
+          {
+            "name": "UpdateNamespacePackageSettingsPayload"
+          },
+          {
+            "name": "UpdateNoteInput"
+          },
+          {
+            "name": "UpdateNotePayload"
+          },
+          {
+            "name": "UpdateSnippetInput"
+          },
+          {
+            "name": "UpdateSnippetPayload"
+          },
+          {
+            "name": "Upload"
+          },
+          {
+            "name": "UsageTrendsMeasurement"
+          },
+          {
+            "name": "UsageTrendsMeasurementConnection"
+          },
+          {
+            "name": "UsageTrendsMeasurementEdge"
+          },
+          {
+            "name": "User"
+          },
+          {
+            "name": "UserCallout"
+          },
+          {
+            "name": "UserCalloutConnection"
+          },
+          {
+            "name": "UserCalloutCreateInput"
+          },
+          {
+            "name": "UserCalloutCreatePayload"
+          },
+          {
+            "name": "UserCalloutEdge"
+          },
+          {
+            "name": "UserCalloutFeatureNameEnum"
+          },
+          {
+            "name": "UserCore"
+          },
+          {
+            "name": "UserCoreConnection"
+          },
+          {
+            "name": "UserCoreEdge"
+          },
+          {
+            "name": "UserID"
+          },
+          {
+            "name": "UserMergeRequestInteraction"
+          },
+          {
+            "name": "UserPermissions"
+          },
+          {
+            "name": "UserPreferences"
+          },
+          {
+            "name": "UserPreferencesUpdateInput"
+          },
+          {
+            "name": "UserPreferencesUpdatePayload"
+          },
+          {
+            "name": "UserState"
+          },
+          {
+            "name": "UserStatus"
+          },
+          {
+            "name": "UsersSavedReplyID"
+          },
+          {
+            "name": "VisibilityLevelsEnum"
+          },
+          {
+            "name": "VisibilityScopesEnum"
+          },
+          {
+            "name": "WorkItem"
+          },
+          {
+            "name": "WorkItemConvertTaskInput"
+          },
+          {
+            "name": "WorkItemCreateFromTaskInput"
+          },
+          {
+            "name": "WorkItemCreateFromTaskPayload"
+          },
+          {
+            "name": "WorkItemCreateInput"
+          },
+          {
+            "name": "WorkItemCreatePayload"
+          },
+          {
+            "name": "WorkItemDeleteInput"
+          },
+          {
+            "name": "WorkItemDeletePayload"
+          },
+          {
+            "name": "WorkItemID"
+          },
+          {
+            "name": "WorkItemState"
+          },
+          {
+            "name": "WorkItemStateEvent"
+          },
+          {
+            "name": "WorkItemType"
+          },
+          {
+            "name": "WorkItemTypeConnection"
+          },
+          {
+            "name": "WorkItemTypeEdge"
+          },
+          {
+            "name": "WorkItemUpdateInput"
+          },
+          {
+            "name": "WorkItemUpdatePayload"
+          },
+          {
+            "name": "WorkItemsTypeID"
+          },
+          {
+            "name": "__Directive"
+          },
+          {
+            "name": "__DirectiveLocation"
+          },
+          {
+            "name": "__EnumValue"
+          },
+          {
+            "name": "__Field"
+          },
+          {
+            "name": "__InputValue"
+          },
+          {
+            "name": "__Schema"
+          },
+          {
+            "name": "__Type"
+          },
+          {
+            "name": "__TypeKind"
+          }
+        ]
+      }
+    }
+  }
+}

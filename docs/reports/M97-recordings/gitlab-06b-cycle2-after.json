@@ -1,0 +1,76 @@
+{
+  "body": {
+    "id": 74,
+    "iid": 2,
+    "project_id": 423,
+    "title": "M2 - probe cycle two",
+    "description": "## Tasks\n- [ ] T01 only task",
+    "state": "closed",
+    "created_at": "2026-11-23T15:14:02.159+09:00",
+    "updated_at": "2026-11-23T15:16:12.471+09:00",
+    "closed_at": "2026-11-23T15:16:12.467+09:00",
+    "closed_by": {
+      "id": 3,
+      "username": "placeholder3",
+      "name": "name-placeholder",
+      "state": "active",
+      "avatar_url": "https://avatars.example/u",
+      "web_url": "http://gitlab.example:7000/placeholder3"
+    },
+    "labels": [
+      "tide-probe::a",
+      "tide-probe::b",
+      "tide:cycle"
+    ],
+    "milestone": null,
+    "assignees": [],
+    "author": {
+      "id": 3,
+      "username": "placeholder3",
+      "name": "name-placeholder",
+      "state": "active",
+      "avatar_url": "https://avatars.example/u",
+      "web_url": "http://gitlab.example:7000/placeholder3"
+    },
+    "type": "ISSUE",
+    "assignee": null,
+    "user_notes_count": 0,
+    "merge_requests_count": 0,
+    "upvotes": 0,
+    "downvotes": 0,
+    "due_date": null,
+    "confidential": false,
+    "discussion_locked": null,
+    "issue_type": "issue",
+    "web_url": "http://gitlab.example:7000/placeholder3/tide-test/-/issues/2",
+    "time_stats": {
+      "time_estimate": 0,
+      "total_time_spent": 0,
+      "human_time_estimate": null,
+      "human_total_time_spent": null
+    },
+    "task_completion_status": {
+      "count": 1,
+      "completed_count": 0
+    },
+    "has_tasks": true,
+    "task_status": "0 of 1 task completed",
+    "_links": {
+      "self": "http://gitlab.example:7000/api/v4/projects/423/issues/2",
+      "notes": "http://gitlab.example:7000/api/v4/projects/423/issues/2/notes",
+      "award_emoji": "http://gitlab.example:7000/api/v4/projects/423/issues/2/award_emoji",
+      "project": "http://gitlab.example:7000/api/v4/projects/423"
+    },
+    "references": {
+      "short": "#2",
+      "relative": "#2",
+      "full": "placeholder3/tide-test#2"
+    },
+    "subscribed": true,
+    "moved_to_id": null,
+    "service_desk_reply_to": null
+  },
+  "method": "GET",
+  "status": 200,
+  "path": "projects/423/issues/2"
+}

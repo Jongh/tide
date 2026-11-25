@@ -33,7 +33,7 @@
 
 | 알고 싶은 것 | 단일 원본 |
 |---|---|
-| 규약 전체(단계·판정·집행) | `docs/conventions.md`(+ `docs/conventions-release.md`) |
+| 규약 전체(단계·판정·집행) | `docs/conventions.md`(+ 조각 `docs/conventions-*.md`) |
 | 커맨드 12종의 역할·산출물 | `docs/commands.md` |
 | 프로젝트 맥락·이월 원장 | `docs/project-context.md` |
 | 하니스가 무엇을 무는가 | `tests/{name}/README.md` |

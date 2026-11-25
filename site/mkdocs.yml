@@ -43,6 +43,7 @@ nav:
   - 커맨드 레퍼런스: commands.md
   - 규약: conventions.md
   - 릴리즈 게시 규약: conventions-release.md
+  - 트래커 계약 규약: conventions-tracker.md
   - 오케스트레이션 가이드: orchestration.md
   - 변경 이력: changelog.md
 

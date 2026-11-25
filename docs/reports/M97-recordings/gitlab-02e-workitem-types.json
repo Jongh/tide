@@ -1,0 +1,12 @@
+{
+  "path": "graphql",
+  "body": {
+    "data": {
+      "project": {
+        "workItemTypes": null
+      }
+    }
+  },
+  "method": "POST",
+  "status": 200
+}

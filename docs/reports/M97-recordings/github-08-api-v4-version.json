@@ -1,0 +1,11 @@
+{
+  "method": "GET",
+  "path": "https://api.github.com/api/v4/version",
+  "status": 404,
+  "body": {
+    "message": "Not Found",
+    "documentation_url": "https://docs.github.com/rest",
+    "status": "404"
+  },
+  "note": "no token; GitHub host answers 404 at the GitLab version path"
+}

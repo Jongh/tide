@@ -1,0 +1,16 @@
+{
+  "path": "projects/423/labels",
+  "method": "POST",
+  "body": {
+    "id": 560,
+    "name": "tide:cycle",
+    "description": null,
+    "description_html": "",
+    "text_color": "#FFFFFF",
+    "color": "#44ad8e",
+    "subscribed": false,
+    "priority": null,
+    "is_project_label": true
+  },
+  "status": 201
+}

@@ -1,0 +1,67 @@
+{
+  "path": "projects/423/issues",
+  "method": "POST",
+  "body": {
+    "id": 75,
+    "iid": 3,
+    "project_id": 423,
+    "title": "E1 - probe epic",
+    "description": "Summary line.\n\n## Cycles\n- [ ] #1\n- [ ] #2",
+    "state": "opened",
+    "created_at": "2026-11-23T15:14:03.173+09:00",
+    "updated_at": "2026-11-23T15:14:03.173+09:00",
+    "closed_at": null,
+    "closed_by": null,
+    "labels": [
+      "tide:epic"
+    ],
+    "milestone": null,
+    "assignees": [],
+    "author": {
+      "id": 3,
+      "username": "placeholder3",
+      "name": "name-placeholder",
+      "state": "active",
+      "avatar_url": "https://avatars.example/u",
+      "web_url": "http://gitlab.example:7000/placeholder3"
+    },
+    "type": "ISSUE",
+    "assignee": null,
+    "user_notes_count": 0,
+    "merge_requests_count": 0,
+    "upvotes": 0,
+    "downvotes": 0,
+    "due_date": null,
+    "confidential": false,
+    "discussion_locked": null,
+    "issue_type": "issue",
+    "web_url": "http://gitlab.example:7000/placeholder3/tide-test/-/issues/3",
+    "time_stats": {
+      "time_estimate": 0,
+      "total_time_spent": 0,
+      "human_time_estimate": null,
+      "human_total_time_spent": null
+    },
+    "task_completion_status": {
+      "count": 2,
+      "completed_count": 0
+    },
+    "has_tasks": true,
+    "task_status": "0 of 2 tasks completed",
+    "_links": {
+      "self": "http://gitlab.example:7000/api/v4/projects/423/issues/3",
+      "notes": "http://gitlab.example:7000/api/v4/projects/423/issues/3/notes",
+      "award_emoji": "http://gitlab.example:7000/api/v4/projects/423/issues/3/award_emoji",
+      "project": "http://gitlab.example:7000/api/v4/projects/423"
+    },
+    "references": {
+      "short": "#3",
+      "relative": "#3",
+      "full": "placeholder3/tide-test#3"
+    },
+    "subscribed": true,
+    "moved_to_id": null,
+    "service_desk_reply_to": null
+  },
+  "status": 201
+}

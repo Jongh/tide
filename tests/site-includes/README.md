@@ -10,7 +10,7 @@ MkDocs 사이트의 **스니펫 인클루드**가 실제로 해소되는지를 *
 **그 스텝의 배선**을 따로 문다(아래 「CI 산출물 스캔 배선」). 분담마다 무는 표면이 다르다는 것은
 `docs/conventions.md`의 "릴리즈 빌드 출력 검증" 절이 표로 적는다.
 
-**현재 케이스 수 (cases: 51)** — `run.sh` @ **dash**(우분투 `/bin/sh`) · `run.sh` @ **bash**(Git
+**현재 케이스 수 (cases: 57)** — `run.sh` @ **dash**(우분투 `/bin/sh`) · `run.sh` @ **bash**(Git
 Bash) · `run.ps1` @ **Windows PowerShell 5.1** · `run.ps1` @ **pwsh 7** — **네 실행 환경 모두**
 같은 수, FAIL 0.
 

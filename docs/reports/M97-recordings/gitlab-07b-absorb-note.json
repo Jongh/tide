@@ -1,0 +1,28 @@
+{
+  "status": 201,
+  "path": "projects/423/issues/4/notes",
+  "method": "POST",
+  "body": {
+    "id": 36839,
+    "type": null,
+    "body": "tide: absorbed into backlog (probe).",
+    "attachment": null,
+    "author": {
+      "id": 3,
+      "username": "placeholder3",
+      "name": "name-placeholder",
+      "state": "active",
+      "avatar_url": "https://avatars.example/u",
+      "web_url": "http://gitlab.example:7000/placeholder3"
+    },
+    "created_at": "2026-11-23T15:16:56.644+09:00",
+    "updated_at": "2026-11-23T15:16:56.644+09:00",
+    "system": false,
+    "noteable_id": 76,
+    "noteable_type": "Issue",
+    "resolvable": false,
+    "confidential": false,
+    "noteable_iid": 4,
+    "commands_changes": {}
+  }
+}

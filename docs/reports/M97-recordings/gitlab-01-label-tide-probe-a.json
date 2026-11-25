@@ -1,0 +1,16 @@
+{
+  "path": "projects/423/labels",
+  "method": "POST",
+  "body": {
+    "id": 562,
+    "name": "tide-probe::a",
+    "description": null,
+    "description_html": "",
+    "text_color": "#FFFFFF",
+    "color": "#cc0033",
+    "subscribed": false,
+    "priority": null,
+    "is_project_label": true
+  },
+  "status": 201
+}

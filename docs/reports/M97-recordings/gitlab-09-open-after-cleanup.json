@@ -1,0 +1,6 @@
+{
+  "path": "projects/423/issues?state=opened",
+  "method": "GET",
+  "body": [],
+  "status": 200
+}
