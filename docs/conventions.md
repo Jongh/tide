@@ -350,6 +350,7 @@ tide는 porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴�
   세션 열림이고, `/tide:debug done`이 세션을 닫으며 삭제한다(아래 "debug 세션" 절이 단일 원본).
   세션 번호는 **별도 파일**에 둔다 — `.tide/phase`는 종전 계약대로 **단계명 한 줄**만 담고
   `debug` 역시 단계명일 뿐이다(phase 계약 불변).
+- **`.tide/tracker`** — 트래커 연결 설정 **한 줄**(값과 판별 순서는 `docs/conventions-tracker.md`의 "트래커 계약" 절). 파일이 없으면 로컬 문서 모드다 — 부재가 곧 현행 동작이다. 레포의 선언이므로 `.tide/deps`와 같이 **커밋한다**.
 - `.gitignore` 대상은 **`.tide/phase`와 `.tide/debug-session` 둘**이다 (로컬 상태일 뿐 커밋하지
   않는다). `.tide/` 전체가 아니라 이 두 파일만 무시하므로, 같은 `.tide/` 아래의
   **`.tide/deps`(의존성 선언)·`.tide/release-mode`(게시 모드 선호도)·`.tide/autonomy`(자율 진행
@@ -2433,7 +2434,7 @@ release 프리플라이트에서 사이트를 빌드한 **산출물 기준**으�
 ## 트래커 계약 (분리된 조각)
 
 사이클 계획을 이슈 트래커에 두는 **트래커 계약**의 이름 선언은 `docs/conventions-tracker.md`에 있다 — 규약 문서 집합의 둘째 조각이다(M97).
-방향과 근거는 에픽 `docs/epics/E5.md`가 든다. 스킬이 소비하는 것은 읽기 항목(`tracker-read-items:`)뿐이고(M98), 판별 · 쓰기 · 대응 기록 · 유입은 아직 소비자가 없다(조각 요건 ③ 포인터).
+방향과 근거는 에픽 `docs/epics/E5.md`가 든다. 스킬이 소비하는 것은 읽기 항목(`tracker-read-items:`)과 판별 순서(`tracker-detect-steps:`)이고(M98 · M99), 쓰기 · 대응 기록 · 유입은 아직 소비자가 없다(조각 요건 ③ 포인터).
 
 ## 단계별 금지 행위 요약
 

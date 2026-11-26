@@ -1,4 +1,4 @@
-# tide 상태 파일 (로컬 전용 — .tide/phase·.tide/debug-session만 무시, .tide/deps는 커밋)
+# tide 상태 파일 (로컬 전용 — .tide/phase·.tide/debug-session만 무시, .tide/deps·.tide/tracker는 커밋)
 .tide/phase
 .tide/debug-session
 

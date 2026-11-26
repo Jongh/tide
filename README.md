@@ -147,7 +147,7 @@ minor·patch에서는 가산·정리·견고화만 합니다.
 > 상세는 [docs/conventions.md](docs/conventions.md)의 "debug 세션" 절을 참고하시면 됩니다.
 
 > gitignore 마이그레이션(기존 프로젝트): `.tide/deps`(의존성 선언)를 채택하는 기존 프로젝트에 해당합니다.
-> `.tide/phase`와 `.tide/debug-session`은 로컬 상태라 무시해야 하지만, `.tide/deps`·`.tide/release-mode`는 커밋해야 합니다.
+> `.tide/phase`와 `.tide/debug-session`은 로컬 상태라 무시해야 하지만, `.tide/deps`·`.tide/release-mode`·`.tide/tracker`는 커밋해야 합니다.
 > 이러한 이유로 `.gitignore`를 `.tide/`에서 위 두 파일로 좁혀야 합니다.
 > 추가로 신규 `/tide:kickoff` 프로젝트에는 이미 적용되어 있습니다.
 

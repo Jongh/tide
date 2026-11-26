@@ -475,13 +475,22 @@ function GitInit($d) { New-Item -ItemType Directory -Force -Path $d | Out-Null; 
         return @($out)
     }
     function RdTableBad([string]$f = '') {
-        # -> declared names without exactly one table row + rows carrying a name that is not declared.
+        # -> per declared adapter table (read-item names without exactly one row + rows carrying an undeclared name)
+        #    + `rd-` rows that sit in no declared adapter table.
+        # (M99) PER TABLE: a table is what TbLines yields; `rd-` rows outside the tables (a table without a marker, or under a
+        # marker of an undeclared name) are the whole-fragment count of RdRows minus the count inside the tables.
         $names = @(DnNames $RDI_KEY (RdTrk $f))
-        $rows = @(RdRows $f)
-        $bad = 0
         $ns = OrdSet $names
-        foreach ($n in $ns) { if (@($rows | Where-Object { $_ -ceq $n }).Count -ne 1) { $bad++ } }
-        foreach ($r in $rows) { if (-not $ns.Contains($r)) { $bad++ } }
+        $bad = 0
+        $inside = 0
+        foreach ($a in (OrdSet @(DnNames $ADP_KEY (RdTrk $f)))) {
+            $rows = @(TbRows ($ADP_MARK + $a + ' -->') 'rd-' $f)
+            $inside += $rows.Count
+            foreach ($n in $ns) { if (@($rows | Where-Object { $_ -ceq $n }).Count -ne 1) { $bad++ } }
+            foreach ($r in $rows) { if (-not $ns.Contains($r)) { $bad++ } }
+        }
+        $all = @(RdRows $f).Count
+        if ($all -gt $inside) { $bad += ($all - $inside) }
         return [string]$bad
     }
     function RdSkillFiles([string]$skBase = '') {
@@ -604,9 +613,10 @@ function GitInit($d) { New-Item -ItemType Directory -Force -Path $d | Out-Null; 
         if ($mode -eq 'badop' -or $mode -eq 'badphase') { $first = [string](@(DnNames $RDP_KEY $CONV_TRK) | Select-Object -First 1) }
         $key = if ($mode -eq 'addname') { $RDI_KEY } elseif ($mode -eq 'dropsite') { $RDS_KEY } elseif ($mode -eq 'badop' -or $mode -eq 'badphase') { $RDP_KEY } else { '' }
         $kc = '- ' + $bt + $key + $bt
+        $dropped = $false   # (M99) droprow drops the first match only -- there are two adapter tables with the same row names
         foreach ($l in $src) {
             $isDecl = ($key -ne '') -and $l.TrimStart($ws).StartsWith($kc, [System.StringComparison]::Ordinal)
-            if ($mode -eq 'droprow' -and $first -ne '' -and $l.StartsWith('| ' + $bt + $first + $bt + ' ', [System.StringComparison]::Ordinal)) { continue }
+            if ($mode -eq 'droprow' -and $first -ne '' -and -not $dropped -and $l.StartsWith('| ' + $bt + $first + $bt + ' ', [System.StringComparison]::Ordinal)) { $dropped = $true; continue }
             if ($isDecl -and $mode -eq 'addname') { [void]$out.Add($l + ' rd-zz-fixture'); continue }
             if ($isDecl -and $first -ne '' -and ($mode -eq 'dropsite' -or $mode -eq 'badop' -or $mode -eq 'badphase')) {
                 $o = ' ' + $first
@@ -638,8 +648,295 @@ function GitInit($d) { New-Item -ItemType Directory -Force -Path $d | Out-Null; 
         Copy-Item -LiteralPath $CONV -Destination (Join-Path $fx 'docs/conventions.md') -Force
         $zd = Join-Path $fx 'skills/zz-fixture'
         New-Item -ItemType Directory -Force -Path $zd | Out-Null
-        $line = if ($mode -eq 'stray') { 'x ' + $bt + 'rd-zz-stray' + $bt + ' x' } else { 'x docs/milestones/M1.md x' }
-        [System.IO.File]::WriteAllLines((Join-Path $zd 'template.md'), [string[]]@($line), (New-Object System.Text.UTF8Encoding($false)))
+        # (M99) rdnodetect: a skill document holding only a declared read-item token / tdstray: an undeclared `td-` token /
+        # dropptr: the detection pointer removed from the first skill of `tracker-detect-sites:` (no document is added).
+        $enc = New-Object System.Text.UTF8Encoding($false)
+        if ($mode -eq 'dropptr') {
+            $s1 = [string](@(DnNames $TDK_KEY $CONV_TRK) | Select-Object -First 1)
+            if ($s1 -ne '') {
+                foreach ($x in @(Get-ChildItem -LiteralPath (Join-Path $fx ('skills/' + $s1)) -File -Force -ErrorAction SilentlyContinue)) {
+                    if (-not $x.Name.EndsWith('.md', [System.StringComparison]::Ordinal)) { continue }
+                    [System.IO.File]::WriteAllText($x.FullName, [System.IO.File]::ReadAllText($x.FullName).Replace('tracker-detect-steps:', 'tracker-detect-zz:'), $enc)
+                }
+            }
+            return $fx
+        }
+        $line = 'x docs/milestones/M1.md x'
+        if ($mode -eq 'stray') { $line = 'x ' + $bt + 'rd-zz-stray' + $bt + ' x' }
+        if ($mode -eq 'rdnodetect') { $line = 'x ' + $bt + [string](@(DnNames $RDI_KEY $CONV_TRK) | Select-Object -First 1) + $bt + ' x' }
+        if ($mode -eq 'tdstray') { $line = 'x ' + $bt + 'td-zz-stray' + $bt + ' x' }
+        [System.IO.File]::WriteAllLines((Join-Path $zd 'template.md'), [string[]]@($line), $enc)
+        return $fx
+    }
+    # --- DETECTION / ADAPTER TABLES / RESPONSE RECORDS (M99 / front half of the third E5 cycle allocation) ----------------
+    # The fragment now holds two adapter tables (local documents / GitHub), so row extraction is PER TABLE. A table is the run of
+    # rows that follows an ASCII marker line: blank lines between the marker and the first row are skipped, and the table ends at
+    # the first non-row line once rows have started (TbLines). A marker line is a line that equals the marker string exactly once
+    # leading/trailing spaces and tabs are trimmed. Adapter tables are marked `<!-- tracker-adapter:{name} -->` with a name of
+    # `tracker-adapters:`; the detection procedure table is marked `<!-- tracker-detect-table -->`. What is asked: adapter markers
+    # are one-to-one with the declaration (AdMarkBad); detection table rows are one-to-one with `tracker-detect-steps:`
+    # (DtTableBad); the backticked `tl-` tokens of that table are the same set as `tracker-local-reasons:` (DtReasonBad); the
+    # skills holding the detection pointer (backticked `tracker-detect-steps:`) are the same set as `tracker-detect-sites:` and
+    # every skill holding a backticked `rd-` token is in it (DsSiteBad); backticked `td-` / `tl-` tokens in skill documents are
+    # declared names (DxStray); each directory in `tracker-record-dirs:` has record files one-to-one with the names its README
+    # carries (RcReadmeBad). Helpers live OUTSIDE the part guard (rf-60).
+    $ADP_KEY = 'tracker-adapters:'
+    $TDS_KEY = 'tracker-detect-steps:'
+    $TLR_KEY = 'tracker-local-reasons:'
+    $TDK_KEY = 'tracker-detect-sites:'
+    $RCD_KEY = 'tracker-record-dirs:'
+    $ADP_MARK = '<!-- tracker-adapter:'
+    $TDT_MARK = '<!-- tracker-detect-table -->'
+    $TDP_TOKEN = ([string][char]0x60) + 'tracker-detect-steps:' + ([string][char]0x60)
+    function TbIsRow([string]$l) {
+        $t = $l.TrimStart([char[]]@([char]0x20, [char]0x09))
+        if (-not $t.StartsWith('|', [System.StringComparison]::Ordinal)) { return $false }
+        return ($t.Substring(1).IndexOf('|', [System.StringComparison]::Ordinal) -ge 0)
+    }
+    function TbFirstCell([string]$l) {
+        # -> first cell of a row with spaces, tabs and backticks removed.
+        $t = $l.TrimStart([char[]]@([char]0x20, [char]0x09)).Substring(1)
+        $j = $t.IndexOf('|', [System.StringComparison]::Ordinal)
+        return $t.Substring(0, $j).Replace(' ', '').Replace([string][char]0x09, '').Replace([string][char]0x60, '')
+    }
+    function TbLines([string]$mark, [string]$f = '') {
+        # -> the row run after that marker line (raw lines; when the marker occurs several times the tables are concatenated).
+        $ws = [char[]]@([char]0x20, [char]0x09)
+        $out = New-Object System.Collections.Generic.List[string]
+        $path = RdTrk $f
+        if (-not (Test-Path -LiteralPath $path)) { return @() }
+        $st = 0
+        foreach ($l in [System.IO.File]::ReadAllLines($path)) {
+            $t = $l.TrimStart($ws)
+            $u = $t.TrimEnd($ws)
+            if ($u -ceq $mark) { $st = 1; continue }
+            if ($st -eq 0) { continue }
+            if ($t -eq '' -and $st -eq 1) { continue }
+            if (TbIsRow $l) { $st = 2; [void]$out.Add($l); continue }
+            $st = 0
+        }
+        return @($out)
+    }
+    function TbRows([string]$mark, [string]$prefix, [string]$f = '') {
+        # -> first-cell values of that table's rows that start with the prefix.
+        $out = New-Object System.Collections.Generic.List[string]
+        foreach ($l in @(TbLines $mark $f)) {
+            $c = TbFirstCell $l
+            if ($c.StartsWith($prefix, [System.StringComparison]::Ordinal)) { [void]$out.Add($c) }
+        }
+        return @($out)
+    }
+    function TbMarkCount([string]$mark, [string]$f = '') {
+        $ws = [char[]]@([char]0x20, [char]0x09)
+        $path = RdTrk $f
+        if (-not (Test-Path -LiteralPath $path)) { return 0 }
+        $c = 0
+        foreach ($l in [System.IO.File]::ReadAllLines($path)) { if ($l.Trim($ws) -ceq $mark) { $c++ } }
+        return $c
+    }
+    function AdMarks([string]$f = '') {
+        # -> names carried by adapter marker lines (one per marker; a name marked twice yields two entries).
+        $ws = [char[]]@([char]0x20, [char]0x09)
+        $out = New-Object System.Collections.Generic.List[string]
+        $path = RdTrk $f
+        if (-not (Test-Path -LiteralPath $path)) { return @() }
+        foreach ($l in [System.IO.File]::ReadAllLines($path)) {
+            $t = $l.Trim($ws)
+            if ($t.Length -gt ($ADP_MARK.Length + 4) -and $t.StartsWith($ADP_MARK, [System.StringComparison]::Ordinal) -and $t.EndsWith(' -->', [System.StringComparison]::Ordinal)) {
+                $n = $t.Substring($ADP_MARK.Length, $t.Length - $ADP_MARK.Length - 4)
+                if ($n.IndexOf(' ', [System.StringComparison]::Ordinal) -lt 0 -and $n.IndexOf([string][char]0x09, [System.StringComparison]::Ordinal) -lt 0) { [void]$out.Add($n) }
+            }
+        }
+        return @($out)
+    }
+    function AdMarkBad([string]$f = '') {
+        # -> declared adapters without exactly one marker + markers carrying an undeclared name.
+        $ns = OrdSet @(DnNames $ADP_KEY (RdTrk $f))
+        $marks = @(AdMarks $f)
+        $bad = 0
+        foreach ($n in $ns) { if (@($marks | Where-Object { $_ -ceq $n }).Count -ne 1) { $bad++ } }
+        foreach ($m in $marks) { if (-not $ns.Contains($m)) { $bad++ } }
+        return [string]$bad
+    }
+    function DtTableBad([string]$f = '') {
+        # -> (1 when the detection table marker is not exactly one) + step names without exactly one row + rows of an undeclared step.
+        $bad = 0
+        if ((TbMarkCount $TDT_MARK $f) -ne 1) { $bad = 1 }
+        $ns = OrdSet @(DnNames $TDS_KEY (RdTrk $f))
+        $rows = @(TbRows $TDT_MARK 'td-' $f)
+        foreach ($n in $ns) { if (@($rows | Where-Object { $_ -ceq $n }).Count -ne 1) { $bad++ } }
+        foreach ($r in $rows) { if (-not $ns.Contains($r)) { $bad++ } }
+        return [string]$bad
+    }
+    function BtTokens([string[]]$lines, [string]$prefix) {
+        # -> distinct backticked tokens starting with the prefix in those lines.
+        $bt = [string][char]0x60
+        $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($ln in $lines) {
+            $s = $ln
+            while (($i = $s.IndexOf($bt + $prefix, [System.StringComparison]::Ordinal)) -ge 0) {
+                $s = $s.Substring($i + 1)
+                $j = $s.IndexOf($bt, [System.StringComparison]::Ordinal)
+                if ($j -lt 0) { break }
+                [void]$seen.Add($s.Substring(0, $j))
+                $s = $s.Substring($j + 1)
+            }
+        }
+        return @($seen)
+    }
+    function DtReasons([string]$f = '') { return @(BtTokens ([string[]]@(TbLines $TDT_MARK $f)) 'tl-') }
+    function DtReasonBad([string]$f = '') {
+        # -> symmetric difference of the table's `tl-` tokens and the `tracker-local-reasons:` names.
+        $ns = OrdSet @(DnNames $TLR_KEY (RdTrk $f))
+        $ts = OrdSet @(DtReasons $f)
+        $bad = 0
+        foreach ($t in $ts) { if (-not $ns.Contains($t)) { $bad++ } }
+        foreach ($n in $ns) { if (-not $ts.Contains($n)) { $bad++ } }
+        return [string]$bad
+    }
+    function SkTokens([string]$prefix, [string]$skBase = '') {
+        # -> distinct backticked tokens starting with the prefix in the skill documents.
+        $all = New-Object System.Collections.Generic.List[string]
+        foreach ($p in @(RdSkillFiles $skBase)) { foreach ($ln in [System.IO.File]::ReadAllLines($p)) { [void]$all.Add($ln) } }
+        return @(BtTokens ([string[]]@($all)) $prefix)
+    }
+    function SkWith([string]$needle, [string]$skBase = '') {
+        # -> distinct skill names that have a skill document holding that literal string.
+        $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($p in @(RdSkillFiles $skBase)) {
+            $txt = [System.IO.File]::ReadAllText($p)
+            if ($txt.IndexOf($needle, [System.StringComparison]::Ordinal) -ge 0) { [void]$seen.Add((Split-Path (Split-Path $p -Parent) -Leaf)) }
+        }
+        return @($seen)
+    }
+    function DxStray([string]$f = '', [string]$skBase = '') {
+        # -> skill `td-` tokens that are not declared detection steps + skill `tl-` tokens that are not declared local reasons.
+        $ds = OrdSet @(DnNames $TDS_KEY (RdTrk $f))
+        $ls = OrdSet @(DnNames $TLR_KEY (RdTrk $f))
+        $bad = 0
+        foreach ($t in @(SkTokens 'td-' $skBase)) { if ($t -ne '' -and -not $ds.Contains($t)) { $bad++ } }
+        foreach ($t in @(SkTokens 'tl-' $skBase)) { if ($t -ne '' -and -not $ls.Contains($t)) { $bad++ } }
+        return [string]$bad
+    }
+    function DsSiteBad([string]$f = '', [string]$skBase = '') {
+        # -> symmetric difference of (skills holding the detection pointer) and (declared skills)
+        #    + skills holding a backticked `rd-` token that are not declared (the declaration is read as distinct names --
+        #    duplicates are the registry `dup` row's job).
+        $ns = OrdSet @(DnNames $TDK_KEY (RdTrk $f))
+        $hs = OrdSet @(SkWith $TDP_TOKEN $skBase)
+        $rs = OrdSet @(SkWith (([string][char]0x60) + 'rd-') $skBase)
+        $bad = 0
+        foreach ($h in $hs) { if (-not $ns.Contains($h)) { $bad++ } }
+        foreach ($n in $ns) { if (-not $hs.Contains($n)) { $bad++ } }
+        foreach ($r in $rs) { if (-not $ns.Contains($r)) { $bad++ } }
+        return [string]$bad
+    }
+    function RcFiles([string]$dir) {
+        # -> record file names (README.md and names starting with a dot excluded; one level).
+        $out = New-Object System.Collections.Generic.List[string]
+        if (-not (Test-Path -LiteralPath $dir)) { return @() }
+        foreach ($x in @(Get-ChildItem -LiteralPath $dir -File -Force -ErrorAction SilentlyContinue)) {
+            if ($x.Name.StartsWith('.', [System.StringComparison]::Ordinal)) { continue }
+            if ($x.Name -ceq 'README.md') { continue }
+            [void]$out.Add($x.Name)
+        }
+        return @($out)
+    }
+    function RcNames([string]$readme) {
+        # -> distinct backtick spans shaped like a record file name (alphanumerics, dot, underscore, hyphen only, ending in
+        #    `.json` or `.txt`).
+        $bt = [char]0x60
+        $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        if (-not (Test-Path -LiteralPath $readme)) { return @() }
+        foreach ($ln in [System.IO.File]::ReadAllLines($readme)) {
+            $a = $ln.Split($bt)
+            for ($i = 1; $i -lt $a.Length; $i += 2) {
+                $v = $a[$i]
+                if ($v -cmatch '^[A-Za-z0-9._-]+$' -and ($v.EndsWith('.json', [System.StringComparison]::Ordinal) -or $v.EndsWith('.txt', [System.StringComparison]::Ordinal))) { [void]$seen.Add($v) }
+            }
+        }
+        return @($seen)
+    }
+    function RcReadmeBad([string]$dir = '') {
+        # [dir -- all directories of `tracker-record-dirs:` when empty] -> directories without a README
+        #    + symmetric difference of the record file names and the names the README carries.
+        $dirs = New-Object System.Collections.Generic.List[string]
+        if ($dir -ne '') { [void]$dirs.Add($dir) } else { foreach ($d in @(DnNames $RCD_KEY $CONV_TRK)) { if ($d -ne '') { [void]$dirs.Add((Join-Path $ROOT $d)) } } }
+        $bad = 0
+        foreach ($d in $dirs) {
+            $rm = Join-Path $d 'README.md'
+            if (-not (Test-Path -LiteralPath $rm)) { $bad++; continue }
+            $fs = OrdSet @(RcFiles $d)
+            $ts = OrdSet @(RcNames $rm)
+            foreach ($x in $fs) { if (-not $ts.Contains($x)) { $bad++ } }
+            foreach ($x in $ts) { if (-not $fs.Contains($x)) { $bad++ } }
+        }
+        return [string]$bad
+    }
+    function RcFixture([string]$mode) {
+        # <addfile|addtoken> -> a copy of the first declared record directory (addfile: one file the README does not name;
+        #    addtoken: one name without a file).
+        $bt = [string][char]0x60
+        $fx = Join-Path $sbx ('rcfx-' + $mode)
+        if (Test-Path -LiteralPath $fx) { Remove-Item -LiteralPath $fx -Recurse -Force }
+        New-Item -ItemType Directory -Force -Path $fx | Out-Null
+        $first = [string](@(DnNames $RCD_KEY $CONV_TRK) | Select-Object -First 1)
+        $src = if ($first -ne '') { Join-Path $ROOT $first } else { '' }
+        if ($src -ne '' -and (Test-Path -LiteralPath $src)) {
+            foreach ($x in @(Get-ChildItem -LiteralPath $src -File -Force)) { Copy-Item -LiteralPath $x.FullName -Destination (Join-Path $fx $x.Name) -Force }
+        }
+        $enc = New-Object System.Text.UTF8Encoding($false)
+        if ($mode -eq 'addfile') { [System.IO.File]::WriteAllText((Join-Path $fx 'zz-fixture.json'), '{}', $enc) }
+        if ($mode -eq 'addtoken') {
+            $rm = Join-Path $fx 'README.md'
+            $old = if (Test-Path -LiteralPath $rm) { [System.IO.File]::ReadAllText($rm) } else { '' }
+            [System.IO.File]::WriteAllText($rm, ($old + "`n" + 'x ' + $bt + 'zz-fixture.txt' + $bt + ' x' + "`n"), $enc)
+        }
+        return $fx
+    }
+    function TkFixture([string]$mode) {
+        # <mode> -> a fragment copy (the real file is not touched). Modes -- ghdrop (drop the first rd- row of the second adapter
+        # table) / moverow (move the first rd- row of the first adapter table into the second) / dropmark (drop the second adapter
+        # marker) / addmark (add a marker of an undeclared name with a row) / in-{first|second}-{tight|indent|bare} (add a row of an
+        # undeclared name in that shape after that table's first rd- row) / dtdrop (drop the first td- row of the detection table) /
+        # dtadd (add a row of an undeclared step there) / dtreason (rename the first local-reason token in that table).
+        $bt = [string][char]0x60
+        $ws = [char[]]@([char]0x20, [char]0x09)
+        $fx = Join-Path $sbx ('conv-tk-' + $mode + '.md')
+        $ad = @(DnNames $ADP_KEY $CONV_TRK)
+        $m1 = if ($ad.Count -ge 1) { $ADP_MARK + $ad[0] + ' -->' } else { '' }
+        $m2 = if ($ad.Count -ge 2) { $ADP_MARK + $ad[1] + ' -->' } else { '' }
+        $rs = [string](@(DnNames $TLR_KEY $CONV_TRK) | Select-Object -First 1)
+        $tgt = ''; $shape = ''
+        if ($mode.StartsWith('in-', [System.StringComparison]::Ordinal)) { $mm = $mode.Split('-'); $tgt = if ($mm[1] -ceq 'first') { '1' } else { '2' }; $shape = $mm[2] }
+        $out = New-Object System.Collections.Generic.List[string]
+        $cur = ''; $done = $false; $held = ''; $hd = $false
+        foreach ($l in [System.IO.File]::ReadAllLines($CONV_TRK)) {
+            $u = $l.Trim($ws)
+            if ($m1 -ne '' -and $u -ceq $m1) { $cur = '1' } elseif ($m2 -ne '' -and $u -ceq $m2) { $cur = '2' } elseif ($u -ceq $TDT_MARK) { $cur = 'd' }
+            $isRd = (TbIsRow $l) -and (TbFirstCell $l).StartsWith('rd-', [System.StringComparison]::Ordinal)
+            $isTd = (TbIsRow $l) -and (TbFirstCell $l).StartsWith('td-', [System.StringComparison]::Ordinal)
+            if ($mode -ceq 'dropmark' -and $m2 -ne '' -and $u -ceq $m2 -and -not $done) { $done = $true; continue }
+            if ($mode -ceq 'ghdrop' -and $cur -ceq '2' -and -not $done -and $isRd) { $done = $true; continue }
+            if ($mode -ceq 'moverow' -and $cur -ceq '1' -and -not $hd -and $isRd) { $held = $l; $hd = $true; continue }
+            if ($mode -ceq 'moverow' -and $cur -ceq '2' -and $hd -and -not $done -and $isRd) { [void]$out.Add($l); [void]$out.Add($held); $done = $true; continue }
+            if ($tgt -ne '' -and $cur -ceq $tgt -and -not $done -and $isRd) {
+                [void]$out.Add($l)
+                if ($shape -ceq 'tight') { [void]$out.Add('|' + $bt + 'rd-zz-fixture' + $bt + '| x |') }
+                elseif ($shape -ceq 'indent') { [void]$out.Add('  | ' + $bt + 'rd-zz-fixture' + $bt + ' | x |') }
+                else { [void]$out.Add('| rd-zz-fixture | x |') }
+                $done = $true; continue
+            }
+            if ($mode -ceq 'dtdrop' -and $cur -ceq 'd' -and -not $done -and $isTd) { $done = $true; continue }
+            if ($mode -ceq 'dtadd' -and $cur -ceq 'd' -and -not $done -and $isTd) { [void]$out.Add($l); [void]$out.Add('| ' + $bt + 'td-zz-fixture' + $bt + ' | x | x | x |'); $done = $true; continue }
+            if ($mode -ceq 'dtreason' -and $cur -ceq 'd' -and -not $done -and $rs -ne '') {
+                $i = $l.IndexOf($bt + $rs + $bt, [System.StringComparison]::Ordinal)
+                if ($i -ge 0) { [void]$out.Add($l.Substring(0, $i) + $bt + 'tl-zz-fixture' + $bt + $l.Substring($i + $rs.Length + 2)); $done = $true; continue }
+            }
+            [void]$out.Add($l)
+        }
+        if ($mode -ceq 'addmark') { [void]$out.Add('<!-- tracker-adapter:zz-fixture -->'); [void]$out.Add(''); [void]$out.Add('| ' + $bt + 'rd-zz-fixture' + $bt + ' | x |') }
+        [System.IO.File]::WriteAllLines($fx, [string[]]$out, (New-Object System.Text.UTF8Encoding($false)))
         return $fx
     }
     # (M90) NAME DECLARATION + SITE PAIRS: CO-PRESENCE AND STRAY CHECKS -- `retro-flow:` / `retro-flow-sites:` (Part O, O90 / O92) and
@@ -824,6 +1121,29 @@ F|F87|orphan|CONV_TRK|tracker-read-items:|main check - every read-item definitio
 F|F88|order|CONV_TRK|tracker-read-items:|main check - read-item definition items follow the declared name order
 F|F89|count|CONV_TRK|tracker-path-sites:|exactly one tracker-path-sites declaration line
 F|F90|seps|CONV_TRK|tracker-path-sites:|no forbidden separator in the tracker-path-sites declaration tail
+F|F102|count|CONV_TRK|tracker-adapters:|exactly one tracker-adapters declaration line
+F|F103|seps|CONV_TRK|tracker-adapters:|no forbidden separator in the tracker-adapters declaration tail
+F|F104|dup|CONV_TRK|tracker-adapters:|main check - adapter names are unique
+F|F105|count|CONV_TRK|tracker-connect:|exactly one tracker-connect declaration line
+F|F106|seps|CONV_TRK|tracker-connect:|no forbidden separator in the tracker-connect declaration tail
+F|F107|count|CONV_TRK|tracker-local-reasons:|exactly one tracker-local-reasons declaration line
+F|F108|seps|CONV_TRK|tracker-local-reasons:|no forbidden separator in the tracker-local-reasons declaration tail
+F|F109|dup|CONV_TRK|tracker-local-reasons:|main check - local-reason names are unique
+F|F110|def|CONV_TRK|tracker-local-reasons:|main check - every local-reason name has exactly one definition item
+F|F111|orphan|CONV_TRK|tracker-local-reasons:|main check - every local-reason definition item has a declared name (0 orphans)
+F|F112|order|CONV_TRK|tracker-local-reasons:|main check - local-reason definition items follow the declared name order
+F|F113|count|CONV_TRK|tracker-detect-sites:|exactly one tracker-detect-sites declaration line
+F|F114|seps|CONV_TRK|tracker-detect-sites:|no forbidden separator in the tracker-detect-sites declaration tail
+F|F115|dup|CONV_TRK|tracker-detect-sites:|main check - detection skill names are unique
+F|F116|count|CONV_TRK|tracker-record-steps:|exactly one tracker-record-steps declaration line
+F|F117|seps|CONV_TRK|tracker-record-steps:|no forbidden separator in the tracker-record-steps declaration tail
+F|F118|dup|CONV_TRK|tracker-record-steps:|main check - record step names are unique
+F|F119|def|CONV_TRK|tracker-record-steps:|main check - every record step name has exactly one definition item
+F|F120|orphan|CONV_TRK|tracker-record-steps:|main check - every record step definition item has a declared name (0 orphans)
+F|F121|order|CONV_TRK|tracker-record-steps:|main check - record step definition items follow the declared name order
+F|F122|count|CONV_TRK|tracker-record-dirs:|exactly one tracker-record-dirs declaration line
+F|F123|seps|CONV_TRK|tracker-record-dirs:|no forbidden separator in the tracker-record-dirs declaration tail
+F|F124|dup|CONV_TRK|tracker-record-dirs:|main check - record directory names are unique
 I|I7|count|CONV|state-neg:|exactly one state-neg declaration line in the convention
 I|I8|count|CONV|state-past:|exactly one state-past declaration line in the convention
 I|I10|seps|CONV|state-neg:|no forbidden separator in the state-neg declaration tail
@@ -2587,7 +2907,7 @@ try {
     # raise the verdict value by one.
     $rdPc = (@(DnNames $RDI_KEY $CONV_TRK).Count -ge 1) -and (@(RdRows).Count -ge 1) -and (@(RdTokens).Count -ge 1) -and (@(RdPathSkills).Count -ge 1) -and (@(DnNames $RDS_KEY $CONV_TRK).Count -ge 1) -and (@(DnNames $RDP_KEY $CONV_TRK).Count -ge 1) -and (@(DnNames $RDO_KEY $CONV_TRK).Count -ge 1)
     Chk "F91: read-item extraction positive control (names / table rows / consumer tokens / path skills / path declaration / phase tokens / op names each at least 1)" $(if ($rdPc) { 'ok' } else { 'no' }) 'ok'
-    Chk "F92: main check - every read-item name has exactly one row in the local document adapter table and no row carries an undeclared name" (RdTableBad) '0'
+    Chk "F92: main check - in every declared adapter table each read-item name has exactly one row, and there is no row of an undeclared name and no rd- row outside the tables" (RdTableBad) '0'
     Chk "F93: main check - every rd- token in the skill documents and the conventions body is a declared read item" (RdStray) '0'
     Chk "F94: main check - every read-item name has at least one consumer" (RdUnused) '0'
     Chk "F95: main check - the skills spelling a plan document path are the same set as the skills in tracker-path-sites and the classes are within the three" (RdSiteBad) '0'
@@ -2599,6 +2919,29 @@ try {
     Chk "F99: control - a root copy with one plan document path line in an undeclared skill / a fragment copy with one skill dropped from the path declaration each add one mismatch" ([string]([int](RdSiteBad '' (RdRootFixture 'path')) - $rdB95) + '|' + [string]([int](RdSiteBad (RdConvFixture 'dropsite')) - $rdB95)) '1|1'
     Chk "F100: control - a fragment copy with one op of the phase-writes declaration renamed to an undeclared name / with one phase name renamed to a non-skill name each add one mismatch" ([string]([int](RdPhaseBad (RdConvFixture 'badop')) - [int](RdPhaseBad)) + '|' + [string]([int](RdPhaseBad (RdConvFixture 'badphase')) - [int](RdPhaseBad))) '1|1'
     Chk "F101: control - a fragment copy with a row of an undeclared name added in each of three other shapes (no space after the first pipe / leading spaces / no backticks) adds one mismatch each" ([string]([int](RdTableBad (RdConvFixture 'rowtight')) - $rdB92) + '|' + [string]([int](RdTableBad (RdConvFixture 'rowindent')) - $rdB92) + '|' + [string]([int](RdTableBad (RdConvFixture 'rowbare')) - $rdB92)) '1|1|1'
+    # (F102-F136 / M99) DETECTION / ADAPTER TABLES / RESPONSE RECORDS -- with two adapter tables F92 asks per table (RdTableBad above).
+    # Declaration hygiene comes from the registry rows (F102-F124); here are one extraction positive control, six main checks and
+    # five controls. Controls ask a delta (control-reads-delta).
+    $m99Dir = [string](@(DnNames $RCD_KEY $CONV_TRK) | Select-Object -First 1)
+    $m99Pc = (@(DnNames $ADP_KEY $CONV_TRK).Count -ge 1) -and (@(AdMarks).Count -ge 1) -and (@(TbRows $TDT_MARK 'td-').Count -ge 1) -and (@(DtReasons).Count -ge 1) -and (@(DnNames $TDK_KEY $CONV_TRK).Count -ge 1) -and (@(SkWith $TDP_TOKEN).Count -ge 1) -and ($m99Dir -ne '') -and (@(RcFiles (Join-Path $ROOT $m99Dir)).Count -ge 1) -and (@(RcNames (Join-Path (Join-Path $ROOT $m99Dir) 'README.md')).Count -ge 1)
+    Chk "F125: detection / adapter / record extraction positive control (adapter names / adapter markers / detection table rows / reason tokens of the table / detection skill declaration / skills holding the pointer / record directories / its record files / names in its README each at least 1)" $(if ($m99Pc) { 'ok' } else { 'no' }) 'ok'
+    Chk "F126: main check - every declared adapter name has exactly one adapter marker and no marker carries an undeclared name" (AdMarkBad) '0'
+    Chk "F127: main check - there is one detection table marker, every detection step name has exactly one row in that table and no row carries an undeclared step" (DtTableBad) '0'
+    Chk "F128: main check - the tl- tokens of the detection table are the same set as the tracker-local-reasons names" (DtReasonBad) '0'
+    Chk "F129: main check - the skills holding the detection pointer are the same set as the skills in tracker-detect-sites and every skill holding an rd- token is in it" (DsSiteBad) '0'
+    Chk "F130: main check - every td- / tl- token in the skill documents is a declared detection step / local reason" (DxStray) '0'
+    Chk "F131: main check - in every directory of tracker-record-dirs the record file names and the names its README carries are the same set" (RcReadmeBad) '0'
+    $rdB126 = [int](AdMarkBad)
+    Chk "F132: control - a copy with one row dropped from the second adapter table / with one row of the first table moved into the second adds 1 / 2 table mismatches, and a copy with the second marker dropped / with a marker of an undeclared name added adds one marker mismatch each" ([string]([int](RdTableBad (TkFixture 'ghdrop')) - $rdB92) + '|' + [string]([int](RdTableBad (TkFixture 'moverow')) - $rdB92) + '|' + [string]([int](AdMarkBad (TkFixture 'dropmark')) - $rdB126) + '|' + [string]([int](AdMarkBad (TkFixture 'addmark')) - $rdB126)) '1|2|1|1'
+    Chk "F133: control - a copy with a row of an undeclared name added in each of three other shapes inside each of the two adapter tables adds one mismatch each" ([string]([int](RdTableBad (TkFixture 'in-first-tight')) - $rdB92) + '|' + [string]([int](RdTableBad (TkFixture 'in-first-indent')) - $rdB92) + '|' + [string]([int](RdTableBad (TkFixture 'in-first-bare')) - $rdB92) + '|' + [string]([int](RdTableBad (TkFixture 'in-second-tight')) - $rdB92) + '|' + [string]([int](RdTableBad (TkFixture 'in-second-indent')) - $rdB92) + '|' + [string]([int](RdTableBad (TkFixture 'in-second-bare')) - $rdB92)) '1|1|1|1|1|1'
+    $dtB127 = [int](DtTableBad)
+    $dtB128 = [int](DtReasonBad)
+    Chk "F134: control - a copy with one detection table row dropped / with a row of an undeclared step added adds one mismatch each, and a copy with one reason token renamed to an undeclared name adds two to the reason symmetric difference" ([string]([int](DtTableBad (TkFixture 'dtdrop')) - $dtB127) + '|' + [string]([int](DtTableBad (TkFixture 'dtadd')) - $dtB127) + '|' + [string]([int](DtReasonBad (TkFixture 'dtreason')) - $dtB128)) '1|1|2'
+    $dsB129 = [int](DsSiteBad)
+    $dxB130 = [int](DxStray)
+    Chk "F135: control - a skill root copy with the detection pointer removed / with an undeclared skill holding an rd- token / with an undeclared td- token adds one mismatch each" ([string]([int](DsSiteBad '' (RdRootFixture 'dropptr')) - $dsB129) + '|' + [string]([int](DsSiteBad '' (RdRootFixture 'rdnodetect')) - $dsB129) + '|' + [string]([int](DxStray '' (RdRootFixture 'tdstray')) - $dxB130)) '1|1|1'
+    $rcB131 = [int](RcReadmeBad)
+    Chk "F136: control - a record directory copy with a file the README does not name / with a name in the README that has no file adds one mismatch each" ([string]([int](RcReadmeBad (RcFixture 'addfile')) - $rcB131) + '|' + [string]([int](RcReadmeBad (RcFixture 'addtoken')) - $rcB131)) '1|1'
     }
     # === Part G -- cross-reference integrity (M34; generalized to a FILE SET in M35) =====
     # (M34) Part F enforces what a document says ABOUT ITSELF; Part G enforces the REFERENCES BETWEEN

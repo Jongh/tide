@@ -533,6 +533,29 @@ F|F87|orphan|CONV_TRK|tracker-read-items:|본 검사 - 읽기 항목 정의 항�
 F|F88|order|CONV_TRK|tracker-read-items:|본 검사 - 읽기 항목 정의 항목의 순서가 선언의 이름 순서와 같다
 F|F89|count|CONV_TRK|tracker-path-sites:|tracker-path-sites 선언 줄 정확히 1개
 F|F90|seps|CONV_TRK|tracker-path-sites:|tracker-path-sites 선언 줄 꼬리에 금지 구분자 0건
+F|F102|count|CONV_TRK|tracker-adapters:|tracker-adapters 선언 줄 정확히 1개
+F|F103|seps|CONV_TRK|tracker-adapters:|tracker-adapters 선언 줄 꼬리에 금지 구분자 0건
+F|F104|dup|CONV_TRK|tracker-adapters:|본 검사 - 어댑터 이름이 유일하다
+F|F105|count|CONV_TRK|tracker-connect:|tracker-connect 선언 줄 정확히 1개
+F|F106|seps|CONV_TRK|tracker-connect:|tracker-connect 선언 줄 꼬리에 금지 구분자 0건
+F|F107|count|CONV_TRK|tracker-local-reasons:|tracker-local-reasons 선언 줄 정확히 1개
+F|F108|seps|CONV_TRK|tracker-local-reasons:|tracker-local-reasons 선언 줄 꼬리에 금지 구분자 0건
+F|F109|dup|CONV_TRK|tracker-local-reasons:|본 검사 - 알림 사유 이름이 유일하다
+F|F110|def|CONV_TRK|tracker-local-reasons:|본 검사 - 알림 사유 이름마다 정의 항목이 정확히 하나
+F|F111|orphan|CONV_TRK|tracker-local-reasons:|본 검사 - 알림 사유 정의 항목마다 선언된 이름이 있다(고아 정의 0)
+F|F112|order|CONV_TRK|tracker-local-reasons:|본 검사 - 알림 사유 정의 항목의 순서가 선언의 이름 순서와 같다
+F|F113|count|CONV_TRK|tracker-detect-sites:|tracker-detect-sites 선언 줄 정확히 1개
+F|F114|seps|CONV_TRK|tracker-detect-sites:|tracker-detect-sites 선언 줄 꼬리에 금지 구분자 0건
+F|F115|dup|CONV_TRK|tracker-detect-sites:|본 검사 - 판별을 부르는 스킬 이름이 유일하다
+F|F116|count|CONV_TRK|tracker-record-steps:|tracker-record-steps 선언 줄 정확히 1개
+F|F117|seps|CONV_TRK|tracker-record-steps:|tracker-record-steps 선언 줄 꼬리에 금지 구분자 0건
+F|F118|dup|CONV_TRK|tracker-record-steps:|본 검사 - 보관 절차 이름이 유일하다
+F|F119|def|CONV_TRK|tracker-record-steps:|본 검사 - 보관 절차 이름마다 정의 항목이 정확히 하나
+F|F120|orphan|CONV_TRK|tracker-record-steps:|본 검사 - 보관 절차 정의 항목마다 선언된 이름이 있다(고아 정의 0)
+F|F121|order|CONV_TRK|tracker-record-steps:|본 검사 - 보관 절차 정의 항목의 순서가 선언의 이름 순서와 같다
+F|F122|count|CONV_TRK|tracker-record-dirs:|tracker-record-dirs 선언 줄 정확히 1개
+F|F123|seps|CONV_TRK|tracker-record-dirs:|tracker-record-dirs 선언 줄 꼬리에 금지 구분자 0건
+F|F124|dup|CONV_TRK|tracker-record-dirs:|본 검사 - 보관 디렉터리 이름이 유일하다
 R|R1|count|CONV|coverage-bookkeeping:|coverage-bookkeeping 선언 줄 정확히 1개
 S|S1|count|CONV_REL|push-availability:|push-availability 선언 줄 정확히 1개
 S|S2|count|CONV_REL|terminal-state:|terminal-state 선언 줄 정확히 1개
@@ -758,13 +781,21 @@ RDP_KEY='tracker-phase-writes:'
 rd_rows() { # [조각] → 표 행의 항목 이름 한 줄씩. 행은 앞 공백 · 탭을 벗긴 줄이 `|`로 시작하는 줄이고, 이름은 첫 칸에서 공백 · 탭 · 백틱을 벗긴 것이 `rd-`로 시작할 때의 그 값이다(조각 전체를 본다 — 표 하나에 한정하지 않는다)
     LC_ALL=C awk '{ sub(/\r$/, ""); t = $0; sub(/^[ \t]+/, "", t); if (substr(t, 1, 1) != "|") next; t = substr(t, 2); j = index(t, "|"); if (j == 0) next; c = substr(t, 1, j - 1); gsub(/[ \t`]/, "", c); if (substr(c, 1, 3) == "rd-") print c }' "${1:-$CONV_TRK}"
 }
-rd_table_bad() { # [조각] → 표 행이 정확히 하나가 아닌 선언 이름의 수 + 선언에 없는 이름을 든 행의 수
-    dn_names "$RDI_KEY" "${1:-$CONV_TRK}" | LC_ALL=C sort -u > "$SBX/rd-tn.txt"; rd_rows "${1:-$CONV_TRK}" > "$SBX/rd-tr.txt"
-    _rtb=0
-    while IFS= read -r _rtv; do [ -n "$_rtv" ] || continue
-        [ "$(LC_ALL=C grep -cxF -- "$_rtv" "$SBX/rd-tr.txt")" = 1 ] || _rtb=$((_rtb + 1)); done < "$SBX/rd-tn.txt"
-    while IFS= read -r _rtv; do [ -n "$_rtv" ] || continue
-        LC_ALL=C grep -qxF -- "$_rtv" "$SBX/rd-tn.txt" || _rtb=$((_rtb + 1)); done < "$SBX/rd-tr.txt"
+rd_table_bad() { # [조각] → 선언된 어댑터의 표마다(행이 정확히 하나가 아닌 읽기 항목 이름의 수 + 선언에 없는 이름을 든 행의 수) + 어느 선언된 어댑터 표에도 들지 않은 `rd-` 행의 수
+    # (M99) 표 단위다 — 표는 `tb_lines`가 정하고, 표 밖의 `rd-` 행(표지 없는 표 · 선언에 없는 이름의 표지 아래 표)은 `rd_rows`의 조각 전체 셈에서 표 안의 수를 뺀 값으로 잡는다.
+    _rtf=${1:-$CONV_TRK}
+    dn_names "$RDI_KEY" "$_rtf" | LC_ALL=C sort -u > "$SBX/rd-tn.txt"
+    _rtb=0; _rtin=0
+    for _rta in $(dn_names "$ADP_KEY" "$_rtf" | LC_ALL=C sort -u); do
+        tb_rows "$ADP_MARK$_rta -->" rd- "$_rtf" > "$SBX/rd-tr.txt"
+        _rtin=$((_rtin + $(grep -c . "$SBX/rd-tr.txt")))
+        while IFS= read -r _rtv; do [ -n "$_rtv" ] || continue
+            [ "$(LC_ALL=C grep -cxF -- "$_rtv" "$SBX/rd-tr.txt")" = 1 ] || _rtb=$((_rtb + 1)); done < "$SBX/rd-tn.txt"
+        while IFS= read -r _rtv; do [ -n "$_rtv" ] || continue
+            LC_ALL=C grep -qxF -- "$_rtv" "$SBX/rd-tn.txt" || _rtb=$((_rtb + 1)); done < "$SBX/rd-tr.txt"
+    done
+    _rtall=$(rd_rows "$_rtf" | grep -c .)
+    [ "$_rtall" -gt "$_rtin" ] && _rtb=$((_rtb + _rtall - _rtin))
     echo "$_rtb"
 }
 rd_skill_files() { # [루트] → 스킬 문서 경로 한 줄씩
@@ -810,11 +841,11 @@ rd_phase_bad() { # [조각] [루트] → `tracker-phase-writes:` 토큰 중 `=`�
         if ! LC_ALL=C grep -qxF -- "$_rpo" "$SBX/rd-on.txt"; then _rp=$((_rp + 1)); continue; fi
         LC_ALL=C grep -qxF -- "$_rpl" "$SBX/rd-sn.txt" || _rp=$((_rp + 1)); done; echo "$_rp"; }
 }
-rd_conv_fixture() { # <droprow|addrow|rowtight|rowindent|rowbare|addname|dropsite|badop|badphase> → 조각 사본(실제 파일을 건드리지 않는다)
+rd_conv_fixture() { # (M99) droprow는 첫 일치 한 줄만 지운다 — 어댑터 표가 둘이라 같은 이름의 행이 표마다 있다. <droprow|addrow|rowtight|rowindent|rowbare|addname|dropsite|badop|badphase> → 조각 사본(실제 파일을 건드리지 않는다)
     _rcf="$SBX/conv-trk-$1.md"
     case $1 in
         droprow) _rc1=$(dn_names "$RDI_KEY" "$CONV_TRK" | head -1)
-            LC_ALL=C awk -v p="| \`$_rc1\` " -v e="$_rc1" '{ if (e != "" && substr($0, 1, length(p)) == p) next; print }' "$CONV_TRK" > "$_rcf" ;;
+            LC_ALL=C awk -v p="| \`$_rc1\` " -v e="$_rc1" '{ if (e != "" && !d && substr($0, 1, length(p)) == p) { d = 1; next } print }' "$CONV_TRK" > "$_rcf" ;;
         addrow) { cat "$CONV_TRK"; printf '%s\n' '| `rd-zz-fixture` | x |'; } > "$_rcf" ;;
         rowtight) { cat "$CONV_TRK"; printf '%s\n' '|`rd-zz-fixture`| x |'; } > "$_rcf" ;;
         rowindent) { cat "$CONV_TRK"; printf '%s\n' '  | `rd-zz-fixture` | x |'; } > "$_rcf" ;;
@@ -829,15 +860,156 @@ rd_conv_fixture() { # <droprow|addrow|rowtight|rowindent|rowbare|addname|dropsit
     esac
     printf '%s' "$_rcf"
 }
-rd_root_fixture() { # <stray|path> → 스킬 디렉터리와 규약 본체의 사본 루트에 스킬 문서 하나를 더한 것(stray: 선언에 없는 `rd-` 토큰 · path: 계획 문서 경로 한 줄)
+rd_root_fixture() { # (M99) rdnodetect: 선언된 읽기 항목 토큰만 든 스킬 문서 · tdstray: 선언에 없는 `td-` 토큰 · dropptr: 판별을 부르는 첫 스킬에서 판별 포인터를 지운다. <stray|path|rdnodetect|tdstray|dropptr> → 스킬 디렉터리와 규약 본체의 사본 루트에 스킬 문서 하나를 더한 것(stray: 선언에 없는 `rd-` 토큰 · path: 계획 문서 경로 한 줄)
     _rrf="$SBX/rdroot-$1"; rm -rf "$_rrf"; mkdir -p "$_rrf/docs" "$_rrf/skills"
     cp -R "$ROOT/skills/." "$_rrf/skills/"; cp "$CONV" "$_rrf/docs/conventions.md"
     mkdir -p "$_rrf/skills/zz-fixture"
     case $1 in
         stray) printf '%s\n' 'x `rd-zz-stray` x' > "$_rrf/skills/zz-fixture/template.md" ;;
         path)  printf '%s\n' 'x docs/milestones/M1.md x' > "$_rrf/skills/zz-fixture/template.md" ;;
+        rdnodetect) printf '%s\n' "x \`$(dn_names "$RDI_KEY" "$CONV_TRK" | sed -n 1p)\` x" > "$_rrf/skills/zz-fixture/template.md" ;;
+        tdstray) printf '%s\n' 'x `td-zz-stray` x' > "$_rrf/skills/zz-fixture/template.md" ;;
+        dropptr) _rr1=$(dn_names "$TDK_KEY" "$CONV_TRK" | sed -n 1p)
+            for _rrp in "$_rrf/skills/$_rr1"/*.md; do [ -f "$_rrp" ] || continue
+                LC_ALL=C awk '{ gsub(/tracker-detect-steps:/, "tracker-detect-zz:"); print }' "$_rrp" > "$_rrp.tmp" && mv "$_rrp.tmp" "$_rrp"; done ;;
     esac
     printf '%s' "$_rrf"
+}
+# --- 판별 · 어댑터 표 · 응답 보관 판정 (M99 · E5 사이클 배분의 셋째를 둘로 나눈 앞쪽) ---------------
+# 조각이 어댑터 표를 둘(로컬 문서 · GitHub) 들게 되어 행 추출을 **표 단위**로 가른다. 표는 ASCII 표지 한 줄 다음에 오는 **행의 연속**이다 —
+# 표지와 첫 행 사이의 빈 줄은 건너뛰고, 행이 시작된 뒤 행이 아닌 첫 줄에서 끝난다(`tb_lines`). 표지 줄은 앞뒤 공백 · 탭 · CR을 벗긴 줄이
+# 표지 문자열과 글자 그대로 같은 줄이다. 어댑터 표의 표지는 `<!-- tracker-adapter:{이름} -->`이고 이름은 `tracker-adapters:`의 것이다.
+# 판별 절차 표의 표지는 `<!-- tracker-detect-table -->`다. 묻는 것은 — 어댑터 표지가 선언과 일대일인가(`ad_mark_bad`) · 판별 절차 표의 행이
+# `tracker-detect-steps:`와 일대일인가(`dt_table_bad`) · 그 표의 백틱 `tl-` 토큰이 `tracker-local-reasons:`와 같은 집합인가(`dt_reason_bad`) ·
+# 판별 포인터(백틱 `tracker-detect-steps:`)를 든 스킬이 `tracker-detect-sites:`와 같은 집합이고 백틱 `rd-` 토큰을 든 스킬이 모두 거기 드는가(`ds_site_bad`) ·
+# 스킬 문서의 백틱 `td-` · `tl-` 토큰이 선언된 이름인가(`dx_stray`) · `tracker-record-dirs:`가 든 디렉터리마다 기록 파일과 README의 이름이 일대일인가(`rc_readme_bad`).
+# 헬퍼는 파트 가드 밖에서 정의한다(`rf-60`).
+ADP_KEY='tracker-adapters:'
+TDS_KEY='tracker-detect-steps:'
+TLR_KEY='tracker-local-reasons:'
+TDK_KEY='tracker-detect-sites:'
+RCD_KEY='tracker-record-dirs:'
+ADP_MARK='<!-- tracker-adapter:'
+TDT_MARK='<!-- tracker-detect-table -->'
+TDP_TOKEN='`tracker-detect-steps:`'
+tb_lines() { # <표지 줄> [조각] → 그 표지 다음에 오는 행의 연속(원문 줄 — 같은 표지가 여러 번이면 그 표들을 잇는다)
+    LC_ALL=C awk -v m="$1" '{ sub(/\r$/, ""); t = $0; sub(/^[ \t]+/, "", t); u = t; sub(/[ \t]+$/, "", u)
+        if (u == m) { st = 1; next }
+        if (st == 0) next
+        if (t == "" && st == 1) next
+        if (substr(t, 1, 1) == "|" && index(substr(t, 2), "|") > 0) { st = 2; print; next }
+        st = 0 }' "${2:-$CONV_TRK}"
+}
+tb_rows() { # <표지 줄> <접두> [조각] → 그 표의 행 가운데 첫 칸(공백 · 탭 · 백틱을 벗긴 값)이 접두로 시작하는 것의 그 값
+    tb_lines "$1" "${3:-$CONV_TRK}" | LC_ALL=C awk -v p="$2" '{ t = $0; sub(/^[ \t]+/, "", t); t = substr(t, 2); j = index(t, "|"); c = substr(t, 1, j - 1); gsub(/[ \t`]/, "", c); if (substr(c, 1, length(p)) == p) print c }'
+}
+tb_mark_count() { # <표지 줄> [조각] → 그 표지 줄의 수
+    LC_ALL=C awk -v m="$1" '{ sub(/\r$/, ""); t = $0; sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t); if (t == m) c++ } END { print c + 0 }' "${2:-$CONV_TRK}"
+}
+ad_marks() { # [조각] → 어댑터 표지 줄이 든 이름 한 줄씩(표지마다 — 같은 이름이 두 번이면 두 줄)
+    LC_ALL=C awk -v p="$ADP_MARK" '{ sub(/\r$/, ""); t = $0; sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t)
+        if (length(t) > length(p) + 4 && substr(t, 1, length(p)) == p && substr(t, length(t) - 3) == " -->") { n = substr(t, length(p) + 1, length(t) - length(p) - 4); if (n !~ /[ \t]/) print n } }' "${1:-$CONV_TRK}"
+}
+ad_mark_bad() { # [조각] → 표지가 정확히 하나가 아닌 선언 어댑터의 수 + 선언에 없는 이름을 든 표지의 수
+    dn_names "$ADP_KEY" "${1:-$CONV_TRK}" | LC_ALL=C sort -u > "$SBX/ad-n.txt"; ad_marks "${1:-$CONV_TRK}" > "$SBX/ad-m.txt"
+    _amb=0
+    while IFS= read -r _amv; do [ -n "$_amv" ] || continue
+        [ "$(LC_ALL=C grep -cxF -- "$_amv" "$SBX/ad-m.txt")" = 1 ] || _amb=$((_amb + 1)); done < "$SBX/ad-n.txt"
+    while IFS= read -r _amv; do [ -n "$_amv" ] || continue
+        LC_ALL=C grep -qxF -- "$_amv" "$SBX/ad-n.txt" || _amb=$((_amb + 1)); done < "$SBX/ad-m.txt"
+    echo "$_amb"
+}
+dt_table_bad() { # [조각] → (판별 절차 표지가 정확히 하나가 아니면 1) + 행이 정확히 하나가 아닌 갈래 이름의 수 + 선언에 없는 갈래를 든 행의 수
+    _dtf=${1:-$CONV_TRK}; _dtb=0
+    [ "$(tb_mark_count "$TDT_MARK" "$_dtf")" = 1 ] || _dtb=1
+    dn_names "$TDS_KEY" "$_dtf" | LC_ALL=C sort -u > "$SBX/dt-n.txt"; tb_rows "$TDT_MARK" td- "$_dtf" > "$SBX/dt-r.txt"
+    while IFS= read -r _dtv; do [ -n "$_dtv" ] || continue
+        [ "$(LC_ALL=C grep -cxF -- "$_dtv" "$SBX/dt-r.txt")" = 1 ] || _dtb=$((_dtb + 1)); done < "$SBX/dt-n.txt"
+    while IFS= read -r _dtv; do [ -n "$_dtv" ] || continue
+        LC_ALL=C grep -qxF -- "$_dtv" "$SBX/dt-n.txt" || _dtb=$((_dtb + 1)); done < "$SBX/dt-r.txt"
+    echo "$_dtb"
+}
+dt_reasons() { # [조각] → 판별 절차 표의 행 안 백틱 `tl-…` 토큰(서로 다른 것) 한 줄씩
+    tb_lines "$TDT_MARK" "${1:-$CONV_TRK}" | LC_ALL=C awk -v q='`' '{ s = $0; while ((i = index(s, q "tl-")) > 0) { s = substr(s, i + 1); j = index(s, q); if (j == 0) break; print substr(s, 1, j - 1); s = substr(s, j + 1) } }' | LC_ALL=C sort -u
+}
+dt_reason_bad() { # [조각] → 표의 `tl-` 토큰 집합과 `tracker-local-reasons:` 이름 집합의 대칭차
+    dn_names "$TLR_KEY" "${1:-$CONV_TRK}" | LC_ALL=C sort -u > "$SBX/dr-n.txt"; dt_reasons "${1:-$CONV_TRK}" > "$SBX/dr-t.txt"
+    LC_ALL=C comm -3 "$SBX/dr-t.txt" "$SBX/dr-n.txt" | grep -c .
+}
+sk_tokens() { # <접두> [루트] → 스킬 문서 안 백틱 `{접두}…` 토큰(서로 다른 것) 한 줄씩
+    rd_skill_files "${2:-$ROOT}" | while IFS= read -r _skp; do [ -f "$_skp" ] && cat "$_skp"; done |
+        LC_ALL=C awk -v q='`' -v p="$1" '{ sub(/\r$/, ""); s = $0; while ((i = index(s, q p)) > 0) { s = substr(s, i + 1); j = index(s, q); if (j == 0) break; print substr(s, 1, j - 1); s = substr(s, j + 1) } }' | LC_ALL=C sort -u
+}
+sk_with() { # <글자 그대로의 문자열> [루트] → 그 문자열을 든 스킬 문서가 있는 스킬 이름(서로 다른 것) 한 줄씩
+    rd_skill_files "${2:-$ROOT}" | while IFS= read -r _swf; do
+        if LC_ALL=C grep -qF -- "$1" "$_swf"; then _swd=${_swf%/*}; printf '%s\n' "${_swd##*/}"; fi
+    done | LC_ALL=C sort -u
+}
+dx_stray() { # [조각] [루트] → 스킬 문서의 `td-` 토큰 중 판별 갈래 선언에 없는 것 + `tl-` 토큰 중 알림 사유 선언에 없는 것의 수
+    dn_names "$TDS_KEY" "${1:-$CONV_TRK}" > "$SBX/dx-d.txt"; dn_names "$TLR_KEY" "${1:-$CONV_TRK}" > "$SBX/dx-l.txt"
+    _dxa=$(sk_tokens td- "${2:-$ROOT}" | { _dx=0; while IFS= read -r _dxv; do [ -n "$_dxv" ] || continue
+        LC_ALL=C grep -qxF -- "$_dxv" "$SBX/dx-d.txt" || _dx=$((_dx + 1)); done; echo "$_dx"; })
+    _dxb=$(sk_tokens tl- "${2:-$ROOT}" | { _dx=0; while IFS= read -r _dxv; do [ -n "$_dxv" ] || continue
+        LC_ALL=C grep -qxF -- "$_dxv" "$SBX/dx-l.txt" || _dx=$((_dx + 1)); done; echo "$_dx"; })
+    echo $((_dxa + _dxb))
+}
+ds_site_bad() { # [조각] [루트] → (판별 포인터를 든 스킬 집합과 선언 집합의 대칭차) + 백틱 `rd-` 토큰을 든 스킬 중 선언에 없는 것의 수(선언은 서로 다른 이름으로 센다 — 중복은 등록표의 `dup` 행이 문다)
+    dn_names "$TDK_KEY" "${1:-$CONV_TRK}" | LC_ALL=C sort -u > "$SBX/ds-n.txt"
+    sk_with "$TDP_TOKEN" "${2:-$ROOT}" > "$SBX/ds-h.txt"; sk_with '`rd-' "${2:-$ROOT}" > "$SBX/ds-r.txt"
+    _dsa=$(LC_ALL=C comm -3 "$SBX/ds-h.txt" "$SBX/ds-n.txt" | grep -c .)
+    _dsb=$(LC_ALL=C comm -23 "$SBX/ds-r.txt" "$SBX/ds-n.txt" | grep -c .)
+    echo $((_dsa + _dsb))
+}
+rc_files() { # <디렉터리> → 기록 파일 이름 한 줄씩(`README.md`와 점으로 시작하는 이름 제외 · 한 단계)
+    for _rcf in "$1"/*; do [ -f "$_rcf" ] || continue; _rcn=${_rcf##*/}; [ "$_rcn" = README.md ] || printf '%s\n' "$_rcn"; done | LC_ALL=C sort -u
+}
+rc_names() { # <README 경로> → 백틱 구획 가운데 기록 파일 이름 꼴(영숫자 · 점 · 밑줄 · 붙임표만이고 `.json` 또는 `.txt`로 끝난다)인 것(서로 다른 것) 한 줄씩
+    LC_ALL=C awk -v q='`' '{ sub(/\r$/, ""); n = split($0, a, q); for (i = 2; i <= n; i += 2) { v = a[i]; if (v ~ /^[A-Za-z0-9._-]+$/ && (v ~ /\.json$/ || v ~ /\.txt$/)) print v } }' "$1" | LC_ALL=C sort -u
+}
+rc_readme_bad() { # [디렉터리 — 없으면 `tracker-record-dirs:`가 든 디렉터리 전부] → README가 없는 디렉터리의 수 + 기록 파일 이름 집합과 README 이름 집합의 대칭차
+    if [ -n "${1:-}" ]; then printf '%s\n' "$1"; else dn_names "$RCD_KEY" "$CONV_TRK" | while IFS= read -r _rcd; do [ -n "$_rcd" ] && printf '%s\n' "$ROOT/$_rcd"; done; fi > "$SBX/rc-d.txt"
+    _rcb=0
+    while IFS= read -r _rcd; do [ -n "$_rcd" ] || continue
+        if [ ! -f "$_rcd/README.md" ]; then _rcb=$((_rcb + 1)); continue; fi
+        rc_files "$_rcd" > "$SBX/rc-f.txt"; rc_names "$_rcd/README.md" > "$SBX/rc-t.txt"
+        _rcb=$((_rcb + $(LC_ALL=C comm -3 "$SBX/rc-f.txt" "$SBX/rc-t.txt" | grep -c .)))
+    done < "$SBX/rc-d.txt"
+    echo "$_rcb"
+}
+rc_fixture() { # <addfile|addtoken> → 선언된 첫 기록 디렉터리의 사본(addfile: README에 없는 파일 하나 · addtoken: 파일이 없는 이름 한 줄)
+    _rxf="$SBX/rcfx-$1"; rm -rf "$_rxf"; mkdir -p "$_rxf"
+    _rxs=$(dn_names "$RCD_KEY" "$CONV_TRK" | head -1)
+    [ -n "$_rxs" ] && [ -d "$ROOT/$_rxs" ] && cp -R "$ROOT/$_rxs/." "$_rxf/"
+    case $1 in
+        addfile) printf '%s\n' '{}' > "$_rxf/zz-fixture.json" ;;
+        addtoken) printf '%s\n' 'x `zz-fixture.txt` x' >> "$_rxf/README.md" ;;
+    esac
+    printf '%s' "$_rxf"
+}
+tk_fixture() { # <모드> → 조각 사본(실제 파일을 건드리지 않는다). 모드 — ghdrop(둘째 어댑터 표의 첫 rd- 행을 지운다) · moverow(첫 어댑터 표의 첫 rd- 행을 둘째 표로 옮긴다) ·
+    # dropmark(둘째 어댑터 표지를 지운다) · addmark(선언에 없는 이름의 표지와 행을 더한다) · in-{first|second}-{tight|indent|bare}(그 표의 첫 rd- 행 뒤에 선언 밖 이름의 행을 그 꼴로 더한다) ·
+    # dtdrop(판별 절차 표의 첫 td- 행을 지운다) · dtadd(그 표에 선언 밖 갈래의 행을 더한다) · dtreason(그 표에서 첫 알림 사유 토큰을 선언 밖 이름으로 바꾼다)
+    _tkf="$SBX/conv-tk-$1.md"
+    _tk1=$(dn_names "$ADP_KEY" "$CONV_TRK" | sed -n 1p); _tk2=$(dn_names "$ADP_KEY" "$CONV_TRK" | sed -n 2p); _tkr=$(dn_names "$TLR_KEY" "$CONV_TRK" | sed -n 1p)
+    LC_ALL=C awk -v mode="$1" -v m1="$ADP_MARK$_tk1 -->" -v m2="$ADP_MARK$_tk2 -->" -v md="$TDT_MARK" -v q='`' -v rs="$_tkr" '
+        function trim(s) { sub(/\r$/, "", s); sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+        function isrow(s, p,   t, j, c) { t = trim(s); if (substr(t, 1, 1) != "|") return 0; t = substr(t, 2); j = index(t, "|"); if (j == 0) return 0; c = substr(t, 1, j - 1); gsub(/[ \t`]/, "", c); return (substr(c, 1, length(p)) == p) }
+        BEGIN { if (mode ~ /^in-/) { n = split(mode, mm, "-"); tgt = (mm[2] == "first") ? "1" : "2"; shape = mm[3] } }
+        { u = trim($0)
+          if (u == m1) cur = "1"; else if (u == m2) cur = "2"; else if (u == md) cur = "d"
+          if (mode == "dropmark" && u == m2 && !done) { done = 1; next }
+          if (mode == "ghdrop" && cur == "2" && !done && isrow($0, "rd-")) { done = 1; next }
+          if (mode == "moverow" && cur == "1" && !hd && isrow($0, "rd-")) { held = $0; hd = 1; next }
+          if (mode == "moverow" && cur == "2" && hd && !done && isrow($0, "rd-")) { print; print held; done = 1; next }
+          if (mode ~ /^in-/ && cur == tgt && !done && isrow($0, "rd-")) { print
+              if (shape == "tight") print "|" q "rd-zz-fixture" q "| x |"; else if (shape == "indent") print "  | " q "rd-zz-fixture" q " | x |"; else print "| rd-zz-fixture | x |"
+              done = 1; next }
+          if (mode == "dtdrop" && cur == "d" && !done && isrow($0, "td-")) { done = 1; next }
+          if (mode == "dtadd" && cur == "d" && !done && isrow($0, "td-")) { print; print "| " q "td-zz-fixture" q " | x | x | x |"; done = 1; next }
+          if (mode == "dtreason" && cur == "d" && !done && rs != "" && (i = index($0, q rs q)) > 0) { $0 = substr($0, 1, i - 1) q "tl-zz-fixture" q substr($0, i + length(rs) + 2); done = 1 }
+          print }
+        END { if (mode == "addmark") { print "<!-- tracker-adapter:zz-fixture -->"; print ""; print "| " q "rd-zz-fixture" q " | x |" } }' "$CONV_TRK" > "$_tkf"
+    printf '%s' "$_tkf"
 }
 # === Part A — 감지 임계값 (detection threshold) =========================
 
@@ -2006,7 +2178,7 @@ chk "F60: 통제 - 선언 줄 머리 · 토큰 사이 탭 사본에서 꼬리 �
 # 선언 위생은 등록표 행(`F83`~`F90`)이 내고, 여기는 추출 positive-control 하나 · 표 대응 · 소비 · 박힌 경로 · 연산 소속의 본 검사 다섯 · 통제 넷이다.
 # 통제는 차이를 묻는다(`control-reads-delta`) — 조각 사본과 스킬 루트 사본에 한 가지만 바꿔 판정 값이 하나 느는지 본다.
 chk "F91: 읽기 항목 추출 positive-control(이름 · 표 행 · 소비 토큰 · 경로 스킬 · 경로 선언 · 단계 토큰 · 연산 이름이 각각 1 이상)" "$([ "$(dn_names "$RDI_KEY" "$CONV_TRK" | grep -c .)" -ge 1 ] && [ "$(rd_rows | grep -c .)" -ge 1 ] && [ "$(rd_tokens | grep -c .)" -ge 1 ] && [ "$(rd_path_skills | grep -c .)" -ge 1 ] && [ "$(dn_names "$RDS_KEY" "$CONV_TRK" | grep -c .)" -ge 1 ] && [ "$(dn_names "$RDP_KEY" "$CONV_TRK" | grep -c .)" -ge 1 ] && [ "$(dn_names "$RDO_KEY" "$CONV_TRK" | grep -c .)" -ge 1 ] && echo ok || echo no)" "ok"
-chk "F92: 본 검사 - 읽기 항목 이름마다 로컬 문서 어댑터 표의 행이 정확히 하나이고 선언 밖 이름의 행이 없다" "$(rd_table_bad)" "0"
+chk "F92: 본 검사 - 선언된 어댑터의 표마다 읽기 항목 이름의 행이 정확히 하나이고 선언 밖 이름의 행 · 표 밖의 rd- 행이 없다" "$(rd_table_bad)" "0"
 chk "F93: 본 검사 - 스킬 문서와 규약 본체의 rd- 토큰이 전부 선언된 읽기 항목이다" "$(rd_stray)" "0"
 chk "F94: 본 검사 - 읽기 항목 이름마다 소비처가 하나 이상 있다" "$(rd_unused)" "0"
 chk "F95: 본 검사 - 계획 문서 경로를 적은 스킬이 tracker-path-sites가 든 스킬과 같은 집합이고 분류가 셋 안이다" "$(rd_site_bad)" "0"
@@ -2018,6 +2190,21 @@ _rdb95=$(rd_site_bad)
 chk "F99: 통제 - 선언에 없는 스킬에 계획 문서 경로 한 줄을 더한 루트 사본 · 경로 선언에서 스킬 하나를 지운 조각 사본에서 어긋남이 하나씩 는다" "$(( $(rd_site_bad "" "$(rd_root_fixture path)") - _rdb95 ))|$(( $(rd_site_bad "$(rd_conv_fixture dropsite)") - _rdb95 ))" "1|1"
 chk "F100: 통제 - 단계 쓰기 선언의 연산 하나를 선언 밖 이름으로 바꾼 조각 사본 · 단계 이름 하나를 스킬이 아닌 이름으로 바꾼 사본에서 어긋남이 하나씩 는다" "$(( $(rd_phase_bad "$(rd_conv_fixture badop)") - $(rd_phase_bad) ))|$(( $(rd_phase_bad "$(rd_conv_fixture badphase)") - $(rd_phase_bad) ))" "1|1"
 chk "F101: 통제 - 선언 밖 이름의 행을 다른 꼴 셋(첫 세로줄 뒤 공백 없음 · 앞 공백 · 백틱 없음)으로 더한 조각 사본마다 어긋남이 하나씩 는다" "$(( $(rd_table_bad "$(rd_conv_fixture rowtight)") - _rdb92 ))|$(( $(rd_table_bad "$(rd_conv_fixture rowindent)") - _rdb92 ))|$(( $(rd_table_bad "$(rd_conv_fixture rowbare)") - _rdb92 ))" "1|1|1"
+# (F102~F136 · M99) **판별 · 어댑터 표 · 응답 보관** — 어댑터 표가 둘이 되어 `F92`가 표 단위로 묻는다(위 `rd_table_bad`). 선언 위생은 등록표 행(`F102`~`F124`)이 내고,
+# 여기는 추출 positive-control 하나 · 본 검사 여섯 · 통제 다섯이다. 통제는 차이를 묻는다(`control-reads-delta`).
+chk "F125: 판별 · 어댑터 · 보관 추출 positive-control(어댑터 이름 · 어댑터 표지 · 판별 절차 표 행 · 표의 사유 토큰 · 판별 스킬 선언 · 포인터를 든 스킬 · 보관 디렉터리 · 그 기록 파일 · README의 이름이 각각 1 이상)" "$([ "$(dn_names "$ADP_KEY" "$CONV_TRK" | grep -c .)" -ge 1 ] && [ "$(ad_marks | grep -c .)" -ge 1 ] && [ "$(tb_rows "$TDT_MARK" td- | grep -c .)" -ge 1 ] && [ "$(dt_reasons | grep -c .)" -ge 1 ] && [ "$(dn_names "$TDK_KEY" "$CONV_TRK" | grep -c .)" -ge 1 ] && [ "$(sk_with "$TDP_TOKEN" | grep -c .)" -ge 1 ] && [ "$(dn_names "$RCD_KEY" "$CONV_TRK" | grep -c .)" -ge 1 ] && [ "$(rc_files "$ROOT/$(dn_names "$RCD_KEY" "$CONV_TRK" | sed -n 1p)" | grep -c .)" -ge 1 ] && [ "$(rc_names "$ROOT/$(dn_names "$RCD_KEY" "$CONV_TRK" | sed -n 1p)/README.md" | grep -c .)" -ge 1 ] && echo ok || echo no)" "ok"
+chk "F126: 본 검사 - 선언된 어댑터 이름마다 어댑터 표지가 정확히 하나이고 선언에 없는 이름의 표지가 없다" "$(ad_mark_bad)" "0"
+chk "F127: 본 검사 - 판별 절차 표지가 하나이고 판별 갈래 이름마다 그 표의 행이 정확히 하나이며 선언 밖 갈래의 행이 없다" "$(dt_table_bad)" "0"
+chk "F128: 본 검사 - 판별 절차 표의 tl- 토큰 집합이 tracker-local-reasons의 이름 집합과 같다" "$(dt_reason_bad)" "0"
+chk "F129: 본 검사 - 판별 포인터를 든 스킬이 tracker-detect-sites가 든 스킬과 같은 집합이고 rd- 토큰을 든 스킬이 모두 거기 든다" "$(ds_site_bad)" "0"
+chk "F130: 본 검사 - 스킬 문서의 td- · tl- 토큰이 전부 선언된 판별 갈래 · 알림 사유다" "$(dx_stray)" "0"
+chk "F131: 본 검사 - tracker-record-dirs가 든 디렉터리마다 기록 파일 이름과 README가 든 이름이 같은 집합이다" "$(rc_readme_bad)" "0"
+_rdb126=$(ad_mark_bad)
+chk "F132: 통제 - 둘째 어댑터 표의 행 하나를 지운 사본 · 첫 표의 행 하나를 둘째 표로 옮긴 사본에서 표 어긋남이 1 · 2 늘고, 둘째 표지를 지운 사본 · 선언 밖 이름의 표지를 더한 사본에서 표지 어긋남이 하나씩 는다" "$(( $(rd_table_bad "$(tk_fixture ghdrop)") - _rdb92 ))|$(( $(rd_table_bad "$(tk_fixture moverow)") - _rdb92 ))|$(( $(ad_mark_bad "$(tk_fixture dropmark)") - _rdb126 ))|$(( $(ad_mark_bad "$(tk_fixture addmark)") - _rdb126 ))" "1|2|1|1"
+chk "F133: 통제 - 선언 밖 이름의 행을 다른 꼴 셋으로 두 어댑터 표 각각의 안에 더한 사본마다 어긋남이 하나씩 는다" "$(( $(rd_table_bad "$(tk_fixture in-first-tight)") - _rdb92 ))|$(( $(rd_table_bad "$(tk_fixture in-first-indent)") - _rdb92 ))|$(( $(rd_table_bad "$(tk_fixture in-first-bare)") - _rdb92 ))|$(( $(rd_table_bad "$(tk_fixture in-second-tight)") - _rdb92 ))|$(( $(rd_table_bad "$(tk_fixture in-second-indent)") - _rdb92 ))|$(( $(rd_table_bad "$(tk_fixture in-second-bare)") - _rdb92 ))" "1|1|1|1|1|1"
+chk "F134: 통제 - 판별 절차 표의 행 하나를 지운 사본 · 선언 밖 갈래의 행을 더한 사본에서 어긋남이 하나씩 늘고, 사유 토큰 하나를 선언 밖 이름으로 바꾼 사본에서 사유 대칭차가 둘 는다" "$(( $(dt_table_bad "$(tk_fixture dtdrop)") - $(dt_table_bad) ))|$(( $(dt_table_bad "$(tk_fixture dtadd)") - $(dt_table_bad) ))|$(( $(dt_reason_bad "$(tk_fixture dtreason)") - $(dt_reason_bad) ))" "1|1|2"
+chk "F135: 통제 - 판별 포인터를 지운 스킬 루트 사본 · 판별 선언에 없는 스킬이 rd- 토큰을 든 루트 사본 · 선언에 없는 td- 토큰을 든 루트 사본에서 어긋남이 하나씩 는다" "$(( $(ds_site_bad "" "$(rd_root_fixture dropptr)") - $(ds_site_bad) ))|$(( $(ds_site_bad "" "$(rd_root_fixture rdnodetect)") - $(ds_site_bad) ))|$(( $(dx_stray "" "$(rd_root_fixture tdstray)") - $(dx_stray) ))" "1|1|1"
+chk "F136: 통제 - README에 없는 파일을 더한 보관 디렉터리 사본 · 파일이 없는 이름을 README에 더한 사본에서 어긋남이 하나씩 는다" "$(( $(rc_readme_bad "$(rc_fixture addfile)") - $(rc_readme_bad) ))|$(( $(rc_readme_bad "$(rc_fixture addtoken)") - $(rc_readme_bad) ))" "1|1"
 fi
 # === Part G — 상호참조 무결성(M34 · M35에서 규약 문서 **집합**으로 일반화) ====
 # (M34) Part F가 문서의 **자기서술**을 집행한다면, Part G는 문서 **사이를 잇는 참조**를 집행한다 —
