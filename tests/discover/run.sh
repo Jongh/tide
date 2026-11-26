@@ -525,6 +525,14 @@ F|F79|count|CONV_TRK|tracker-labels:|tracker-labels 선언 줄 정확히 1개
 F|F80|seps|CONV_TRK|tracker-labels:|tracker-labels 선언 줄 꼬리에 금지 구분자 0건
 F|F81|count|CONV_TRK|tracker-phase-writes:|tracker-phase-writes 선언 줄 정확히 1개
 F|F82|seps|CONV_TRK|tracker-phase-writes:|tracker-phase-writes 선언 줄 꼬리에 금지 구분자 0건
+F|F83|count|CONV_TRK|tracker-read-items:|tracker-read-items 선언 줄 정확히 1개
+F|F84|seps|CONV_TRK|tracker-read-items:|tracker-read-items 선언 줄 꼬리에 금지 구분자 0건
+F|F85|dup|CONV_TRK|tracker-read-items:|본 검사 - 읽기 항목 이름이 유일하다
+F|F86|def|CONV_TRK|tracker-read-items:|본 검사 - 읽기 항목 이름마다 정의 항목이 정확히 하나
+F|F87|orphan|CONV_TRK|tracker-read-items:|본 검사 - 읽기 항목 정의 항목마다 선언된 이름이 있다(고아 정의 0)
+F|F88|order|CONV_TRK|tracker-read-items:|본 검사 - 읽기 항목 정의 항목의 순서가 선언의 이름 순서와 같다
+F|F89|count|CONV_TRK|tracker-path-sites:|tracker-path-sites 선언 줄 정확히 1개
+F|F90|seps|CONV_TRK|tracker-path-sites:|tracker-path-sites 선언 줄 꼬리에 금지 구분자 0건
 R|R1|count|CONV|coverage-bookkeeping:|coverage-bookkeeping 선언 줄 정확히 1개
 S|S1|count|CONV_REL|push-availability:|push-availability 선언 줄 정확히 1개
 S|S2|count|CONV_REL|terminal-state:|terminal-state 선언 줄 정확히 1개
@@ -734,6 +742,102 @@ cover_fixture() { # <noid|empty|oneside|oneside-src> → 등록표 사본(실제
             LC_ALL=C awk -v p='Chk "F29:' '{ t = $0; sub(/^[ \t]+/, "", t); if (substr(t, 1, length(p)) == p) next; print }' "$RUN_PS1" > "$SBX/cov-fx-ps1.txt"
             printf '%s' "$SBX/cov-fx-ps1.txt" ;;
     esac
+}
+# --- 읽기 항목 판정 (M98 · E5 사이클 배분의 「읽기 경로 모으기」) ---------------------------
+# 트래커 계약 조각(`docs/conventions-tracker.md`)의 `tracker-read-items:`가 스킬이 계획을 읽을 때 쓰는 이름을 들고, 같은 조각의 「로컬 문서
+# 어댑터」 표가 이름마다 읽는 법을 든다. 묻는 것은 넷이다 — 표의 행이 선언과 일대일인가(`rd_table_bad`) · 소비처(스킬 문서와 규약 본체)의
+# 백틱 `rd-` 토큰이 전부 선언된 이름이고 선언된 이름마다 소비처가 있는가(`rd_stray` · `rd_unused`) · 계획 문서 경로를 적은 스킬이
+# `tracker-path-sites:`가 든 스킬과 같은 집합인가(`rd_site_bad`) · `tracker-phase-writes:`의 연산 토큰이 `tracker-ops:`의 이름이고 단계 이름이 `skills/` 디렉터리 이름인가(`rd_phase_bad`).
+# **무는 대상 집합** — 스킬 문서는 `skills/{이름}/*.md`다(한 단계 깊이 · 소문자 확장자 `.md` · 점으로 시작하는 이름 제외). 소비처는 그 파일들과
+# `docs/conventions.md` 하나다(조각 자신은 선언처라 소비처가 아니다). 경로 판정은 줄에 `docs/milestones` 또는 `docs/epics`가 글자 그대로 있는가만
+# 본다 — 스킬 단위이고 줄 수는 세지 않는다. 헬퍼는 파트 가드 밖에서 정의한다(`rf-60`).
+RDI_KEY='tracker-read-items:'
+RDS_KEY='tracker-path-sites:'
+RDO_KEY='tracker-ops:'
+RDP_KEY='tracker-phase-writes:'
+rd_rows() { # [조각] → 표 행의 항목 이름 한 줄씩. 행은 앞 공백 · 탭을 벗긴 줄이 `|`로 시작하는 줄이고, 이름은 첫 칸에서 공백 · 탭 · 백틱을 벗긴 것이 `rd-`로 시작할 때의 그 값이다(조각 전체를 본다 — 표 하나에 한정하지 않는다)
+    LC_ALL=C awk '{ sub(/\r$/, ""); t = $0; sub(/^[ \t]+/, "", t); if (substr(t, 1, 1) != "|") next; t = substr(t, 2); j = index(t, "|"); if (j == 0) next; c = substr(t, 1, j - 1); gsub(/[ \t`]/, "", c); if (substr(c, 1, 3) == "rd-") print c }' "${1:-$CONV_TRK}"
+}
+rd_table_bad() { # [조각] → 표 행이 정확히 하나가 아닌 선언 이름의 수 + 선언에 없는 이름을 든 행의 수
+    dn_names "$RDI_KEY" "${1:-$CONV_TRK}" | LC_ALL=C sort -u > "$SBX/rd-tn.txt"; rd_rows "${1:-$CONV_TRK}" > "$SBX/rd-tr.txt"
+    _rtb=0
+    while IFS= read -r _rtv; do [ -n "$_rtv" ] || continue
+        [ "$(LC_ALL=C grep -cxF -- "$_rtv" "$SBX/rd-tr.txt")" = 1 ] || _rtb=$((_rtb + 1)); done < "$SBX/rd-tn.txt"
+    while IFS= read -r _rtv; do [ -n "$_rtv" ] || continue
+        LC_ALL=C grep -qxF -- "$_rtv" "$SBX/rd-tn.txt" || _rtb=$((_rtb + 1)); done < "$SBX/rd-tr.txt"
+    echo "$_rtb"
+}
+rd_skill_files() { # [루트] → 스킬 문서 경로 한 줄씩
+    for _rsf in "${1:-$ROOT}"/skills/*/*.md; do [ -f "$_rsf" ] && printf '%s\n' "$_rsf"; done
+}
+rd_tokens() { # [루트] → 소비처 안 백틱 `rd-…` 토큰(서로 다른 것) 한 줄씩
+    { rd_skill_files "${1:-$ROOT}"; printf '%s\n' "${1:-$ROOT}/docs/conventions.md"; } |
+        while IFS= read -r _rkp; do [ -f "$_rkp" ] && cat "$_rkp"; done |
+        LC_ALL=C awk -v q='`' '{ sub(/\r$/, ""); s = $0; while ((i = index(s, q "rd-")) > 0) { s = substr(s, i + 1); j = index(s, q); if (j == 0) break; print substr(s, 1, j - 1); s = substr(s, j + 1) } }' | LC_ALL=C sort -u
+}
+rd_stray() { # [조각] [루트] → 소비처의 `rd-` 토큰 중 선언에 없는 것의 수
+    dn_names "$RDI_KEY" "${1:-$CONV_TRK}" > "$SBX/rd-xn.txt"
+    rd_tokens "${2:-$ROOT}" | { _rx=0; while IFS= read -r _rxv; do [ -n "$_rxv" ] || continue
+        LC_ALL=C grep -qxF -- "$_rxv" "$SBX/rd-xn.txt" || _rx=$((_rx + 1)); done; echo "$_rx"; }
+}
+rd_unused() { # [조각] [루트] → 선언된 이름 중 소비처에 토큰이 없는 것의 수
+    rd_tokens "${2:-$ROOT}" > "$SBX/rd-ut.txt"
+    dn_names "$RDI_KEY" "${1:-$CONV_TRK}" | { _ru=0; while IFS= read -r _ruv; do [ -n "$_ruv" ] || continue
+        LC_ALL=C grep -qxF -- "$_ruv" "$SBX/rd-ut.txt" || _ru=$((_ru + 1)); done; echo "$_ru"; }
+}
+rd_path_skills() { # [루트] → 계획 문서 경로를 적은 스킬 문서가 있는 스킬 이름(서로 다른 것) 한 줄씩
+    rd_skill_files "${1:-$ROOT}" | while IFS= read -r _rpf; do
+        if LC_ALL=C grep -qE 'docs/(milestones|epics)' "$_rpf"; then _rpd=${_rpf%/*}; printf '%s\n' "${_rpd##*/}"; fi
+    done | LC_ALL=C sort -u
+}
+rd_site_bad() { # [조각] [루트] → 경로를 적은 스킬 집합과 선언의 스킬 집합의 대칭차 + 같은 스킬을 두 번 든 토큰 + 꼴이 `{스킬}={분류,…}`가 아니거나 분류가 셋(write signal cite) 밖인 토큰의 수
+    rd_path_skills "${2:-$ROOT}" > "$SBX/rd-ps.txt"
+    dn_names "$RDS_KEY" "${1:-$CONV_TRK}" > "$SBX/rd-pd.txt"
+    LC_ALL=C awk '{ i = index($0, "="); if (i > 0) print substr($0, 1, i - 1); else print }' "$SBX/rd-pd.txt" | LC_ALL=C sort -u > "$SBX/rd-pn.txt"
+    _rsb=$(LC_ALL=C comm -3 "$SBX/rd-ps.txt" "$SBX/rd-pn.txt" | grep -c .)
+    _rsd=$(( $(grep -c . "$SBX/rd-pd.txt") - $(grep -c . "$SBX/rd-pn.txt") ))
+    _rsc=$(LC_ALL=C awk '{ i = index($0, "="); if (i < 2 || i == length($0)) { c++; next }
+        n = split(substr($0, i + 1), a, ","); for (k = 1; k <= n; k++) if (a[k] != "write" && a[k] != "signal" && a[k] != "cite") { c++; break } } END { print c + 0 }' "$SBX/rd-pd.txt")
+    echo $((_rsb + _rsd + _rsc))
+}
+rd_skill_names() { # [루트] → `skills/` 바로 아래 디렉터리 이름 한 줄씩
+    for _rsn in "${1:-$ROOT}"/skills/*/; do [ -d "$_rsn" ] || continue; _rsn=${_rsn%/}; printf '%s\n' "${_rsn##*/}"; done
+}
+rd_phase_bad() { # [조각] [루트] → `tracker-phase-writes:` 토큰 중 `=`가 없거나, `=` 뒤 첫 `:` 앞의 연산이 `tracker-ops:`의 이름이 아니거나, `=` 앞의 이름이 `skills/` 디렉터리 이름이 아닌 것의 수(토큰 하나는 한 번만 센다)
+    dn_names "$RDO_KEY" "${1:-$CONV_TRK}" > "$SBX/rd-on.txt"; rd_skill_names "${2:-$ROOT}" > "$SBX/rd-sn.txt"
+    dn_names "$RDP_KEY" "${1:-$CONV_TRK}" | { _rp=0; while IFS= read -r _rpt; do [ -n "$_rpt" ] || continue
+        case $_rpt in *=*) _rpo=${_rpt#*=}; _rpo=${_rpo%%:*}; _rpl=${_rpt%%=*} ;; *) _rp=$((_rp + 1)); continue ;; esac
+        if ! LC_ALL=C grep -qxF -- "$_rpo" "$SBX/rd-on.txt"; then _rp=$((_rp + 1)); continue; fi
+        LC_ALL=C grep -qxF -- "$_rpl" "$SBX/rd-sn.txt" || _rp=$((_rp + 1)); done; echo "$_rp"; }
+}
+rd_conv_fixture() { # <droprow|addrow|rowtight|rowindent|rowbare|addname|dropsite|badop|badphase> → 조각 사본(실제 파일을 건드리지 않는다)
+    _rcf="$SBX/conv-trk-$1.md"
+    case $1 in
+        droprow) _rc1=$(dn_names "$RDI_KEY" "$CONV_TRK" | head -1)
+            LC_ALL=C awk -v p="| \`$_rc1\` " -v e="$_rc1" '{ if (e != "" && substr($0, 1, length(p)) == p) next; print }' "$CONV_TRK" > "$_rcf" ;;
+        addrow) { cat "$CONV_TRK"; printf '%s\n' '| `rd-zz-fixture` | x |'; } > "$_rcf" ;;
+        rowtight) { cat "$CONV_TRK"; printf '%s\n' '|`rd-zz-fixture`| x |'; } > "$_rcf" ;;
+        rowindent) { cat "$CONV_TRK"; printf '%s\n' '  | `rd-zz-fixture` | x |'; } > "$_rcf" ;;
+        rowbare) { cat "$CONV_TRK"; printf '%s\n' '| rd-zz-fixture | x |'; } > "$_rcf" ;;
+        addname) LC_ALL=C awk -v kc="- \`$RDI_KEY\`" '{ t = $0; sub(/^[ \t]+/, "", t); if (substr(t, 1, length(kc)) == kc) { sub(/\r$/, ""); $0 = $0 " rd-zz-fixture" } print }' "$CONV_TRK" > "$_rcf" ;;
+        dropsite) _rc1=$(dn_names "$RDS_KEY" "$CONV_TRK" | head -1)
+            LC_ALL=C awk -v kc="- \`$RDS_KEY\`" -v o=" $_rc1" '{ t = $0; sub(/^[ \t]+/, "", t); if (o != " " && substr(t, 1, length(kc)) == kc) { i = index($0, o); if (i > 0) $0 = substr($0, 1, i - 1) substr($0, i + length(o)) } print }' "$CONV_TRK" > "$_rcf" ;;
+        badop) _rc1=$(dn_names "$RDP_KEY" "$CONV_TRK" | head -1)
+            LC_ALL=C awk -v kc="- \`$RDP_KEY\`" -v o=" $_rc1" -v n=" ${_rc1%%=*}=zz-op" '{ t = $0; sub(/^[ \t]+/, "", t); if (o != " " && substr(t, 1, length(kc)) == kc) { i = index($0, o); if (i > 0) $0 = substr($0, 1, i - 1) n substr($0, i + length(o)) } print }' "$CONV_TRK" > "$_rcf" ;;
+        badphase) _rc1=$(dn_names "$RDP_KEY" "$CONV_TRK" | head -1)
+            LC_ALL=C awk -v kc="- \`$RDP_KEY\`" -v o=" $_rc1" -v n=" zz-phase=${_rc1#*=}" '{ t = $0; sub(/^[ \t]+/, "", t); if (o != " " && substr(t, 1, length(kc)) == kc) { i = index($0, o); if (i > 0) $0 = substr($0, 1, i - 1) n substr($0, i + length(o)) } print }' "$CONV_TRK" > "$_rcf" ;;
+    esac
+    printf '%s' "$_rcf"
+}
+rd_root_fixture() { # <stray|path> → 스킬 디렉터리와 규약 본체의 사본 루트에 스킬 문서 하나를 더한 것(stray: 선언에 없는 `rd-` 토큰 · path: 계획 문서 경로 한 줄)
+    _rrf="$SBX/rdroot-$1"; rm -rf "$_rrf"; mkdir -p "$_rrf/docs" "$_rrf/skills"
+    cp -R "$ROOT/skills/." "$_rrf/skills/"; cp "$CONV" "$_rrf/docs/conventions.md"
+    mkdir -p "$_rrf/skills/zz-fixture"
+    case $1 in
+        stray) printf '%s\n' 'x `rd-zz-stray` x' > "$_rrf/skills/zz-fixture/template.md" ;;
+        path)  printf '%s\n' 'x docs/milestones/M1.md x' > "$_rrf/skills/zz-fixture/template.md" ;;
+    esac
+    printf '%s' "$_rrf"
 }
 # === Part A — 감지 임계값 (detection threshold) =========================
 
@@ -1898,6 +2002,22 @@ nc_inner_same() { # <head|mid> → 꼬리 읽기 · 이름 추출이 원본과 �
     if [ "$(decl_tail "$_nci" "$NCC_KEY")" = "$(decl_tail "$CONV" "$NCC_KEY")" ] && [ "$(dn_names "$NCC_KEY" "$_nci")" = "$(dn_names "$NCC_KEY")" ] && [ "$(decl_tail_raw "$_nci" "$NCC_KEY")" != "$(decl_tail_raw "$CONV" "$NCC_KEY")" ]; then echo same; else echo differ; fi
 }
 chk "F60: 통제 - 선언 줄 머리 · 토큰 사이 탭 사본에서 꼬리 읽기와 이름 추출이 원본과 같다(원문 꼬리는 다르다)" "$(nc_inner_same head)|$(nc_inner_same mid)" "same|same"
+# (F91~F100 · M98) **읽기 항목** — 스킬이 계획을 읽는 자리를 트래커 계약의 읽기 항목 이름으로 모았다(E5 사이클 배분의 「읽기 경로 모으기」).
+# 선언 위생은 등록표 행(`F83`~`F90`)이 내고, 여기는 추출 positive-control 하나 · 표 대응 · 소비 · 박힌 경로 · 연산 소속의 본 검사 다섯 · 통제 넷이다.
+# 통제는 차이를 묻는다(`control-reads-delta`) — 조각 사본과 스킬 루트 사본에 한 가지만 바꿔 판정 값이 하나 느는지 본다.
+chk "F91: 읽기 항목 추출 positive-control(이름 · 표 행 · 소비 토큰 · 경로 스킬 · 경로 선언 · 단계 토큰 · 연산 이름이 각각 1 이상)" "$([ "$(dn_names "$RDI_KEY" "$CONV_TRK" | grep -c .)" -ge 1 ] && [ "$(rd_rows | grep -c .)" -ge 1 ] && [ "$(rd_tokens | grep -c .)" -ge 1 ] && [ "$(rd_path_skills | grep -c .)" -ge 1 ] && [ "$(dn_names "$RDS_KEY" "$CONV_TRK" | grep -c .)" -ge 1 ] && [ "$(dn_names "$RDP_KEY" "$CONV_TRK" | grep -c .)" -ge 1 ] && [ "$(dn_names "$RDO_KEY" "$CONV_TRK" | grep -c .)" -ge 1 ] && echo ok || echo no)" "ok"
+chk "F92: 본 검사 - 읽기 항목 이름마다 로컬 문서 어댑터 표의 행이 정확히 하나이고 선언 밖 이름의 행이 없다" "$(rd_table_bad)" "0"
+chk "F93: 본 검사 - 스킬 문서와 규약 본체의 rd- 토큰이 전부 선언된 읽기 항목이다" "$(rd_stray)" "0"
+chk "F94: 본 검사 - 읽기 항목 이름마다 소비처가 하나 이상 있다" "$(rd_unused)" "0"
+chk "F95: 본 검사 - 계획 문서 경로를 적은 스킬이 tracker-path-sites가 든 스킬과 같은 집합이고 분류가 셋 안이다" "$(rd_site_bad)" "0"
+chk "F96: 본 검사 - tracker-phase-writes의 연산 토큰이 전부 tracker-ops의 이름이고 단계 이름이 전부 skills 디렉터리 이름이다" "$(rd_phase_bad)" "0"
+_rdb92=$(rd_table_bad)
+chk "F97: 통제 - 어댑터 표의 행 하나를 지운 조각 사본 · 선언 밖 이름의 행을 더한 사본에서 어긋남이 하나씩 는다" "$(( $(rd_table_bad "$(rd_conv_fixture droprow)") - _rdb92 ))|$(( $(rd_table_bad "$(rd_conv_fixture addrow)") - _rdb92 ))" "1|1"
+chk "F98: 통제 - 선언에 없는 rd- 토큰을 든 스킬 문서를 더한 루트 사본에서 잔재가 하나 늘고, 이름 하나를 더한 조각 사본에서 소비처 없는 이름이 하나 는다" "$(( $(rd_stray "" "$(rd_root_fixture stray)") - $(rd_stray) ))|$(( $(rd_unused "$(rd_conv_fixture addname)") - $(rd_unused) ))" "1|1"
+_rdb95=$(rd_site_bad)
+chk "F99: 통제 - 선언에 없는 스킬에 계획 문서 경로 한 줄을 더한 루트 사본 · 경로 선언에서 스킬 하나를 지운 조각 사본에서 어긋남이 하나씩 는다" "$(( $(rd_site_bad "" "$(rd_root_fixture path)") - _rdb95 ))|$(( $(rd_site_bad "$(rd_conv_fixture dropsite)") - _rdb95 ))" "1|1"
+chk "F100: 통제 - 단계 쓰기 선언의 연산 하나를 선언 밖 이름으로 바꾼 조각 사본 · 단계 이름 하나를 스킬이 아닌 이름으로 바꾼 사본에서 어긋남이 하나씩 는다" "$(( $(rd_phase_bad "$(rd_conv_fixture badop)") - $(rd_phase_bad) ))|$(( $(rd_phase_bad "$(rd_conv_fixture badphase)") - $(rd_phase_bad) ))" "1|1"
+chk "F101: 통제 - 선언 밖 이름의 행을 다른 꼴 셋(첫 세로줄 뒤 공백 없음 · 앞 공백 · 백틱 없음)으로 더한 조각 사본마다 어긋남이 하나씩 는다" "$(( $(rd_table_bad "$(rd_conv_fixture rowtight)") - _rdb92 ))|$(( $(rd_table_bad "$(rd_conv_fixture rowindent)") - _rdb92 ))|$(( $(rd_table_bad "$(rd_conv_fixture rowbare)") - _rdb92 ))" "1|1|1"
 fi
 # === Part G — 상호참조 무결성(M34 · M35에서 규약 문서 **집합**으로 일반화) ====
 # (M34) Part F가 문서의 **자기서술**을 집행한다면, Part G는 문서 **사이를 잇는 참조**를 집행한다 —

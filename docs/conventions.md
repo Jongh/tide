@@ -63,14 +63,14 @@ tide는 porpoise의 개발 방법론(마일스톤 → 구현 → 리뷰 → 릴�
 
   | 항목 | 무엇을 읽는가 |
   |---|---|
-  | `milestone` | `docs/milestones/M*.md` 중 **최대 번호** — 번호와 제목 |
+  | `milestone` | **최대 번호** 사이클 — 번호와 제목. 어디서 읽는지는 `docs/conventions-tracker.md`의 "트래커 계약" 절 읽기 항목 `rd-cycle-latest`가 정한다(M98) |
   | `impl-report` | `docs/reports/M{N}-impl.md` 존재 여부 — 있으면 개요의 **재작업 라운드(rework)** 값(없으면 0 — 판정 `불가` 갈래가 리뷰 쪽 값과 견준다 · M85) |
   | `review-report` | `docs/reports/M{N}-review.md` 존재 여부 — 있으면 **릴리즈 판정**(`가능`/`불가`)과 추천 버전, 계측 줄의 **재작업 라운드(rework)** 값(없으면 0) |
   | `version` | 버전 파일(`Cargo.toml`·`package.json`·`pyproject.toml`·`.claude-plugin/plugin.json` 등)의 현재 버전 |
   | `phase` | `.tide/phase`의 현재 값 (파일 없으면 "없음") |
   | `debug-report` | `docs/reports/debug-*.md` 중 **최대 번호** — 존재 여부와, 있으면 판정·추천 버전. **리뷰보고서와 동일한 판정 형식**이라 `review-report`와 같은 방식으로 읽는다 |
   | `debug-session` | `.tide/debug-session` 존재 여부 — 있으면 **열린 세션**이고 그 안의 한 줄이 활성 보고서 번호 (파일 없으면 "없음") |
-  | `open-epic` | `docs/epics/E*.md` 중 `status: open`인 것 — 있으면 **열린 줄기**와 그 에픽의 「속한 마일스톤」 마지막 항목. **에픽이 하나도 없으면 아무 것도 덧붙이지 않는다**(소음 0). 규약의 단일 원본은 위 "에픽 (방향) 층" 절 |
+  | `open-epic` | 열린 에픽(읽기 항목 `rd-epic-open` — 어디서 읽는지를 정하는 자리는 위 `milestone` 행이 가리키는 조각과 같다 · M98) — 있으면 **열린 줄기**와 그 에픽의 「속한 마일스톤」 마지막 항목. **에픽이 하나도 없으면 아무 것도 덧붙이지 않는다**(소음 0). 규약의 단일 원본은 위 "에픽 (방향) 층" 절 |
 
   - **전부 읽기 전용이다** — 이 항목을 조회하는 것이 파일·`.tide/phase`·git을 바꾸지 않는다.
   - **표시는 커맨드가 정한다**: `/tide:status`는 단일 레포 표로, `/tide:fleet`은 레포별 표로 낸다.
@@ -2433,7 +2433,7 @@ release 프리플라이트에서 사이트를 빌드한 **산출물 기준**으�
 ## 트래커 계약 (분리된 조각)
 
 사이클 계획을 이슈 트래커에 두는 **트래커 계약**의 이름 선언은 `docs/conventions-tracker.md`에 있다 — 규약 문서 집합의 둘째 조각이다(M97).
-방향과 근거는 에픽 `docs/epics/E5.md`가 들고, 아직 어떤 스킬도 그 선언을 소비하지 않는다(조각 요건 ③ 포인터).
+방향과 근거는 에픽 `docs/epics/E5.md`가 든다. 스킬이 소비하는 것은 읽기 항목(`tracker-read-items:`)뿐이고(M98), 판별 · 쓰기 · 대응 기록 · 유입은 아직 소비자가 없다(조각 요건 ③ 포인터).
 
 ## 단계별 금지 행위 요약
 
