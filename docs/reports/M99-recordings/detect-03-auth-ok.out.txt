@@ -1,0 +1,6 @@
+github.com
+  ✓ Logged in to github.com account placeholder1 (keyring)
+  - Active account: true
+  - Git operations protocol: https
+  - Token: TOKEN-MASKED
+  - Token scopes: SCOPES-MASKED

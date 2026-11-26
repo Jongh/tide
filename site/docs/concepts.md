@@ -24,7 +24,7 @@ release 커밋 하나로 모입니다. 해당 원칙은 프롬프트 지시에 �
   문서와(`처분`이 생겼을 때) 이월 원장의 처분 행, 사용자가 승인한 에픽 승격이 있을 때 그 에픽 본문 한 줄만 씁니다. `fleet-verify`는 verification-only이고,
   `kickoff`는 `.gitignore` 항목만 손댑니다. `fleet-cycle`은 자식 저장소의 phase만 씁니다.
 - `.gitignore` 대상은 `.tide/phase`와 `.tide/debug-session` 두 파일입니다. `.tide/` 전체가 대상이
-  아니므로 `.tide/deps`·`.tide/release-mode`는 커밋됩니다.
+  아니므로 `.tide/deps`·`.tide/release-mode`·`.tide/tracker`는 커밋됩니다.
 
 ## tide-guard hook
 

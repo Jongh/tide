@@ -22,11 +22,11 @@
 | `docs/reports/` | 완료보고서 `M{N}-impl.md`·리뷰보고서 `M{N}-review.md`·debug 보고서 `debug-{N}.md`(발견 우선 세션 산출물 — 번호는 마일스톤과 무관한 독립 수열)·회고 `retro.md`(최근) + `retro-archive.md`(과거 회고 분리·보존) |
 | `docs/conventions.md` | 단계별 규약 단일 원본 — **규약 문서 집합의 본체**(조각은 `docs/conventions-{주제}.md`, 발견 글롭 `docs/conventions*.md`) |
 | `docs/conventions-release.md` | 규약 조각 — 릴리즈 게시(gh) 모드. 사이트 `conventions-release.md`가 `pymdownx.snippets`로 본문(`[start:body]`) 인클루드 |
-| `docs/conventions-tracker.md` | 규약 조각 — 트래커 계약의 이름 선언(M97)과 읽기 항목 · 로컬 문서 어댑터 표(M98 — 스킬에서 계획 문서의 경로를 적어 읽던 자리가 이 이름으로 가리킨다. 경로 없이 읽는 자리는 그대로다). 사이트 `conventions-tracker.md`가 `pymdownx.snippets`로 본문(`[start:body]`) 인클루드 |
+| `docs/conventions-tracker.md` | 규약 조각 — 트래커 계약의 이름 선언(M97)과 읽기 항목 · 로컬 문서 어댑터 표(M98 — 스킬에서 계획 문서의 경로를 적어 읽던 자리가 이 이름으로 가리킨다), 판별 절차 · 연결 설정 `.tide/tracker` · 알림 사유 · GitHub 어댑터 표 · 응답 보관 절차(M99 — 스킬이 계획을 읽기 전에 판별을 하고, 경로 없이 읽던 자리도 스킬마다 한 문장이 같은 이름으로 묶는다. 쓰기는 아직 로컬 문서에만 한다). 사이트 `conventions-tracker.md`가 `pymdownx.snippets`로 본문(`[start:body]`) 인클루드 |
 | `docs/commands.md` | 커맨드 카탈로그 단일 원본 — 커맨드 **수·역할·인자·산출물·금지**의 선언처. 사이트 `commands.md`가 `pymdownx.snippets`로 본문(`[start:body]`) 인클루드 — `tests/discover` 가드가 카운트·셸·이름 완전성을 집행 |
 | `tests/` | 라이브 실증 하니스 (`multi-repo/`·`site-includes/` 등 — `run.sh`·`run.ps1`, 자동 러너 없는 도그푸딩 검증 수단). 발견·위상정렬·deps 파싱·BOM 제거 참조 구현은 `tests/lib/{encoding,discover,deps,toposort}.{sh,ps1}` 공유 단일 원본을 하니스가 source(트리 내 자기완결; source 순서 encoding→discover→deps→toposort) |
 | `site/` | MkDocs 사이트 (`mkdocs.yml`·`docs/` — 문서 사이트 빌드 입력). `conventions`·`conventions-release`·`conventions-tracker`·`orchestration`·`changelog`·`commands`는 저장소 원본을 `pymdownx.snippets`로 인클루드하는 **스니펫 셸**(수기 복제 아님) — `tests/site-includes`가 셸을 **발견**하므로 셸이 늘어도 러너를 고치지 않는다 |
-| `.tide/` | `phase`(로컬 상태 — `.gitignore` 대상, 커밋 안 함) + `debug-session`(열린 debug 세션의 활성 보고서 번호 한 줄 — 로컬 상태, `.gitignore` 대상) + `deps`(의존성 선언 — 커밋함) + `release-mode`(게시 모드 선호도 `pr`/`release` — `deps`와 동급으로 커밋함). gitignore 범위는 `.tide/`가 아니라 `.tide/phase`·`.tide/debug-session` 두 파일만 |
+| `.tide/` | `phase`(로컬 상태 — `.gitignore` 대상, 커밋 안 함) + `debug-session`(열린 debug 세션의 활성 보고서 번호 한 줄 — 로컬 상태, `.gitignore` 대상) + `deps`(의존성 선언 — 커밋함) + `release-mode`(게시 모드 선호도 `pr`/`release` — `deps`와 동급으로 커밋함) + `autonomy`(자율 진행 수준 — 커밋함) + `tracker`(트래커 연결 설정 한 줄 — 커밋함). gitignore 범위는 `.tide/`가 아니라 `.tide/phase`·`.tide/debug-session` 두 파일만 |
 | `.tide-fleet/` | 부모 레벨 통합 훅(`integration`) — fleet-verify가 읽는 cross-repo 검증 명령(옵트인). 숨김 디렉터리라 fleet 발견에서 제외 |
 
 ## 진입점 · 빌드/테스트
@@ -358,6 +358,7 @@ M20(에픽 마감)에서 회고 백로그의 이월·견고화 항목을 **각�
 | 회고 후속 두 행의 E2 승격(`rf-108` · `rf-93`) | M86-impl 후속 5 · M87-impl 후속 3 · M81-review 권장 1 | **에픽 승격(`E2`)(2026-11-19 · `ef-promote` · 사용자 승인)** — `rf-108`: 등록표 행의 판정 종류와 `cover` 주장의 기계 대조가 규약에 이름 선언과 값 선언을 가르는 꼴이 없어 막혀 있고, 근거 갱신 없이 일곱 회고 동안 열려 있었다. `rf-93`: 소개 문서 · 커맨드 카탈로그의 스킬 동작 재서술을 스킬과 대조하는 자리가 없고(재서술처 군집 일곱 사이클), 근거 갱신 없이 여섯 회고 동안 사이클이 집지 않았다. 둘 다 규약 · 스킬 구조의 문제라 E2가 받는다. E2 본문 `### 승격된 회고 행` 소절에 한 줄씩 있다 |
 | 회고 후속 `rf-106`의 E1 승격 | M85-impl 후속 1 · 2 · M85-review 권장 5 | **에픽 승격(`E1`)(2026-11-19 · `ef-promote` · 사용자 승인)** — 인자 없는 `/tide:cycle` 시작점이 판정 `불가`에서 재작업 라운드를 견주지 않는 오동작 경로이고, 근거 갱신 없이 여섯 회고 동안 사이클이 집지 않았다. 세션을 넘는 사이클 흐름의 시작점 문제라 E1이 받는다. E1 본문 `### 승격된 회고 행` 소절에 한 줄이 있다 |
 | 회고 후속 `rf-122`의 E4 승격 | M93-impl 후속 8 · M93-review 라운드 0 차단 2 | **에픽 승격(`E4`)(2026-11-25 · `ef-promote` · 사용자 승인)** — 엄격 awk 심을 하니스 sh 축에 붙이는 일이 사이클에 집히지 않은 채 근거 갱신 없이 다섯 회고 동안 열려 있었다. 심 아래 sh 실행이 약 30% 느려 붙일 자리와 비용을 정하는 것이 검증 시간의 문제라 E4가 받는다. E4 본문 `### 승격된 회고 행` 소절에 한 줄이 있다 |
+| 회고 후속 `rf-81`의 E2 승격 | M76-impl 후속 3 · M76-review 권장 1 · M80-review 사소 5 | **에픽 승격(`E2`)(2026-11-26 · `ef-promote` · 사용자 승인)** — 수를 다시 적는 편집을 무는 기계가 없어 선언 포인터로 고친 자리에 수가 되돌아와도 하니스가 초록이고, 근거 갱신 없이 다섯 회고 동안 사이클이 집지 않았다. 규약 문서 집합의 재서술을 선언과 대조하는 구조 문제라 E2가 받는다. E2 본문 `### 승격된 회고 행` 소절에 한 줄이 있다 |
 
 이로써 오케스트레이션 에픽의 잔여 후속은 fix/수용/환경-이월로 전부 종결됐고, **로드맵 항목 미반영은
 0**이다 — 백로그가 닫혔다. M26은 그 뒤 남아 있던 **코드성 잔여 두 건**(`strip_bom` 단일 원본화·mkdocs
