@@ -665,6 +665,8 @@ function GitInit($d) { New-Item -ItemType Directory -Force -Path $d | Out-Null; 
         if ($mode -eq 'stray') { $line = 'x ' + $bt + 'rd-zz-stray' + $bt + ' x' }
         if ($mode -eq 'rdnodetect') { $line = 'x ' + $bt + [string](@(DnNames $RDI_KEY $CONV_TRK) | Select-Object -First 1) + $bt + ' x' }
         if ($mode -eq 'tdstray') { $line = 'x ' + $bt + 'td-zz-stray' + $bt + ' x' }
+        if ($mode -eq 'tlstray') { $line = 'x ' + $bt + 'tl-zz-stray' + $bt + ' x' }   # (M100) an undeclared `tl-` token
+        if ($mode -eq 'ptrextra') { $line = 'x ' + $TDP_TOKEN + ' x' }                   # (M100) an undeclared skill holding the detection pointer
         [System.IO.File]::WriteAllLines((Join-Path $zd 'template.md'), [string[]]@($line), $enc)
         return $fx
     }
@@ -892,6 +894,10 @@ function GitInit($d) { New-Item -ItemType Directory -Force -Path $d | Out-Null; 
             $old = if (Test-Path -LiteralPath $rm) { [System.IO.File]::ReadAllText($rm) } else { '' }
             [System.IO.File]::WriteAllText($rm, ($old + "`n" + 'x ' + $bt + 'zz-fixture.txt' + $bt + ' x' + "`n"), $enc)
         }
+        if ($mode -eq 'noreadme') {   # (M100) a record directory without a README
+            $rm = Join-Path $fx 'README.md'
+            if (Test-Path -LiteralPath $rm) { Remove-Item -LiteralPath $rm -Force }
+        }
         return $fx
     }
     function TkFixture([string]$mode) {
@@ -936,7 +942,320 @@ function GitInit($d) { New-Item -ItemType Directory -Force -Path $d | Out-Null; 
             [void]$out.Add($l)
         }
         if ($mode -ceq 'addmark') { [void]$out.Add('<!-- tracker-adapter:zz-fixture -->'); [void]$out.Add(''); [void]$out.Add('| ' + $bt + 'rd-zz-fixture' + $bt + ' | x |') }
+        if ($mode -ceq 'dtmark2') { [void]$out.Add($TDT_MARK) }   # (M100) the detection table marker written once more
         [System.IO.File]::WriteAllLines($fx, [string[]]$out, (New-Object System.Text.UTF8Encoding($false)))
+        return $fx
+    }
+    # --- WRITE ITEMS (M100 / writes and closing, from the back half of the third E5 cycle allocation) ---------------------
+    # The fragment declares in `tracker-write-items:` the names skills use when they write the plan, and one write table per
+    # adapter (marker `<!-- tracker-write:{name} -->`) says how each name is written. `tracker-write-ranges:` gives every write
+    # item one range of the per-phase write ranges (the `to-write` ranges of `tracker-phase-writes:`), and
+    # `tracker-range-pending:` holds the ranges that have no write item yet. What is asked: write markers are one-to-one with
+    # the adapter declaration (WrMarkBad); in every write table the rows are one-to-one with the write-item declaration and no
+    # `wr-` row sits outside the tables (WrTableBad); the range mapping is closed (WrRangeBad); backticked `wr-` tokens in skill
+    # documents are declared names (WrStray); the range of a write item a skill holds is within that skill's (phase's) ranges
+    # (WrScopeBad); every write item is held by a skill (WrUnused); every skill holding a `wr-` token is in
+    # `tracker-detect-sites:` (WrDetectBad). The skill document set is the one of the read-item checks (RdSkillFiles). Consumers
+    # are the skill documents only -- the conventions body is not counted as a consumer of write items. Helpers live OUTSIDE
+    # the part guard (rf-60).
+    $WRI_KEY = 'tracker-write-items:'
+    $WRR_KEY = 'tracker-write-ranges:'
+    $WRP_KEY = 'tracker-range-pending:'
+    $WR_MARK = '<!-- tracker-write:'
+    function MkNames([string]$markPrefix, [string]$f = '') {
+        # -> names carried by marker lines of that prefix (one per marker; a name marked twice yields two entries).
+        $ws = [char[]]@([char]0x20, [char]0x09)
+        $out = New-Object System.Collections.Generic.List[string]
+        $path = RdTrk $f
+        if (-not (Test-Path -LiteralPath $path)) { return @() }
+        foreach ($l in [System.IO.File]::ReadAllLines($path)) {
+            $t = $l.Trim($ws)
+            if ($t.Length -gt ($markPrefix.Length + 4) -and $t.StartsWith($markPrefix, [System.StringComparison]::Ordinal) -and $t.EndsWith(' -->', [System.StringComparison]::Ordinal)) {
+                $n = $t.Substring($markPrefix.Length, $t.Length - $markPrefix.Length - 4)
+                if ($n.IndexOf(' ', [System.StringComparison]::Ordinal) -lt 0 -and $n.IndexOf([string][char]0x09, [System.StringComparison]::Ordinal) -lt 0) { [void]$out.Add($n) }
+            }
+        }
+        return @($out)
+    }
+    function WrMarkBad([string]$f = '') {
+        # -> declared adapters without exactly one write marker + write markers carrying an undeclared name.
+        $ns = OrdSet @(DnNames $ADP_KEY (RdTrk $f))
+        $marks = @(MkNames $WR_MARK $f)
+        $bad = 0
+        foreach ($n in $ns) { if (@($marks | Where-Object { $_ -ceq $n }).Count -ne 1) { $bad++ } }
+        foreach ($m in $marks) { if (-not $ns.Contains($m)) { $bad++ } }
+        return [string]$bad
+    }
+    function WrRows([string]$f = '') {
+        # -> first-cell values (spaces, tabs and backticks removed) of the fragment's table rows that start with `wr-`
+        #    (the row shape is the one of RdRows).
+        $bt = [string][char]0x60
+        $ws = [char[]]@([char]0x20, [char]0x09)
+        $out = New-Object System.Collections.Generic.List[string]
+        $path = RdTrk $f
+        if (-not (Test-Path -LiteralPath $path)) { return @() }
+        foreach ($l in [System.IO.File]::ReadAllLines($path)) {
+            $t = $l.TrimStart($ws)
+            if (-not $t.StartsWith('|', [System.StringComparison]::Ordinal)) { continue }
+            $t = $t.Substring(1)
+            $j = $t.IndexOf('|', [System.StringComparison]::Ordinal)
+            if ($j -lt 0) { continue }
+            $c = $t.Substring(0, $j).Replace(' ', '').Replace([string][char]0x09, '').Replace($bt, '')
+            if ($c.StartsWith('wr-', [System.StringComparison]::Ordinal)) { [void]$out.Add($c) }
+        }
+        return @($out)
+    }
+    function WrTableBad([string]$f = '') {
+        # -> per declared adapter write table (write-item names without exactly one row + rows carrying an undeclared name)
+        #    + `wr-` rows that sit in no declared adapter write table.
+        $ns = OrdSet @(DnNames $WRI_KEY (RdTrk $f))
+        $bad = 0
+        $inside = 0
+        foreach ($a in (OrdSet @(DnNames $ADP_KEY (RdTrk $f)))) {
+            $rows = @(TbRows ($WR_MARK + $a + ' -->') 'wr-' $f)
+            $inside += $rows.Count
+            foreach ($n in $ns) { if (@($rows | Where-Object { $_ -ceq $n }).Count -ne 1) { $bad++ } }
+            foreach ($r in $rows) { if (-not $ns.Contains($r)) { $bad++ } }
+        }
+        $all = @(WrRows $f).Count
+        if ($all -gt $inside) { $bad += ($all - $inside) }
+        return [string]$bad
+    }
+    function WrPhaseRanges([string]$f = '', [string]$phase = '') {
+        # -> distinct ranges of the `tracker-phase-writes:` tokens whose op is `to-write` (only that phase's when one is given).
+        $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($t in @(DnNames $RDP_KEY (RdTrk $f))) {
+            $i = $t.IndexOf('=', [System.StringComparison]::Ordinal)
+            if ($i -lt 1) { continue }
+            if ($phase -ne '' -and -not ($t.Substring(0, $i) -ceq $phase)) { continue }
+            $r = $t.Substring($i + 1)
+            $j = $r.IndexOf(':', [System.StringComparison]::Ordinal)
+            if ($j -lt 0) { continue }
+            if (-not ($r.Substring(0, $j) -ceq 'to-write')) { continue }
+            foreach ($x in $r.Substring($j + 1).Split(',')) { if ($x -ne '') { [void]$seen.Add($x) } }
+        }
+        return @($seen)
+    }
+    function WrRangeOf([string]$item, [string]$f = '') {
+        # -> the ranges mapped to that write item (several entries when there are several pairs).
+        $out = New-Object System.Collections.Generic.List[string]
+        foreach ($t in @(DnNames $WRR_KEY (RdTrk $f))) {
+            $i = $t.IndexOf('=', [System.StringComparison]::Ordinal)
+            if ($i -gt 0 -and ($t.Substring(0, $i) -ceq $item)) { [void]$out.Add($t.Substring($i + 1)) }
+        }
+        return @($out)
+    }
+    function WrRangeBad([string]$f = '') {
+        # -> write items without exactly one (distinct) mapped range + pair tokens not shaped `{name}={range}` or naming an
+        #    undeclared item + pair tokens whose range is not a `to-write` range of the phase declaration + the symmetric
+        #    difference of (phase `to-write` ranges no pair carries) and (`tracker-range-pending:`).
+        #    Ranges are counted as distinct values -- the same pair token written twice is the registry `dup` row's job.
+        $items = OrdSet @(DnNames $WRI_KEY (RdTrk $f))
+        $phase = OrdSet @(WrPhaseRanges $f)
+        $bad = 0
+        foreach ($n in $items) { if ((OrdSet @(WrRangeOf $n $f)).Count -ne 1) { $bad++ } }
+        $used = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+        foreach ($t in @(DnNames $WRR_KEY (RdTrk $f))) {
+            $i = $t.IndexOf('=', [System.StringComparison]::Ordinal)
+            if ($i -lt 1 -or $i -eq ($t.Length - 1)) { $bad++; continue }
+            if (-not $items.Contains($t.Substring(0, $i))) { $bad++; continue }
+            $r = $t.Substring($i + 1)
+            [void]$used.Add($r)
+            if (-not $phase.Contains($r)) { $bad++ }
+        }
+        $pend = OrdSet @(DnNames $WRP_KEY (RdTrk $f))
+        foreach ($p in $phase) { if (-not $used.Contains($p) -and -not $pend.Contains($p)) { $bad++ } }
+        foreach ($p in $pend) { if ($used.Contains($p) -or -not $phase.Contains($p)) { $bad++ } }
+        return [string]$bad
+    }
+    function SkTokensOf([string]$prefix, [string]$skill, [string]$skBase = '') {
+        # -> distinct backticked tokens starting with the prefix in that skill's documents.
+        if ($skBase -eq '') { $skBase = $ROOT }
+        $all = New-Object System.Collections.Generic.List[string]
+        $d = Join-Path $skBase ('skills/' + $skill)
+        if (-not (Test-Path -LiteralPath $d)) { return @() }
+        foreach ($x in @(Get-ChildItem -LiteralPath $d -File -Force -ErrorAction SilentlyContinue)) {
+            if ($x.Name.StartsWith('.', [System.StringComparison]::Ordinal)) { continue }
+            if (-not $x.Name.EndsWith('.md', [System.StringComparison]::Ordinal)) { continue }
+            foreach ($ln in [System.IO.File]::ReadAllLines($x.FullName)) { [void]$all.Add($ln) }
+        }
+        return @(BtTokens ([string[]]@($all)) $prefix)
+    }
+    function WrStray([string]$f = '', [string]$skBase = '') {
+        # -> skill `wr-` tokens that are not declared write items.
+        $ns = OrdSet @(DnNames $WRI_KEY (RdTrk $f))
+        $bad = 0
+        foreach ($t in @(SkTokens 'wr-' $skBase)) { if ($t -ne '' -and -not $ns.Contains($t)) { $bad++ } }
+        return [string]$bad
+    }
+    function WrUnused([string]$f = '', [string]$skBase = '') {
+        # -> declared write items with no token in the skill documents (the declaration is read as distinct names --
+        #    duplicates are the registry `dup` row's job).
+        $ts = OrdSet @(SkTokens 'wr-' $skBase)
+        $bad = 0
+        foreach ($n in (OrdSet @(DnNames $WRI_KEY (RdTrk $f)))) { if (-not $ts.Contains($n)) { $bad++ } }
+        return [string]$bad
+    }
+    function WrScopeBad([string]$f = '', [string]$skBase = '') {
+        # -> per skill, its declared `wr-` tokens that have no mapped range or whose range is not a `to-write` range of that
+        #    skill (phase). Undeclared tokens are WrStray's job and are skipped.
+        $items = OrdSet @(DnNames $WRI_KEY (RdTrk $f))
+        $bad = 0
+        foreach ($s in @(RdSkillNames $skBase)) {
+            $pr = OrdSet @(WrPhaseRanges $f $s)
+            foreach ($t in @(SkTokensOf 'wr-' $s $skBase)) {
+                if ($t -eq '' -or -not $items.Contains($t)) { continue }
+                $g = [string](@(WrRangeOf $t $f) | Select-Object -First 1)
+                if ($g -eq '' -or -not $pr.Contains($g)) { $bad++ }
+            }
+        }
+        return [string]$bad
+    }
+    function WrDetectBad([string]$f = '', [string]$skBase = '') {
+        # -> skills holding a backticked `wr-` token that are not in `tracker-detect-sites:`.
+        $ns = OrdSet @(DnNames $TDK_KEY (RdTrk $f))
+        $bad = 0
+        foreach ($s in @(SkWith (([string][char]0x60) + 'wr-') $skBase)) { if (-not $ns.Contains($s)) { $bad++ } }
+        return [string]$bad
+    }
+    function WtFixture([string]$mode) {
+        # <mode> -> a fragment copy (the real file is not touched). Modes -- wdrop (drop the first wr- row of the second write
+        # table) / wmove (move the first wr- row of the first write table into the second) / in-{tight|indent|bare} (add a row of
+        # an undeclared name in that shape after the first wr- row of the second write table) / wout (add one wr- row at the end
+        # of the fragment, outside the tables) / wdropmark (drop the second write marker) / waddmark (add only a write marker of
+        # an undeclared name).
+        $bt = [string][char]0x60
+        $ws = [char[]]@([char]0x20, [char]0x09)
+        $fx = Join-Path $sbx ('conv-wt-' + $mode + '.md')
+        $ad = @(DnNames $ADP_KEY $CONV_TRK)
+        $m1 = if ($ad.Count -ge 1) { $WR_MARK + $ad[0] + ' -->' } else { '' }
+        $m2 = if ($ad.Count -ge 2) { $WR_MARK + $ad[1] + ' -->' } else { '' }
+        $shape = ''
+        if ($mode.StartsWith('in-', [System.StringComparison]::Ordinal)) { $shape = $mode.Split('-')[1] }
+        $out = New-Object System.Collections.Generic.List[string]
+        $cur = ''; $done = $false; $held = ''; $hd = $false
+        foreach ($l in [System.IO.File]::ReadAllLines($CONV_TRK)) {
+            $u = $l.Trim($ws)
+            if ($m1 -ne '' -and $u -ceq $m1) { $cur = '1' } elseif ($m2 -ne '' -and $u -ceq $m2) { $cur = '2' }
+            $isWr = (TbIsRow $l) -and (TbFirstCell $l).StartsWith('wr-', [System.StringComparison]::Ordinal)
+            if ($mode -ceq 'wdropmark' -and $m2 -ne '' -and $u -ceq $m2 -and -not $done) { $done = $true; continue }
+            if ($mode -ceq 'wdrop' -and $cur -ceq '2' -and -not $done -and $isWr) { $done = $true; continue }
+            if ($mode -ceq 'wmove' -and $cur -ceq '1' -and -not $hd -and $isWr) { $held = $l; $hd = $true; continue }
+            if ($mode -ceq 'wmove' -and $cur -ceq '2' -and $hd -and -not $done -and $isWr) { [void]$out.Add($l); [void]$out.Add($held); $done = $true; continue }
+            if ($shape -ne '' -and $cur -ceq '2' -and -not $done -and $isWr) {
+                [void]$out.Add($l)
+                if ($shape -ceq 'tight') { [void]$out.Add('|' + $bt + 'wr-zz-fixture' + $bt + '| x |') }
+                elseif ($shape -ceq 'indent') { [void]$out.Add('  | ' + $bt + 'wr-zz-fixture' + $bt + ' | x |') }
+                else { [void]$out.Add('| wr-zz-fixture | x |') }
+                $done = $true; continue
+            }
+            [void]$out.Add($l)
+        }
+        if ($mode -ceq 'wout') { [void]$out.Add(''); [void]$out.Add('| ' + $bt + 'wr-zz-fixture' + $bt + ' | x |') }
+        if ($mode -ceq 'waddmark') { [void]$out.Add('<!-- tracker-write:zz-fixture -->') }
+        [System.IO.File]::WriteAllLines($fx, [string[]]$out, (New-Object System.Text.UTF8Encoding($false)))
+        return $fx
+    }
+    function WrrFixture([string]$mode) {
+        # <additem|duppair|badname|nopair|badrange|addrange|addpending> -> a fragment copy. additem (one name without a pair in
+        # the write-item declaration) / duppair (one more pair with a different range for the first item) / badname (a pair of an
+        # undeclared name) / nopair (a token without `=`) / badrange (one new item and its pair with a range the phase
+        # declaration does not have) / addrange (one more range on the first `to-write` token of the phase declaration) /
+        # addpending (one range the phase declaration does not have, added to `tracker-range-pending:`). Values are read from
+        # the declarations, so the count grows by one whatever the declarations hold.
+        $bt = [string][char]0x60
+        $ws = [char[]]@([char]0x20, [char]0x09)
+        $fx = Join-Path $sbx ('conv-wrr-' + $mode + '.md')
+        $n1 = [string](@(DnNames $WRI_KEY $CONV_TRK) | Select-Object -First 1)
+        $r1 = [string](@(WrRangeOf $n1 $CONV_TRK) | Select-Object -First 1)
+        $r2 = ''
+        foreach ($t in @(DnNames $WRR_KEY $CONV_TRK)) {
+            $i = $t.IndexOf('=', [System.StringComparison]::Ordinal)
+            if ($i -gt 0 -and -not ($t.Substring($i + 1) -ceq $r1)) { $r2 = $t.Substring($i + 1); break }
+        }
+        $p1 = ''
+        foreach ($t in @(DnNames $RDP_KEY $CONV_TRK)) {
+            $i = $t.IndexOf('=', [System.StringComparison]::Ordinal)
+            if ($i -gt 0 -and $t.Substring($i + 1).StartsWith('to-write:', [System.StringComparison]::Ordinal)) { $p1 = $t; break }
+        }
+        $ki = '- ' + $bt + $WRI_KEY + $bt; $kr = '- ' + $bt + $WRR_KEY + $bt; $kp = '- ' + $bt + $RDP_KEY + $bt; $kn = '- ' + $bt + $WRP_KEY + $bt
+        $out = New-Object System.Collections.Generic.List[string]
+        foreach ($l0 in [System.IO.File]::ReadAllLines($CONV_TRK)) {
+            $l = $l0
+            $t = $l.TrimStart($ws)
+            $isI = $t.StartsWith($ki, [System.StringComparison]::Ordinal); $isR = $t.StartsWith($kr, [System.StringComparison]::Ordinal)
+            $isP = $t.StartsWith($kp, [System.StringComparison]::Ordinal); $isN = $t.StartsWith($kn, [System.StringComparison]::Ordinal)
+            if ($mode -ceq 'additem' -and $isI) { $l = $l + ' wr-zz-fixture' }
+            if ($mode -ceq 'duppair' -and $isR) { $l = $l + ' ' + $n1 + '=' + $r2 }
+            if ($mode -ceq 'badname' -and $isR) { $l = $l + ' wr-zz-fixture=' + $r2 }
+            if ($mode -ceq 'nopair' -and $isR) { $l = $l + ' zz-noeq' }
+            if ($mode -ceq 'badrange' -and $isI) { $l = $l + ' wr-zz-fixture' }
+            if ($mode -ceq 'badrange' -and $isR) { $l = $l + ' wr-zz-fixture=zz-range' }
+            if ($mode -ceq 'addrange' -and $isP -and $p1 -ne '') {
+                $o = ' ' + $p1
+                $i = $l.IndexOf($o, [System.StringComparison]::Ordinal)
+                if ($i -ge 0) { $l = $l.Substring(0, $i + $o.Length) + ',zz-range' + $l.Substring($i + $o.Length) }
+            }
+            if ($mode -ceq 'addpending' -and $isN) { $l = $l + ' zz-pending' }
+            [void]$out.Add($l)
+        }
+        [System.IO.File]::WriteAllLines($fx, [string[]]$out, (New-Object System.Text.UTF8Encoding($false)))
+        return $fx
+    }
+    function WrRootFixture([string]$mode) {
+        # <stray|nodetect|noop|cross|unused> -> a root copy of the skills directory and the conventions body. stray (a new skill
+        # holding an undeclared `wr-` token) / nodetect (a new skill holding only the first declared write-item token) / noop (a
+        # document holding the first write-item token added to the skill of the first phase whose op is not `to-write`) / cross
+        # (a document holding a write-item token outside that phase's ranges added to the skill of a `to-write` phase) / unused
+        # (the backticks removed from the first write item's token in every skill document).
+        $bt = [string][char]0x60
+        $enc = New-Object System.Text.UTF8Encoding($false)
+        $fx = Join-Path $sbx ('wrroot-' + $mode)
+        if (Test-Path -LiteralPath $fx) { Remove-Item -LiteralPath $fx -Recurse -Force }
+        New-Item -ItemType Directory -Force -Path (Join-Path $fx 'docs') | Out-Null
+        Copy-Item -LiteralPath (Join-Path $ROOT 'skills') -Destination $fx -Recurse -Force
+        Copy-Item -LiteralPath $CONV -Destination (Join-Path $fx 'docs/conventions.md') -Force
+        $n1 = [string](@(DnNames $WRI_KEY $CONV_TRK) | Select-Object -First 1)
+        if ($mode -ceq 'stray' -or $mode -ceq 'nodetect') {
+            $zd = Join-Path $fx 'skills/zz-fixture'
+            New-Item -ItemType Directory -Force -Path $zd | Out-Null
+            $tok = if ($mode -ceq 'stray') { 'wr-zz-stray' } else { $n1 }
+            [System.IO.File]::WriteAllLines((Join-Path $zd 'template.md'), [string[]]@('x ' + $bt + $tok + $bt + ' x'), $enc)
+        }
+        if ($mode -ceq 'noop') {
+            $s = ''
+            foreach ($t in @(DnNames $RDP_KEY $CONV_TRK)) {
+                $i = $t.IndexOf('=', [System.StringComparison]::Ordinal)
+                if ($i -lt 1) { continue }
+                $r = $t.Substring($i + 1)
+                $j = $r.IndexOf(':', [System.StringComparison]::Ordinal)
+                if ($j -ge 0) { $r = $r.Substring(0, $j) }
+                if (-not ($r -ceq 'to-write')) { $s = $t.Substring(0, $i); break }
+            }
+            $sd = Join-Path $fx ('skills/' + $s)
+            if ($s -ne '' -and (Test-Path -LiteralPath $sd)) { [System.IO.File]::WriteAllLines((Join-Path $sd 'zz-fixture.md'), [string[]]@('x ' + $bt + $n1 + $bt + ' x'), $enc) }
+        }
+        if ($mode -ceq 'cross') {
+            $cs = ''; $ci = ''
+            foreach ($t in @(DnNames $RDP_KEY $CONV_TRK)) {
+                if ($cs -ne '') { break }
+                $i = $t.IndexOf('=', [System.StringComparison]::Ordinal)
+                if ($i -lt 1 -or -not $t.Substring($i + 1).StartsWith('to-write:', [System.StringComparison]::Ordinal)) { continue }
+                $s = $t.Substring(0, $i)
+                $pr = OrdSet @(WrPhaseRanges $CONV_TRK $s)
+                foreach ($it in @(DnNames $WRI_KEY $CONV_TRK)) {
+                    $g = [string](@(WrRangeOf $it $CONV_TRK) | Select-Object -First 1)
+                    if ($g -ne '' -and -not $pr.Contains($g)) { $cs = $s; $ci = $it; break }
+                }
+            }
+            $sd = Join-Path $fx ('skills/' + $cs)
+            if ($cs -ne '' -and (Test-Path -LiteralPath $sd)) { [System.IO.File]::WriteAllLines((Join-Path $sd 'zz-fixture.md'), [string[]]@('x ' + $bt + $ci + $bt + ' x'), $enc) }
+        }
+        if ($mode -ceq 'unused' -and $n1 -ne '') {
+            foreach ($p in @(RdSkillFiles $fx)) {
+                [System.IO.File]::WriteAllText($p, [System.IO.File]::ReadAllText($p).Replace($bt + $n1 + $bt, $n1), $enc)
+            }
+        }
         return $fx
     }
     # (M90) NAME DECLARATION + SITE PAIRS: CO-PRESENCE AND STRAY CHECKS -- `retro-flow:` / `retro-flow-sites:` (Part O, O90 / O92) and
@@ -1144,6 +1463,19 @@ F|F121|order|CONV_TRK|tracker-record-steps:|main check - record step definition 
 F|F122|count|CONV_TRK|tracker-record-dirs:|exactly one tracker-record-dirs declaration line
 F|F123|seps|CONV_TRK|tracker-record-dirs:|no forbidden separator in the tracker-record-dirs declaration tail
 F|F124|dup|CONV_TRK|tracker-record-dirs:|main check - record directory names are unique
+F|F137|count|CONV_TRK|tracker-write-items:|exactly one tracker-write-items declaration line
+F|F138|seps|CONV_TRK|tracker-write-items:|no forbidden separator in the tracker-write-items declaration tail
+F|F139|dup|CONV_TRK|tracker-write-items:|main check - write-item names are unique
+F|F140|def|CONV_TRK|tracker-write-items:|main check - every write-item name has exactly one definition item
+F|F141|orphan|CONV_TRK|tracker-write-items:|main check - every write-item definition item has a declared name (0 orphans)
+F|F142|order|CONV_TRK|tracker-write-items:|main check - write-item definition items follow the declared name order
+F|F143|count|CONV_TRK|tracker-write-ranges:|exactly one tracker-write-ranges declaration line
+F|F144|seps|CONV_TRK|tracker-write-ranges:|no forbidden separator in the tracker-write-ranges declaration tail
+F|F145|dup|CONV_TRK|tracker-write-ranges:|main check - write-range pair tokens are unique
+F|F146|count|CONV_TRK|tracker-range-pending:|exactly one tracker-range-pending declaration line
+F|F147|seps|CONV_TRK|tracker-range-pending:|no forbidden separator in the tracker-range-pending declaration tail
+F|F148|dup|CONV_TRK|tracker-range-pending:|main check - names of ranges without a write item are unique
+F|F149|dup|CONV_TRK|tracker-labels:|main check - label names are unique
 I|I7|count|CONV|state-neg:|exactly one state-neg declaration line in the convention
 I|I8|count|CONV|state-past:|exactly one state-past declaration line in the convention
 I|I10|seps|CONV|state-neg:|no forbidden separator in the state-neg declaration tail
@@ -2942,6 +3274,31 @@ try {
     Chk "F135: control - a skill root copy with the detection pointer removed / with an undeclared skill holding an rd- token / with an undeclared td- token adds one mismatch each" ([string]([int](DsSiteBad '' (RdRootFixture 'dropptr')) - $dsB129) + '|' + [string]([int](DsSiteBad '' (RdRootFixture 'rdnodetect')) - $dsB129) + '|' + [string]([int](DxStray '' (RdRootFixture 'tdstray')) - $dxB130)) '1|1|1'
     $rcB131 = [int](RcReadmeBad)
     Chk "F136: control - a record directory copy with a file the README does not name / with a name in the README that has no file adds one mismatch each" ([string]([int](RcReadmeBad (RcFixture 'addfile')) - $rcB131) + '|' + [string]([int](RcReadmeBad (RcFixture 'addtoken')) - $rcB131)) '1|1'
+    # (F137-F164 / M100) WRITE ITEMS -- the places where skills write the plan point at the write-item names of the tracker
+    # contract (writes and closing, from the back half of the third E5 cycle allocation). Declaration hygiene comes from the
+    # registry rows (F137-F149); here are one extraction positive control, seven main checks, their four controls and three
+    # controls for the four branches M99 left without a control. Controls ask a delta (control-reads-delta).
+    $wrAd1 = [string](@(DnNames $ADP_KEY $CONV_TRK) | Select-Object -First 1)
+    $wrPc = (@(DnNames $WRI_KEY $CONV_TRK).Count -ge 1) -and (@(MkNames $WR_MARK).Count -ge 1) -and (@(TbRows ($WR_MARK + $wrAd1 + ' -->') 'wr-').Count -ge 1) -and (@(DnNames $WRR_KEY $CONV_TRK).Count -ge 1) -and (@(WrPhaseRanges).Count -ge 1) -and (@(SkTokens 'wr-').Count -ge 1)
+    Chk "F150: write-item extraction positive control (write-item names / write markers / rows of the first write table / range pairs / write ranges of the phase declaration / wr- tokens in skills each at least 1)" $(if ($wrPc) { 'ok' } else { 'no' }) 'ok'
+    Chk "F151: main check - every declared adapter name has exactly one write marker and no write marker carries an undeclared name" (WrMarkBad) '0'
+    Chk "F152: main check - in every declared adapter write table each write-item name has exactly one row, and there is no row of an undeclared name and no wr- row outside the tables" (WrTableBad) '0'
+    Chk "F153: main check - every write item has exactly one range pair, pair names and ranges are declared, and the phase ranges without a write item are the same set as tracker-range-pending" (WrRangeBad) '0'
+    Chk "F154: main check - every wr- token in the skill documents is a declared write item" (WrStray) '0'
+    Chk "F155: main check - the range of a write item a skill holds is within that phase's ranges of tracker-phase-writes" (WrScopeBad) '0'
+    Chk "F156: main check - every write-item name is held by at least one skill" (WrUnused) '0'
+    Chk "F157: main check - every skill holding a wr- token is in tracker-detect-sites" (WrDetectBad) '0'
+    $wrB152 = [int](WrTableBad)
+    $wrB151 = [int](WrMarkBad)
+    Chk "F158: control - a copy with one row dropped from the second write table / with one row of the first table moved into the second / with a row of an undeclared name added in three shapes inside the second table / with a wr- row added outside the tables adds 1 / 2 / 1 / 1 / 1 / 1 table mismatches" ([string]([int](WrTableBad (WtFixture 'wdrop')) - $wrB152) + '|' + [string]([int](WrTableBad (WtFixture 'wmove')) - $wrB152) + '|' + [string]([int](WrTableBad (WtFixture 'in-tight')) - $wrB152) + '|' + [string]([int](WrTableBad (WtFixture 'in-indent')) - $wrB152) + '|' + [string]([int](WrTableBad (WtFixture 'in-bare')) - $wrB152) + '|' + [string]([int](WrTableBad (WtFixture 'wout')) - $wrB152)) '1|2|1|1|1|1'
+    Chk "F159: control - a copy with the second write marker dropped / with a write marker of an undeclared name added adds one marker mismatch each" ([string]([int](WrMarkBad (WtFixture 'wdropmark')) - $wrB151) + '|' + [string]([int](WrMarkBad (WtFixture 'waddmark')) - $wrB151)) '1|1'
+    $wrB153 = [int](WrRangeBad)
+    Chk "F160: control - a fragment copy with one change per branch of the range mapping (an item without a pair / an item with two pairs / a pair of an undeclared name / a token without an equals sign / a range the phase declaration does not have / a phase range without a write item / a pending range the phase declaration does not have) adds one mismatch each" ([string]([int](WrRangeBad (WrrFixture 'additem')) - $wrB153) + '|' + [string]([int](WrRangeBad (WrrFixture 'duppair')) - $wrB153) + '|' + [string]([int](WrRangeBad (WrrFixture 'badname')) - $wrB153) + '|' + [string]([int](WrRangeBad (WrrFixture 'nopair')) - $wrB153) + '|' + [string]([int](WrRangeBad (WrrFixture 'badrange')) - $wrB153) + '|' + [string]([int](WrRangeBad (WrrFixture 'addrange')) - $wrB153) + '|' + [string]([int](WrRangeBad (WrrFixture 'addpending')) - $wrB153)) '1|1|1|1|1|1|1'
+    $wrB155 = [int](WrScopeBad)
+    Chk "F161: control - a root copy with a skill holding an undeclared wr- token / with a write-item token in the skill of a phase without writes / with an out-of-range write-item token in the skill of a write phase / with one item's token unbackticked in every skill / with a write-item token in a skill outside the detection declaration adds one mismatch each" ([string]([int](WrStray '' (WrRootFixture 'stray')) - [int](WrStray)) + '|' + [string]([int](WrScopeBad '' (WrRootFixture 'noop')) - $wrB155) + '|' + [string]([int](WrScopeBad '' (WrRootFixture 'cross')) - $wrB155) + '|' + [string]([int](WrUnused '' (WrRootFixture 'unused')) - [int](WrUnused)) + '|' + [string]([int](WrDetectBad '' (WrRootFixture 'nodetect')) - [int](WrDetectBad))) '1|1|1|1|1'
+    Chk "F162: control - a root copy with a skill holding an undeclared tl- token adds one stray, and a root copy with an undeclared skill holding the detection pointer adds one mismatch" ([string]([int](DxStray '' (RdRootFixture 'tlstray')) - $dxB130) + '|' + [string]([int](DsSiteBad '' (RdRootFixture 'ptrextra')) - $dsB129)) '1|1'
+    Chk "F163: control - a fragment copy with the detection table marker written once more adds one mismatch" ([string]([int](DtTableBad (TkFixture 'dtmark2')) - $dtB127)) '1'
+    Chk "F164: control - a record directory copy with its README removed adds one mismatch" ([string]([int](RcReadmeBad (RcFixture 'noreadme')) - $rcB131)) '1'
     }
     # === Part G -- cross-reference integrity (M34; generalized to a FILE SET in M35) =====
     # (M34) Part F enforces what a document says ABOUT ITSELF; Part G enforces the REFERENCES BETWEEN

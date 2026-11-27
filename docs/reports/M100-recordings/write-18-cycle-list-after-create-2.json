@@ -1,0 +1,1 @@
+[{"number":8,"state":"OPEN","title":"M5 — 쓰기 실측 사이클(push 경로)"},{"number":6,"state":"CLOSED","title":"M4 — 쓰기 실측 사이클(pr 경로)"},{"number":5,"state":"OPEN","title":"M3 — 같은 번호로 시작하는 둘째 이슈"},{"number":4,"state":"OPEN","title":"M3 — 완료 기준 구획이 없는 사이클"},{"number":3,"state":"OPEN","title":"M2 — 진행 중인 probe 사이클"},{"number":2,"state":"CLOSED","title":"M1 — 릴리즈까지 마친 probe 사이클"}]

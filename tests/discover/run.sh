@@ -556,6 +556,19 @@ F|F121|order|CONV_TRK|tracker-record-steps:|본 검사 - 보관 절차 정의 �
 F|F122|count|CONV_TRK|tracker-record-dirs:|tracker-record-dirs 선언 줄 정확히 1개
 F|F123|seps|CONV_TRK|tracker-record-dirs:|tracker-record-dirs 선언 줄 꼬리에 금지 구분자 0건
 F|F124|dup|CONV_TRK|tracker-record-dirs:|본 검사 - 보관 디렉터리 이름이 유일하다
+F|F137|count|CONV_TRK|tracker-write-items:|tracker-write-items 선언 줄 정확히 1개
+F|F138|seps|CONV_TRK|tracker-write-items:|tracker-write-items 선언 줄 꼬리에 금지 구분자 0건
+F|F139|dup|CONV_TRK|tracker-write-items:|본 검사 - 쓰기 항목 이름이 유일하다
+F|F140|def|CONV_TRK|tracker-write-items:|본 검사 - 쓰기 항목 이름마다 정의 항목이 정확히 하나
+F|F141|orphan|CONV_TRK|tracker-write-items:|본 검사 - 쓰기 항목 정의 항목마다 선언된 이름이 있다(고아 정의 0)
+F|F142|order|CONV_TRK|tracker-write-items:|본 검사 - 쓰기 항목 정의 항목의 순서가 선언의 이름 순서와 같다
+F|F143|count|CONV_TRK|tracker-write-ranges:|tracker-write-ranges 선언 줄 정확히 1개
+F|F144|seps|CONV_TRK|tracker-write-ranges:|tracker-write-ranges 선언 줄 꼬리에 금지 구분자 0건
+F|F145|dup|CONV_TRK|tracker-write-ranges:|본 검사 - 쓰기 범위 대응 토큰이 유일하다
+F|F146|count|CONV_TRK|tracker-range-pending:|tracker-range-pending 선언 줄 정확히 1개
+F|F147|seps|CONV_TRK|tracker-range-pending:|tracker-range-pending 선언 줄 꼬리에 금지 구분자 0건
+F|F148|dup|CONV_TRK|tracker-range-pending:|본 검사 - 쓰기 항목이 없는 범위 이름이 유일하다
+F|F149|dup|CONV_TRK|tracker-labels:|본 검사 - 라벨 이름이 유일하다
 R|R1|count|CONV|coverage-bookkeeping:|coverage-bookkeeping 선언 줄 정확히 1개
 S|S1|count|CONV_REL|push-availability:|push-availability 선언 줄 정확히 1개
 S|S2|count|CONV_REL|terminal-state:|terminal-state 선언 줄 정확히 1개
@@ -869,6 +882,8 @@ rd_root_fixture() { # (M99) rdnodetect: 선언된 읽기 항목 토큰만 든 �
         path)  printf '%s\n' 'x docs/milestones/M1.md x' > "$_rrf/skills/zz-fixture/template.md" ;;
         rdnodetect) printf '%s\n' "x \`$(dn_names "$RDI_KEY" "$CONV_TRK" | sed -n 1p)\` x" > "$_rrf/skills/zz-fixture/template.md" ;;
         tdstray) printf '%s\n' 'x `td-zz-stray` x' > "$_rrf/skills/zz-fixture/template.md" ;;
+        tlstray) printf '%s\n' 'x `tl-zz-stray` x' > "$_rrf/skills/zz-fixture/template.md" ;;   # (M100) 선언에 없는 `tl-` 토큰
+        ptrextra) printf '%s\n' "x $TDP_TOKEN x" > "$_rrf/skills/zz-fixture/template.md" ;;       # (M100) 판별 선언에 없는 스킬이 판별 포인터를 든다
         dropptr) _rr1=$(dn_names "$TDK_KEY" "$CONV_TRK" | sed -n 1p)
             for _rrp in "$_rrf/skills/$_rr1"/*.md; do [ -f "$_rrp" ] || continue
                 LC_ALL=C awk '{ gsub(/tracker-detect-steps:/, "tracker-detect-zz:"); print }' "$_rrp" > "$_rrp.tmp" && mv "$_rrp.tmp" "$_rrp"; done ;;
@@ -983,6 +998,7 @@ rc_fixture() { # <addfile|addtoken> → 선언된 첫 기록 디렉터리의 사
     case $1 in
         addfile) printf '%s\n' '{}' > "$_rxf/zz-fixture.json" ;;
         addtoken) printf '%s\n' 'x `zz-fixture.txt` x' >> "$_rxf/README.md" ;;
+        noreadme) rm -f "$_rxf/README.md" ;;   # (M100) README가 없는 보관 디렉터리
     esac
     printf '%s' "$_rxf"
 }
@@ -1008,8 +1024,184 @@ tk_fixture() { # <모드> → 조각 사본(실제 파일을 건드리지 않는
           if (mode == "dtadd" && cur == "d" && !done && isrow($0, "td-")) { print; print "| " q "td-zz-fixture" q " | x | x | x |"; done = 1; next }
           if (mode == "dtreason" && cur == "d" && !done && rs != "" && (i = index($0, q rs q)) > 0) { $0 = substr($0, 1, i - 1) q "tl-zz-fixture" q substr($0, i + length(rs) + 2); done = 1 }
           print }
-        END { if (mode == "addmark") { print "<!-- tracker-adapter:zz-fixture -->"; print ""; print "| " q "rd-zz-fixture" q " | x |" } }' "$CONV_TRK" > "$_tkf"
+        END { if (mode == "addmark") { print "<!-- tracker-adapter:zz-fixture -->"; print ""; print "| " q "rd-zz-fixture" q " | x |" }
+              if (mode == "dtmark2") print md }' "$CONV_TRK" > "$_tkf"
     printf '%s' "$_tkf"
+}
+# --- 쓰기 항목 판정 (M100 · E5 사이클 배분의 셋째 뒤쪽 가운데 쓰기 · 닫힘) -------------------------
+# 조각의 `tracker-write-items:`가 스킬이 계획을 쓸 때 쓰는 이름을 들고, 어댑터마다 쓰기 표(표지 `<!-- tracker-write:{이름} -->`)가 이름마다 쓰는 법을 든다.
+# `tracker-write-ranges:`는 쓰기 항목마다 단계별 쓰기 범위(`tracker-phase-writes:`의 `to-write` 범위)를 하나씩 대고, `tracker-range-pending:`은 아직 쓰기 항목이 없는 범위를 든다.
+# 묻는 것은 — 쓰기 표지가 어댑터 선언과 일대일인가(`wr_mark_bad`) · 쓰기 표마다 행이 쓰기 항목 선언과 일대일이고 표 밖의 `wr-` 행이 없는가(`wr_table_bad`) ·
+# 범위 대응이 닫혀 있는가(`wr_range_bad`) · 스킬 문서의 백틱 `wr-` 토큰이 선언된 이름인가(`wr_stray`) · 스킬이 든 쓰기 항목의 범위가 그 스킬(단계)의 범위 안인가(`wr_scope_bad`) ·
+# 쓰기 항목마다 그것을 든 스킬이 있는가(`wr_unused`) · `wr-` 토큰을 든 스킬이 `tracker-detect-sites:`에 드는가(`wr_detect_bad`).
+# 스킬 문서의 집합은 읽기 항목 판정과 같다(`rd_skill_files`). 소비처는 스킬 문서뿐이다 — 규약 본체는 쓰기 항목의 소비처로 세지 않는다. 헬퍼는 파트 가드 밖에서 정의한다(`rf-60`).
+WRI_KEY='tracker-write-items:'
+WRR_KEY='tracker-write-ranges:'
+WRP_KEY='tracker-range-pending:'
+WR_MARK='<!-- tracker-write:'
+mk_names() { # <표지 접두> [조각] → 그 접두의 표지 줄이 든 이름 한 줄씩(표지마다 — 같은 이름이 두 번이면 두 줄)
+    LC_ALL=C awk -v p="$1" '{ sub(/\r$/, ""); t = $0; sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t)
+        if (length(t) > length(p) + 4 && substr(t, 1, length(p)) == p && substr(t, length(t) - 3) == " -->") { n = substr(t, length(p) + 1, length(t) - length(p) - 4); if (n !~ /[ \t]/) print n } }' "${2:-$CONV_TRK}"
+}
+wr_mark_bad() { # [조각] → 쓰기 표지가 정확히 하나가 아닌 선언 어댑터의 수 + 선언에 없는 이름을 든 쓰기 표지의 수
+    dn_names "$ADP_KEY" "${1:-$CONV_TRK}" | LC_ALL=C sort -u > "$SBX/wm-n.txt"; mk_names "$WR_MARK" "${1:-$CONV_TRK}" > "$SBX/wm-m.txt"
+    _wmb=0
+    while IFS= read -r _wmv; do [ -n "$_wmv" ] || continue
+        [ "$(LC_ALL=C grep -cxF -- "$_wmv" "$SBX/wm-m.txt")" = 1 ] || _wmb=$((_wmb + 1)); done < "$SBX/wm-n.txt"
+    while IFS= read -r _wmv; do [ -n "$_wmv" ] || continue
+        LC_ALL=C grep -qxF -- "$_wmv" "$SBX/wm-n.txt" || _wmb=$((_wmb + 1)); done < "$SBX/wm-m.txt"
+    echo "$_wmb"
+}
+wr_rows() { # [조각] → 조각 전체의 표 행 가운데 첫 칸(공백 · 탭 · 백틱을 벗긴 값)이 `wr-`로 시작하는 것의 그 값(행의 꼴은 `rd_rows`와 같다)
+    LC_ALL=C awk '{ sub(/\r$/, ""); t = $0; sub(/^[ \t]+/, "", t); if (substr(t, 1, 1) != "|") next; t = substr(t, 2); j = index(t, "|"); if (j == 0) next; c = substr(t, 1, j - 1); gsub(/[ \t`]/, "", c); if (substr(c, 1, 3) == "wr-") print c }' "${1:-$CONV_TRK}"
+}
+wr_table_bad() { # [조각] → 선언된 어댑터의 쓰기 표마다(행이 정확히 하나가 아닌 쓰기 항목 이름의 수 + 선언에 없는 이름을 든 행의 수) + 어느 선언된 어댑터의 쓰기 표에도 들지 않은 `wr-` 행의 수
+    _wtf=${1:-$CONV_TRK}
+    dn_names "$WRI_KEY" "$_wtf" | LC_ALL=C sort -u > "$SBX/wr-tn.txt"
+    _wtb=0; _wtin=0
+    for _wta in $(dn_names "$ADP_KEY" "$_wtf" | LC_ALL=C sort -u); do
+        tb_rows "$WR_MARK$_wta -->" wr- "$_wtf" > "$SBX/wr-tr.txt"
+        _wtin=$((_wtin + $(grep -c . "$SBX/wr-tr.txt")))
+        while IFS= read -r _wtv; do [ -n "$_wtv" ] || continue
+            [ "$(LC_ALL=C grep -cxF -- "$_wtv" "$SBX/wr-tr.txt")" = 1 ] || _wtb=$((_wtb + 1)); done < "$SBX/wr-tn.txt"
+        while IFS= read -r _wtv; do [ -n "$_wtv" ] || continue
+            LC_ALL=C grep -qxF -- "$_wtv" "$SBX/wr-tn.txt" || _wtb=$((_wtb + 1)); done < "$SBX/wr-tr.txt"
+    done
+    _wtall=$(wr_rows "$_wtf" | grep -c .)
+    [ "$_wtall" -gt "$_wtin" ] && _wtb=$((_wtb + _wtall - _wtin))
+    echo "$_wtb"
+}
+wr_phase_ranges() { # [조각] [단계] → `tracker-phase-writes:`에서 연산이 `to-write`인 토큰의 범위 한 줄씩(서로 다른 것 · 단계를 주면 그 단계의 것만)
+    dn_names "$RDP_KEY" "${1:-$CONV_TRK}" | LC_ALL=C awk -v ph="${2:-}" '{ i = index($0, "="); if (i < 2) next; l = substr($0, 1, i - 1); r = substr($0, i + 1); if (ph != "" && l != ph) next
+        j = index(r, ":"); if (j == 0) next; if (substr(r, 1, j - 1) != "to-write") next
+        n = split(substr(r, j + 1), a, ","); for (k = 1; k <= n; k++) if (a[k] != "") print a[k] }' | LC_ALL=C sort -u
+}
+wr_range_of() { # <쓰기 항목> [조각] → 그 항목에 댄 범위(대응이 여럿이면 여러 줄)
+    dn_names "$WRR_KEY" "${2:-$CONV_TRK}" | LC_ALL=C awk -v n="$1" '{ i = index($0, "="); if (i > 1 && substr($0, 1, i - 1) == n) print substr($0, i + 1) }'
+}
+wr_range_bad() { # [조각] → 범위 대응이 정확히 하나가 아닌 쓰기 항목의 수 + 꼴이 `{이름}={범위}`가 아니거나 이름이 선언에 없는 대응 토큰의 수 + 범위가 단계 선언의 `to-write` 범위에 없는 대응 토큰의 수 + (단계 선언의 `to-write` 범위 가운데 어느 대응도 들지 않는 것의 집합과 `tracker-range-pending:` 집합의 대칭차)
+    _wrf=${1:-$CONV_TRK}; _wrb=0
+    dn_names "$WRI_KEY" "$_wrf" | LC_ALL=C sort -u > "$SBX/wr-in.txt"
+    dn_names "$WRR_KEY" "$_wrf" > "$SBX/wr-rp.txt"
+    wr_phase_ranges "$_wrf" > "$SBX/wr-pr.txt"
+    while IFS= read -r _wrv; do [ -n "$_wrv" ] || continue
+        [ "$(wr_range_of "$_wrv" "$_wrf" | LC_ALL=C sort -u | grep -c .)" = 1 ] || _wrb=$((_wrb + 1)); done < "$SBX/wr-in.txt"   # 서로 다른 범위로 센다 — 같은 대응 토큰을 두 번 적은 것은 등록표의 `dup` 행이 문다
+    : > "$SBX/wr-ur.txt"
+    while IFS= read -r _wrv; do [ -n "$_wrv" ] || continue
+        case $_wrv in ?*=?*) _wrn=${_wrv%%=*}; _wrr=${_wrv#*=} ;; *) _wrb=$((_wrb + 1)); continue ;; esac
+        if ! LC_ALL=C grep -qxF -- "$_wrn" "$SBX/wr-in.txt"; then _wrb=$((_wrb + 1)); continue; fi
+        printf '%s\n' "$_wrr" >> "$SBX/wr-ur.txt"
+        LC_ALL=C grep -qxF -- "$_wrr" "$SBX/wr-pr.txt" || _wrb=$((_wrb + 1)); done < "$SBX/wr-rp.txt"
+    LC_ALL=C sort -u "$SBX/wr-ur.txt" > "$SBX/wr-us.txt"
+    LC_ALL=C comm -23 "$SBX/wr-pr.txt" "$SBX/wr-us.txt" > "$SBX/wr-un.txt"
+    dn_names "$WRP_KEY" "$_wrf" | LC_ALL=C sort -u > "$SBX/wr-pd.txt"
+    _wrb=$((_wrb + $(LC_ALL=C comm -3 "$SBX/wr-un.txt" "$SBX/wr-pd.txt" | grep -c .)))
+    echo "$_wrb"
+}
+sk_tokens_of() { # <접두> <스킬 이름> [루트] → 그 스킬의 문서 안 백틱 `{접두}…` 토큰(서로 다른 것) 한 줄씩
+    for _sof in "${3:-$ROOT}/skills/$2"/*.md; do [ -f "$_sof" ] && cat "$_sof"; done |
+        LC_ALL=C awk -v q='`' -v p="$1" '{ sub(/\r$/, ""); s = $0; while ((i = index(s, q p)) > 0) { s = substr(s, i + 1); j = index(s, q); if (j == 0) break; print substr(s, 1, j - 1); s = substr(s, j + 1) } }' | LC_ALL=C sort -u
+}
+wr_stray() { # [조각] [루트] → 스킬 문서의 `wr-` 토큰 중 쓰기 항목 선언에 없는 것의 수
+    dn_names "$WRI_KEY" "${1:-$CONV_TRK}" > "$SBX/wr-xn.txt"
+    sk_tokens wr- "${2:-$ROOT}" | { _wx=0; while IFS= read -r _wxv; do [ -n "$_wxv" ] || continue
+        LC_ALL=C grep -qxF -- "$_wxv" "$SBX/wr-xn.txt" || _wx=$((_wx + 1)); done; echo "$_wx"; }
+}
+wr_unused() { # [조각] [루트] → 선언된 쓰기 항목 중 스킬 문서에 토큰이 없는 것의 수(선언은 서로 다른 이름으로 센다 — 중복은 등록표의 `dup` 행이 문다)
+    sk_tokens wr- "${2:-$ROOT}" > "$SBX/wr-ut.txt"
+    dn_names "$WRI_KEY" "${1:-$CONV_TRK}" | LC_ALL=C sort -u | { _wu=0; while IFS= read -r _wuv; do [ -n "$_wuv" ] || continue
+        LC_ALL=C grep -qxF -- "$_wuv" "$SBX/wr-ut.txt" || _wu=$((_wu + 1)); done; echo "$_wu"; }
+}
+wr_scope_bad() { # [조각] [루트] → 스킬마다 그 스킬 문서의 선언된 `wr-` 토큰 가운데, 댄 범위가 없거나 그 범위가 그 스킬(단계)의 `to-write` 범위에 없는 것의 수(선언에 없는 토큰은 `wr_stray`의 자리라 건너뛴다)
+    _wsf=${1:-$CONV_TRK}; _wsr=${2:-$ROOT}; _wsb=0
+    dn_names "$WRI_KEY" "$_wsf" > "$SBX/ws-in.txt"
+    rd_skill_names "$_wsr" > "$SBX/ws-sn.txt"
+    while IFS= read -r _wsn; do [ -n "$_wsn" ] || continue
+        wr_phase_ranges "$_wsf" "$_wsn" > "$SBX/ws-pr.txt"
+        sk_tokens_of wr- "$_wsn" "$_wsr" > "$SBX/ws-tk.txt"
+        while IFS= read -r _wst; do [ -n "$_wst" ] || continue
+            LC_ALL=C grep -qxF -- "$_wst" "$SBX/ws-in.txt" || continue
+            _wsg=$(wr_range_of "$_wst" "$_wsf" | sed -n 1p)
+            if [ -z "$_wsg" ] || ! LC_ALL=C grep -qxF -- "$_wsg" "$SBX/ws-pr.txt"; then _wsb=$((_wsb + 1)); fi
+        done < "$SBX/ws-tk.txt"
+    done < "$SBX/ws-sn.txt"
+    echo "$_wsb"
+}
+wr_detect_bad() { # [조각] [루트] → 백틱 `wr-` 토큰을 든 스킬 중 `tracker-detect-sites:`에 없는 것의 수
+    dn_names "$TDK_KEY" "${1:-$CONV_TRK}" | LC_ALL=C sort -u > "$SBX/wd-n.txt"
+    sk_with '`wr-' "${2:-$ROOT}" > "$SBX/wd-w.txt"
+    LC_ALL=C comm -23 "$SBX/wd-w.txt" "$SBX/wd-n.txt" | grep -c .
+}
+wt_fixture() { # <모드> → 조각 사본(실제 파일을 건드리지 않는다). 모드 — wdrop(둘째 쓰기 표의 첫 wr- 행을 지운다) · wmove(첫 쓰기 표의 첫 wr- 행을 둘째 표로 옮긴다) ·
+    # in-{tight|indent|bare}(둘째 쓰기 표의 첫 wr- 행 뒤에 선언 밖 이름의 행을 그 꼴로 더한다) · wout(조각 끝, 표 밖에 wr- 행 하나를 더한다) ·
+    # wdropmark(둘째 쓰기 표지를 지운다) · waddmark(선언에 없는 이름의 쓰기 표지만 더한다)
+    _wff="$SBX/conv-wt-$1.md"
+    _wf1=$(dn_names "$ADP_KEY" "$CONV_TRK" | sed -n 1p); _wf2=$(dn_names "$ADP_KEY" "$CONV_TRK" | sed -n 2p)
+    LC_ALL=C awk -v mode="$1" -v m1="$WR_MARK$_wf1 -->" -v m2="$WR_MARK$_wf2 -->" -v q='`' '
+        function trim(s) { sub(/\r$/, "", s); sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+        function isrow(s, p,   t, j, c) { t = trim(s); if (substr(t, 1, 1) != "|") return 0; t = substr(t, 2); j = index(t, "|"); if (j == 0) return 0; c = substr(t, 1, j - 1); gsub(/[ \t`]/, "", c); return (substr(c, 1, length(p)) == p) }
+        BEGIN { if (mode ~ /^in-/) { n = split(mode, mm, "-"); shape = mm[2] } }
+        { u = trim($0)
+          if (u == m1) cur = "1"; else if (u == m2) cur = "2"
+          if (mode == "wdropmark" && u == m2 && !done) { done = 1; next }
+          if (mode == "wdrop" && cur == "2" && !done && isrow($0, "wr-")) { done = 1; next }
+          if (mode == "wmove" && cur == "1" && !hd && isrow($0, "wr-")) { held = $0; hd = 1; next }
+          if (mode == "wmove" && cur == "2" && hd && !done && isrow($0, "wr-")) { print; print held; done = 1; next }
+          if (mode ~ /^in-/ && cur == "2" && !done && isrow($0, "wr-")) { print
+              if (shape == "tight") print "|" q "wr-zz-fixture" q "| x |"; else if (shape == "indent") print "  | " q "wr-zz-fixture" q " | x |"; else print "| wr-zz-fixture | x |"
+              done = 1; next }
+          print }
+        END { if (mode == "wout") { print ""; print "| " q "wr-zz-fixture" q " | x |" }
+              if (mode == "waddmark") print "<!-- tracker-write:zz-fixture -->" }' "$CONV_TRK" > "$_wff"
+    printf '%s' "$_wff"
+}
+wrr_fixture() { # <additem|duppair|badname|nopair|badrange|addrange|addpending> → 조각 사본. additem(쓰기 항목 선언에 대응 없는 이름 하나) · duppair(첫 항목에 다른 범위의 대응을 하나 더) ·
+    # badname(선언에 없는 이름의 대응) · nopair(`=` 없는 토큰) · badrange(새 항목 하나와 단계 선언에 없는 범위를 댄 그 대응) · addrange(단계 선언의 첫 `to-write` 토큰에 범위 하나를 더한다) ·
+    # addpending(`tracker-range-pending:`에 단계 선언에 없는 범위 하나를 더한다). 값을 선언에서 읽어 만들므로 선언의 내용이 바뀌어도 늘어나는 수는 하나다.
+    _wqf="$SBX/conv-wrr-$1.md"
+    _wq1=$(dn_names "$WRI_KEY" "$CONV_TRK" | sed -n 1p); _wqr=$(wr_range_of "$_wq1" "$CONV_TRK" | sed -n 1p)
+    _wqp=$(dn_names "$RDP_KEY" "$CONV_TRK" | LC_ALL=C awk '{ i = index($0, "="); if (i > 1 && index(substr($0, i + 1), "to-write:") == 1) { print; exit } }')
+    _wq2=$(dn_names "$WRR_KEY" "$CONV_TRK" | LC_ALL=C awk -v r="$_wqr" '{ i = index($0, "="); if (i > 1 && substr($0, i + 1) != r) { print substr($0, i + 1); exit } }')   # 첫 항목의 것과 다른, 이미 대응에 든 범위
+    LC_ALL=C awk -v mode="$1" -v ki="- \`$WRI_KEY\`" -v kr="- \`$WRR_KEY\`" -v kp="- \`$RDP_KEY\`" -v kn="- \`$WRP_KEY\`" -v n1="$_wq1" -v r1="$_wq2" -v p1=" $_wqp" '{
+        sub(/\r$/, ""); t = $0; sub(/^[ \t]+/, "", t)
+        isi = (substr(t, 1, length(ki)) == ki); isr = (substr(t, 1, length(kr)) == kr); isp = (substr(t, 1, length(kp)) == kp); isn = (substr(t, 1, length(kn)) == kn)
+        if (mode == "additem" && isi) $0 = $0 " wr-zz-fixture"
+        if (mode == "duppair" && isr) $0 = $0 " " n1 "=" r1
+        if (mode == "badname" && isr) $0 = $0 " wr-zz-fixture=" r1
+        if (mode == "nopair" && isr) $0 = $0 " zz-noeq"
+        if (mode == "badrange" && isi) $0 = $0 " wr-zz-fixture"
+        if (mode == "badrange" && isr) $0 = $0 " wr-zz-fixture=zz-range"
+        if (mode == "addrange" && isp && p1 != " ") { i = index($0, p1); if (i > 0) $0 = substr($0, 1, i + length(p1) - 1) ",zz-range" substr($0, i + length(p1)) }
+        if (mode == "addpending" && isn) $0 = $0 " zz-pending"
+        print }' "$CONV_TRK" > "$_wqf"
+    printf '%s' "$_wqf"
+}
+wr_root_fixture() { # <stray|nodetect|noop|cross|unused> → 스킬 디렉터리와 규약 본체의 사본 루트. stray(선언에 없는 `wr-` 토큰을 든 새 스킬) · nodetect(선언된 첫 쓰기 항목 토큰만 든 새 스킬) ·
+    # noop(단계 선언에서 연산이 `to-write`가 아닌 첫 단계의 스킬에 첫 쓰기 항목 토큰을 든 문서를 더한다) · cross(`to-write` 단계의 스킬에 그 단계의 범위 밖 쓰기 항목 토큰을 든 문서를 더한다) ·
+    # unused(첫 쓰기 항목의 토큰에서 모든 스킬 문서의 백틱을 벗긴다)
+    _wxf="$SBX/wrroot-$1"; rm -rf "$_wxf"; mkdir -p "$_wxf/docs" "$_wxf/skills"
+    cp -R "$ROOT/skills/." "$_wxf/skills/"; cp "$CONV" "$_wxf/docs/conventions.md"
+    _wx1=$(dn_names "$WRI_KEY" "$CONV_TRK" | sed -n 1p)
+    case $1 in
+        stray) mkdir -p "$_wxf/skills/zz-fixture"; printf '%s\n' 'x `wr-zz-stray` x' > "$_wxf/skills/zz-fixture/template.md" ;;
+        nodetect) mkdir -p "$_wxf/skills/zz-fixture"; printf '%s\n' "x \`$_wx1\` x" > "$_wxf/skills/zz-fixture/template.md" ;;
+        noop) _wxs=$(dn_names "$RDP_KEY" "$CONV_TRK" | LC_ALL=C awk '{ i = index($0, "="); if (i < 2) next; r = substr($0, i + 1); j = index(r, ":"); if (j > 0) r = substr(r, 1, j - 1); if (r != "to-write") { print substr($0, 1, i - 1); exit } }')
+            if [ -n "$_wxs" ] && [ -d "$_wxf/skills/$_wxs" ]; then printf '%s\n' "x \`$_wx1\` x" > "$_wxf/skills/$_wxs/zz-fixture.md"; fi ;;
+        cross) _wxc=
+            dn_names "$RDP_KEY" "$CONV_TRK" | LC_ALL=C awk '{ i = index($0, "="); if (i > 1 && index(substr($0, i + 1), "to-write:") == 1) print substr($0, 1, i - 1) }' > "$SBX/wx-st.txt"
+            dn_names "$WRI_KEY" "$CONV_TRK" > "$SBX/wx-it.txt"
+            while IFS= read -r _wxs; do [ -n "$_wxs" ] || continue; [ -z "$_wxc" ] || break
+                wr_phase_ranges "$CONV_TRK" "$_wxs" > "$SBX/wx-pr.txt"
+                while IFS= read -r _wxi; do [ -n "$_wxi" ] || continue; [ -z "$_wxc" ] || break
+                    _wxg=$(wr_range_of "$_wxi" "$CONV_TRK" | sed -n 1p)
+                    if [ -n "$_wxg" ] && ! LC_ALL=C grep -qxF -- "$_wxg" "$SBX/wx-pr.txt"; then _wxc="$_wxs $_wxi"; fi
+                done < "$SBX/wx-it.txt"
+            done < "$SBX/wx-st.txt"
+            if [ -n "$_wxc" ] && [ -d "$_wxf/skills/${_wxc%% *}" ]; then printf '%s\n' "x \`${_wxc#* }\` x" > "$_wxf/skills/${_wxc%% *}/zz-fixture.md"; fi ;;
+        unused) for _wxp in "$_wxf"/skills/*/*.md; do [ -f "$_wxp" ] || continue
+                LC_ALL=C awk -v o="\`$_wx1\`" -v n="$_wx1" '{ while (o != "``" && (i = index($0, o)) > 0) $0 = substr($0, 1, i - 1) n substr($0, i + length(o)); print }' "$_wxp" > "$_wxp.tmp" && mv "$_wxp.tmp" "$_wxp"; done ;;
+    esac
+    printf '%s' "$_wxf"
 }
 # === Part A — 감지 임계값 (detection threshold) =========================
 
@@ -2205,6 +2397,26 @@ chk "F133: 통제 - 선언 밖 이름의 행을 다른 꼴 셋으로 두 어댑�
 chk "F134: 통제 - 판별 절차 표의 행 하나를 지운 사본 · 선언 밖 갈래의 행을 더한 사본에서 어긋남이 하나씩 늘고, 사유 토큰 하나를 선언 밖 이름으로 바꾼 사본에서 사유 대칭차가 둘 는다" "$(( $(dt_table_bad "$(tk_fixture dtdrop)") - $(dt_table_bad) ))|$(( $(dt_table_bad "$(tk_fixture dtadd)") - $(dt_table_bad) ))|$(( $(dt_reason_bad "$(tk_fixture dtreason)") - $(dt_reason_bad) ))" "1|1|2"
 chk "F135: 통제 - 판별 포인터를 지운 스킬 루트 사본 · 판별 선언에 없는 스킬이 rd- 토큰을 든 루트 사본 · 선언에 없는 td- 토큰을 든 루트 사본에서 어긋남이 하나씩 는다" "$(( $(ds_site_bad "" "$(rd_root_fixture dropptr)") - $(ds_site_bad) ))|$(( $(ds_site_bad "" "$(rd_root_fixture rdnodetect)") - $(ds_site_bad) ))|$(( $(dx_stray "" "$(rd_root_fixture tdstray)") - $(dx_stray) ))" "1|1|1"
 chk "F136: 통제 - README에 없는 파일을 더한 보관 디렉터리 사본 · 파일이 없는 이름을 README에 더한 사본에서 어긋남이 하나씩 는다" "$(( $(rc_readme_bad "$(rc_fixture addfile)") - $(rc_readme_bad) ))|$(( $(rc_readme_bad "$(rc_fixture addtoken)") - $(rc_readme_bad) ))" "1|1"
+# (F137~F164 · M100) **쓰기 항목** — 스킬이 계획을 쓰는 자리가 트래커 계약의 쓰기 항목 이름으로 가리킨다(E5 사이클 배분의 셋째 뒤쪽 가운데 쓰기 · 닫힘).
+# 선언 위생은 등록표 행(`F137`~`F149`)이 내고, 여기는 추출 positive-control 하나 · 본 검사 일곱 · 그 통제 넷 · M99가 통제 없이 남긴 갈래 넷의 통제 셋이다. 통제는 차이를 묻는다(`control-reads-delta`).
+chk "F150: 쓰기 항목 추출 positive-control(쓰기 항목 이름 · 쓰기 표지 · 첫 쓰기 표의 행 · 범위 대응 · 단계 선언의 쓰기 범위 · 스킬의 wr- 토큰이 각각 1 이상)" "$([ "$(dn_names "$WRI_KEY" "$CONV_TRK" | grep -c .)" -ge 1 ] && [ "$(mk_names "$WR_MARK" | grep -c .)" -ge 1 ] && [ "$(tb_rows "$WR_MARK$(dn_names "$ADP_KEY" "$CONV_TRK" | sed -n 1p) -->" wr- | grep -c .)" -ge 1 ] && [ "$(dn_names "$WRR_KEY" "$CONV_TRK" | grep -c .)" -ge 1 ] && [ "$(wr_phase_ranges | grep -c .)" -ge 1 ] && [ "$(sk_tokens wr- | grep -c .)" -ge 1 ] && echo ok || echo no)" "ok"
+chk "F151: 본 검사 - 선언된 어댑터 이름마다 쓰기 표지가 정확히 하나이고 선언에 없는 이름의 쓰기 표지가 없다" "$(wr_mark_bad)" "0"
+chk "F152: 본 검사 - 선언된 어댑터의 쓰기 표마다 쓰기 항목 이름의 행이 정확히 하나이고 선언 밖 이름의 행 · 표 밖의 wr- 행이 없다" "$(wr_table_bad)" "0"
+chk "F153: 본 검사 - 쓰기 항목마다 범위 대응이 정확히 하나이고 대응의 이름 · 범위가 선언 안이며, 쓰기 항목이 없는 단계 범위가 tracker-range-pending과 같은 집합이다" "$(wr_range_bad)" "0"
+chk "F154: 본 검사 - 스킬 문서의 wr- 토큰이 전부 선언된 쓰기 항목이다" "$(wr_stray)" "0"
+chk "F155: 본 검사 - 스킬이 든 쓰기 항목의 범위가 tracker-phase-writes의 그 단계 범위 안이다" "$(wr_scope_bad)" "0"
+chk "F156: 본 검사 - 쓰기 항목 이름마다 그것을 든 스킬이 하나 이상 있다" "$(wr_unused)" "0"
+chk "F157: 본 검사 - wr- 토큰을 든 스킬이 모두 tracker-detect-sites에 든다" "$(wr_detect_bad)" "0"
+_wrb152=$(wr_table_bad); _wrb151=$(wr_mark_bad)
+chk "F158: 통제 - 둘째 쓰기 표의 행 하나를 지운 사본 · 첫 표의 행 하나를 둘째 표로 옮긴 사본 · 선언 밖 이름의 행을 꼴 셋으로 둘째 표 안에 더한 사본 · 표 밖에 wr- 행을 더한 사본에서 표 어긋남이 1 · 2 · 1 · 1 · 1 · 1 는다" "$(( $(wr_table_bad "$(wt_fixture wdrop)") - _wrb152 ))|$(( $(wr_table_bad "$(wt_fixture wmove)") - _wrb152 ))|$(( $(wr_table_bad "$(wt_fixture in-tight)") - _wrb152 ))|$(( $(wr_table_bad "$(wt_fixture in-indent)") - _wrb152 ))|$(( $(wr_table_bad "$(wt_fixture in-bare)") - _wrb152 ))|$(( $(wr_table_bad "$(wt_fixture wout)") - _wrb152 ))" "1|2|1|1|1|1"
+chk "F159: 통제 - 둘째 쓰기 표지를 지운 사본 · 선언에 없는 이름의 쓰기 표지를 더한 사본에서 표지 어긋남이 하나씩 는다" "$(( $(wr_mark_bad "$(wt_fixture wdropmark)") - _wrb151 ))|$(( $(wr_mark_bad "$(wt_fixture waddmark)") - _wrb151 ))" "1|1"
+_wrb153=$(wr_range_bad)
+chk "F160: 통제 - 범위 대응의 갈래마다 한 가지를 바꾼 조각 사본(대응 없는 항목 · 대응이 둘인 항목 · 선언 밖 이름의 대응 · 등호 없는 토큰 · 단계 선언에 없는 범위 · 쓰기 항목 없는 단계 범위 · 단계 선언에 없는 pending)에서 어긋남이 하나씩 는다" "$(( $(wr_range_bad "$(wrr_fixture additem)") - _wrb153 ))|$(( $(wr_range_bad "$(wrr_fixture duppair)") - _wrb153 ))|$(( $(wr_range_bad "$(wrr_fixture badname)") - _wrb153 ))|$(( $(wr_range_bad "$(wrr_fixture nopair)") - _wrb153 ))|$(( $(wr_range_bad "$(wrr_fixture badrange)") - _wrb153 ))|$(( $(wr_range_bad "$(wrr_fixture addrange)") - _wrb153 ))|$(( $(wr_range_bad "$(wrr_fixture addpending)") - _wrb153 ))" "1|1|1|1|1|1|1"
+_wrb155=$(wr_scope_bad)
+chk "F161: 통제 - 선언에 없는 wr- 토큰을 든 스킬 · 쓰기가 없는 단계의 스킬에 쓰기 항목 토큰 · 쓰기 단계의 스킬에 범위 밖 쓰기 항목 토큰 · 한 항목의 토큰을 모든 스킬에서 벗긴 것 · 판별 선언에 없는 스킬이 든 쓰기 항목 토큰의 루트 사본에서 어긋남이 하나씩 는다" "$(( $(wr_stray "" "$(wr_root_fixture stray)") - $(wr_stray) ))|$(( $(wr_scope_bad "" "$(wr_root_fixture noop)") - _wrb155 ))|$(( $(wr_scope_bad "" "$(wr_root_fixture cross)") - _wrb155 ))|$(( $(wr_unused "" "$(wr_root_fixture unused)") - $(wr_unused) ))|$(( $(wr_detect_bad "" "$(wr_root_fixture nodetect)") - $(wr_detect_bad) ))" "1|1|1|1|1"
+chk "F162: 통제 - 선언에 없는 tl- 토큰을 든 스킬의 루트 사본에서 잔재가 하나 늘고, 판별 선언에 없는 스킬이 판별 포인터를 든 루트 사본에서 어긋남이 하나 는다" "$(( $(dx_stray "" "$(rd_root_fixture tlstray)") - $(dx_stray) ))|$(( $(ds_site_bad "" "$(rd_root_fixture ptrextra)") - $(ds_site_bad) ))" "1|1"
+chk "F163: 통제 - 판별 절차 표지를 한 번 더 적은 조각 사본에서 어긋남이 하나 는다" "$(( $(dt_table_bad "$(tk_fixture dtmark2)") - $(dt_table_bad) ))" "1"
+chk "F164: 통제 - README를 지운 보관 디렉터리 사본에서 어긋남이 하나 는다" "$(( $(rc_readme_bad "$(rc_fixture noreadme)") - $(rc_readme_bad) ))" "1"
 fi
 # === Part G — 상호참조 무결성(M34 · M35에서 규약 문서 **집합**으로 일반화) ====
 # (M34) Part F가 문서의 **자기서술**을 집행한다면, Part G는 문서 **사이를 잇는 참조**를 집행한다 —
